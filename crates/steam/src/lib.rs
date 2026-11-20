@@ -1,11 +1,19 @@
 //! Everything that talks to Steam or the disk. No GUI code here.
+pub mod appinfo;
 pub mod art;
 pub mod auth;
 pub mod cm;
+pub mod compat;
+pub mod compat_cli;
+pub mod content;
 pub mod http;
+pub mod http_dl;
 pub mod local;
+pub mod proton_releases;
 pub mod redact;
+pub mod run;
 pub mod secrets;
 pub mod store;
+pub mod storefront;
 pub mod vdf;
 pub mod webapi;

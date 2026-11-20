@@ -4,6 +4,8 @@
 //!   sr-cli owned <account>  owned games via Web API (token from keyring)
 //!   sr-cli cm <account>     CM logon + license count
 //!   sr-cli logout <account> revoke and remove the stored token
+//!   sr-cli download <appid> [--dir D] [--anonymous|--account A] [--os linux|windows] [--verify]
+//!   sr-cli proton list|available|install|remove, sr-cli appinfo <appid>, sr-cli launch <appid> --dry-run
 
 use anyhow::{Context, Result, bail};
 use sr_steam::{auth, cm, local, secrets, store};
@@ -18,7 +20,11 @@ fn main() -> Result<()> {
         Some("owned") => cmd_owned(&account()?),
         Some("cm") => cmd_cm(&account()?),
         Some("logout") => cmd_logout(&account()?),
-        _ => bail!("usage: sr-cli local | login | owned <account> | cm <account> | logout <account>"),
+        Some("download") => sr_steam::content::cli::run(&args[1..]),
+        Some("proton" | "appinfo" | "launch") => sr_steam::compat_cli::run(&args),
+        _ => bail!(
+            "usage: sr-cli local | login | owned <account> | cm <account> | logout <account> | download <appid> ..."
+        ),
     }
 }
 

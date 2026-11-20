@@ -15,7 +15,8 @@ if [ ! -x "$TOOL" ]; then
   chmod +x "$TOOL"
 fi
 
-CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}" cargo build --release -p steam-rust
+CARGO="${CARGO:-$(command -v cargo || echo "$HOME/.cargo/bin/cargo")}"
+CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}" "$CARGO" build --release -p steam-rust
 
 APPDIR="$(mktemp -d)/steam-rust.AppDir"
 mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications" "$APPDIR/usr/share/icons/hicolor/scalable/apps"

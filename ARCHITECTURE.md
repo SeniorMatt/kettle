@@ -31,7 +31,8 @@ steam-rust is a native Steam client. It talks to Steam's servers directly (CM pr
 - **`sr-model` has no I/O and no network crates.**
 - **`sr-ui` never does I/O**, never holds tokens, and never `.await`s or blocks.
 - **Secrets:** refresh tokens exist only in the system keyring and in memory. They never go to disk, logs or `Debug` output. Passwords are never handled at all, because login is QR-only.
-- **The official Steam install is read-only for us.** We never write to its files.
+- **We never edit the official client's configuration** (`config/*.vdf`, `libraryfolders.vdf`, its `appcache`). We only read it.
+- **Game data is shared with Steam on purpose.** When we launch a Windows game that lives in a Steam library, it uses that library's `steamapps/compatdata/<appid>` prefix, so saves carry over both ways. Our own library uses Steam's on-disk format (`steamapps/appmanifest_<id>.acf`, `common/`), so the official client can adopt it as a library folder. Proton tools are installed into our own `compatibilitytools.d` unless the user picks Steam's.
 - **Every async request carries a generation number.** The reducer drops results whose generation is stale, for example after logout or after switching accounts.
 - **Every cache is bounded** by count and bytes: textures, decoded images and the HTTP art cache.
 
@@ -43,6 +44,20 @@ steam-rust is a native Steam client. It talks to Steam's servers directly (CM pr
 - **Errors:** `anyhow` at the adapter level, plus typed enums wherever the UI has to react (for example `AuthExpired`). Every error is handled once, either propagated or shown.
 - **Measuring:** `sr-cli` and the app print timings (`STEAM_RUST_TIMINGS=1`). Changes that affect performance note their before and after numbers in the commit message.
 
+## Platforms
+
+Linux (KDE Plasma, Wayland first) is the main target. Windows is supported from the start, so it never needs a rewrite. macOS is not a target, but nothing should rule it out.
+
+- OS-specific code sits behind `cfg` in the smallest possible function. The rest of the crate calls that function and never branches on the OS itself. Current seams:
+  - `secrets::platform_store`: Secret Service on Linux, Credential Manager on Windows.
+  - `local::root_candidates`: XDG, Flatpak and Snap paths on Linux; the registry on Windows.
+  - `store::private_dir`/`write_private`: Unix modes. On Windows, user-profile ACLs already keep these private.
+  - Opening URLs.
+  - Launching: Proton and umu on Linux; the exe runs directly on Windows.
+- Paths come from `directories` (XDG on Linux, `%APPDATA%`/`%LOCALAPPDATA%` on Windows) and never from hardcoded `~/.`.
+- Linux-only features (Proton manager, layer-shell overlay) compile to nothing, or to a "not available" stub, on other systems.
+
 ## Checks
 
 `cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test` has to pass before every commit.
+`cargo check --target x86_64-pc-windows-gnu --workspace` has to pass too. It needs `rustup target add x86_64-pc-windows-gnu` and the MinGW cross-compiler (`gcc-mingw-w64-x86-64`).

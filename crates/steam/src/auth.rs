@@ -89,7 +89,8 @@ struct RenewResp {
 /// Call an IAuthenticationService method with a protobuf body.
 fn call<Q: Message, R: Message + Default>(method: &str, req: &Q) -> Result<R> {
     let body = STANDARD.encode(req.encode_to_vec());
-    let mut resp = crate::http::agent().post(&format!("{API}/IAuthenticationService/{method}/v1"))
+    let mut resp = crate::http::agent()
+        .post(&format!("{API}/IAuthenticationService/{method}/v1"))
         .send_form([("input_protobuf_encoded", body.as_str())])
         .with_context(|| format!("{method}: request failed"))?;
     let eresult = resp.headers().get("x-eresult").and_then(|v| v.to_str().ok()).unwrap_or("1").to_string();
@@ -217,7 +218,9 @@ pub fn revoke_refresh_token(refresh_token: &str) -> Result<()> {
     let body = STANDARD.encode(req.encode_to_vec());
     // Token in the POST body, not the URL, so it can't end up in error text.
     let url = format!("{API}/IAuthenticationService/RevokeRefreshToken/v1");
-    let r = crate::http::agent().post(&url).send_form([("access_token", access.as_str()), ("input_protobuf_encoded", body.as_str())]);
+    let r = crate::http::agent()
+        .post(&url)
+        .send_form([("access_token", access.as_str()), ("input_protobuf_encoded", body.as_str())]);
     let res: Result<()> = match r {
         Ok(resp) => match resp.headers().get("x-eresult").and_then(|v| v.to_str().ok()) {
             Some("1") | None => Ok(()),

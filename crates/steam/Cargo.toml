@@ -12,7 +12,6 @@ anyhow = "1"
 base64 = "0.22"
 directories = "6"
 keyring-core = "1"
-zbus-secret-service-keyring-store = { version = "1", features = ["rt-async-io-crypto-rust"] }
 prost = "0.14"
 qrcode = { version = "0.15", default-features = false, features = ["svg"] }
 serde = { version = "1", features = ["derive"] }
@@ -23,3 +22,23 @@ steam-vent-proto-steam = "0.5"
 tokio-stream = "0.1"
 futures-util = "0.3"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+# content downloader
+steam-vent-proto-common = "0.5"
+aes = "0.8"
+cbc = { version = "0.1", features = ["block-padding", "alloc"] }
+sha1 = "0.10"
+crc32fast = "1"
+flate2 = "1"
+lzma-rs = "0.3"
+ruzstd = "0.8"
+# compatibility tools: archive extraction and checksums
+tar = { version = "0.4", default-features = false }
+sha2 = "0.11"
+
+# System keyring and Steam discovery differ per OS (Linux is the main target).
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus-secret-service-keyring-store = { version = "1", features = ["rt-async-io-crypto-rust"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-native-keyring-store = "1"
+winreg = "0.56"

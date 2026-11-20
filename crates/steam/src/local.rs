@@ -9,17 +9,8 @@ use std::path::{Path, PathBuf};
 /// Flatpak, Snap. Deduplicated by canonical path (the Debian layout has
 /// `~/.steam/steam` and `~/.steam/root` symlinks to the same place).
 pub fn steam_roots() -> Vec<PathBuf> {
-    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else { return vec![] };
-    let cands = [
-        home.join(".steam/debian-installation"),
-        home.join(".local/share/Steam"),
-        home.join(".steam/steam"),
-        home.join(".steam/root"),
-        home.join(".var/app/com.valvesoftware.Steam/.local/share/Steam"),
-        home.join("snap/steam/common/.local/share/Steam"),
-    ];
     let mut seen = Vec::new();
-    for c in cands {
+    for c in root_candidates() {
         if !c.join("steamapps").is_dir() && !c.join("config/libraryfolders.vdf").is_file() {
             continue;
         }
@@ -30,6 +21,36 @@ pub fn steam_roots() -> Vec<PathBuf> {
         }
     }
     seen
+}
+
+/// Where the official client may be installed on Linux: the Debian/Ubuntu
+/// package, a native install, the usual symlinks, Flatpak and Snap.
+#[cfg(not(windows))]
+fn root_candidates() -> Vec<PathBuf> {
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else { return vec![] };
+    vec![
+        home.join(".steam/debian-installation"),
+        home.join(".local/share/Steam"),
+        home.join(".steam/steam"),
+        home.join(".steam/root"),
+        home.join(".var/app/com.valvesoftware.Steam/.local/share/Steam"),
+        home.join("snap/steam/common/.local/share/Steam"),
+    ]
+}
+
+/// On Windows the client records its folder in the registry; fall back to
+/// the default install location.
+#[cfg(windows)]
+fn root_candidates() -> Vec<PathBuf> {
+    use winreg::{RegKey, enums::HKEY_CURRENT_USER};
+    let mut out = Vec::new();
+    if let Ok(key) = RegKey::predef(HKEY_CURRENT_USER).open_subkey("Software\\Valve\\Steam")
+        && let Ok(path) = key.get_value::<String, _>("SteamPath")
+    {
+        out.push(PathBuf::from(path));
+    }
+    out.push(PathBuf::from("C:\\Program Files (x86)\\Steam"));
+    out
 }
 
 /// Steam library folders listed by `steamapps/libraryfolders.vdf` of a root.
@@ -82,7 +103,7 @@ pub fn is_tool_app(appid: u32, name: &str) -> bool {
 /// All apps installed under all known libraries of all Steam roots.
 pub fn installed_apps() -> HashMap<u32, InstalledApp> {
     let mut out = HashMap::new();
-    for root in steam_roots() {
+    for root in steam_roots().into_iter().chain([crate::content::default_library()]) {
         for lib in library_folders(&root) {
             let apps = lib.join("steamapps");
             let Ok(rd) = std::fs::read_dir(&apps) else { continue };

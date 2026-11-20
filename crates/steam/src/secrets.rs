@@ -1,5 +1,6 @@
-//! Refresh tokens live only in the system keyring (Secret Service:
-//! gnome-keyring, KWallet, KeePassXC ...). Never on disk, never logged.
+//! Refresh tokens live only in the system keyring: Secret Service on Linux
+//! (GNOME Keyring, KWallet, KeePassXC), Credential Manager on Windows.
+//! Never on disk, never logged.
 
 use anyhow::{Context, Result};
 use std::sync::Once;
@@ -8,10 +9,20 @@ const SERVICE: &str = "steam-rust";
 
 fn init() {
     static ONCE: Once = Once::new();
-    ONCE.call_once(|| match zbus_secret_service_keyring_store::Store::new() {
+    ONCE.call_once(|| match platform_store() {
         Ok(store) => keyring_core::set_default_store(store),
         Err(e) => eprintln!("keyring unavailable: {e}"),
     });
+}
+
+#[cfg(target_os = "linux")]
+fn platform_store() -> keyring_core::Result<std::sync::Arc<zbus_secret_service_keyring_store::Store>> {
+    zbus_secret_service_keyring_store::Store::new()
+}
+
+#[cfg(windows)]
+fn platform_store() -> keyring_core::Result<std::sync::Arc<windows_native_keyring_store::Store>> {
+    windows_native_keyring_store::Store::new()
 }
 
 fn entry(account: &str) -> Result<keyring_core::Entry> {
