@@ -51,6 +51,10 @@ All HTTPS uses rustls with certificate verification.
 
 Chat messages and your friends list are held in memory only (at most 2000 friends and 500 messages per chat) and are never written to disk. Messages go to Steam over the CM connection, the same way the official client sends them. Only avatar pictures are cached on disk (see above).
 
+## In-game overlay
+
+The Shift+Tab shortcut is registered only while a game started here is running (and the setting is on); nothing is sent anywhere. Notes are saved per game in `notes.json` in our data folder.
+
 ## Known limits
 
 - On a machine where the keyring has an empty password, the keyring is unlocked at login and its contents aren't encrypted at rest. That's the keyring's setting, not ours, but it means anyone with access to your user account can read the token.

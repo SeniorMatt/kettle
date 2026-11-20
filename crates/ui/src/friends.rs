@@ -47,6 +47,8 @@ pub struct FriendsView {
     drafts: HashMap<u64, String>,
     toast_seen: Option<(u64, f64)>,
     last_active: Option<SteamId>,
+    /// Drawn inside the in-game overlay: no close button (the overlay has its own).
+    embedded: bool,
 }
 
 fn group_of(f: &Friend) -> Group {
@@ -117,6 +119,17 @@ impl FriendsView {
         }
     }
 
+    /// The same friends list and chats, drawn into `ui` (the in-game overlay) instead of the slide-in panel.
+    pub fn show_embedded(&mut self, ui: &mut Ui, client: &mut Client, textures: &mut Textures) {
+        let mut cmds: Vec<Command> = Vec::new();
+        self.embedded = true;
+        self.contents(ui, client, textures, &mut cmds);
+        self.embedded = false;
+        for c in cmds {
+            client.send(c);
+        }
+    }
+
     fn contents(&mut self, ui: &mut Ui, client: &Client, tex: &mut Textures, cmds: &mut Vec<Command>) {
         let now = fmt::now_unix();
         self.header(ui, client, tex, cmds);
@@ -177,10 +190,12 @@ impl FriendsView {
                 }
             }
         });
-        let close = Rect::from_min_size(Pos2::new(rect.right() - 36.0, rect.top() + 10.0), Vec2::splat(26.0));
-        let mut cui = ui.new_child(UiBuilder::new().max_rect(close));
-        if widgets::icon_button(&mut cui, icon::X, 26.0, "Close").clicked() {
-            cmds.push(Command::CloseFriends);
+        if !self.embedded {
+            let close = Rect::from_min_size(Pos2::new(rect.right() - 36.0, rect.top() + 10.0), Vec2::splat(26.0));
+            let mut cui = ui.new_child(UiBuilder::new().max_rect(close));
+            if widgets::icon_button(&mut cui, icon::X, 26.0, "Close").clicked() {
+                cmds.push(Command::CloseFriends);
+            }
         }
         ui.painter().line_segment(
             [Pos2::new(rect.left(), rect.bottom()), Pos2::new(rect.right(), rect.bottom())],

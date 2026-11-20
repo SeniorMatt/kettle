@@ -51,6 +51,18 @@ Pick a small game you own (under 2 GB).
 - [ ] If a game won't start, check the log path in the message (`~/.local/share/steam-rust/logs/`). Then try Gear → Launch via Steam client.
 - [ ] Steamworks games: with Settings → Games → "Start the Steam client in the background" on, PLAY on a game that ships `libsteam_api.so` / `steam_api64.dll` shows STARTING STEAM… and then starts the official client minimized (`-silent`) and the game. With it off, or without an installed client, the game starts anyway; if it exits within 10 s a notice says it needs the Steam client. `sr-cli launch <appid> --dry-run` prints "needs the Steam client: yes/no, running: yes/no" and starts nothing.
 
+### In-game overlay (Shift+Tab)
+
+- [ ] KDE Wayland: start a game from the launcher. KDE shows a one-time "steam-rust wants to register a shortcut" prompt; accept it. System Settings → Shortcuts lists steam-rust "Show or hide the in-game overlay" with Shift+Tab.
+- [ ] With the game in focus (also fullscreen), Shift+Tab shows the dimmed overlay over it with a fade-in: game name, session time, clock, friends and chat, Notes, "Return to game".
+- [ ] Shift+Tab, Esc or "Return to game" hides it and the game has focus again (keyboard and mouse work).
+- [ ] Type a note, close, press Shift+Tab again: the note is still there. Restart the app: it is still there.
+- [ ] With no game running, Shift+Tab does nothing here: other programs get it (e.g. Shift+Tab moves focus backwards in a browser). Quit the game: same.
+- [ ] Settings → Games → "Enable the in-game overlay" off: Shift+Tab is no longer taken and Games → "Show overlay" is gone.
+- [ ] X11 session: the same checks (the shortcut is a key grab, no prompt).
+- [ ] Windows: same checks with a fullscreen-windowed game. If the overlay shows behind an exclusive-fullscreen game, note it.
+- [ ] While the overlay is hidden the app uses no CPU (`top`).
+
 ## 6. Proton manager
 
 - [ ] Settings → Compatibility lists Steam's Protons and any custom ones.

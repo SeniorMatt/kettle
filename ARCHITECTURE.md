@@ -54,6 +54,7 @@ Linux (KDE Plasma, Wayland first) is the main target. Windows is supported from 
   - `store::private_dir`/`write_private`: Unix modes. On Windows, user-profile ACLs already keep these private.
   - Opening URLs.
   - Launching: Proton and umu on Linux; the exe runs directly on Windows.
+- The in-game overlay (Shift+Tab) has its shortcut in `crates/app/src/hotkey.rs` (portal on Wayland, `XGrabKey` on X11, `RegisterHotKey` on Windows; registered only while `state.running` is non-empty and the setting is on) and its window in `sr-ui` (`overlay.rs`, an egui viewport). The hotkey thread only sends a toggle message and a repaint request; `sr-ui` stays free of I/O. Notes go through `Command::SetNote` to `notes.json`.
 - Paths come from `directories` (XDG on Linux, `%APPDATA%`/`%LOCALAPPDATA%` on Windows) and never from hardcoded `~/.`.
 - Linux-only features (Proton manager, layer-shell overlay) compile to nothing, or to a "not available" stub, on other systems.
 

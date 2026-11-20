@@ -334,6 +334,19 @@ fn games(ui: &mut Ui, client: &mut Client) {
         )
         .color(theme::TEXT_DIM),
     );
+    ui.add_space(10.0);
+    widgets::section_title(ui, "IN-GAME OVERLAY");
+    let mut overlay = client.state().settings.overlay;
+    if ui.checkbox(&mut overlay, "Enable the in-game overlay (Shift+Tab)").changed() {
+        client.send(Command::SetOverlay(overlay));
+    }
+    ui.label(
+        RichText::new(
+            "While a game started here runs, Shift+Tab shows friends, chat and notes over it. \
+             The shortcut is only registered while such a game runs.",
+        )
+        .color(theme::TEXT_DIM),
+    );
 }
 
 fn privacy(ui: &mut Ui, client: &mut Client) {

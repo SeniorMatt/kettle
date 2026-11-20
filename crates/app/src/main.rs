@@ -1,9 +1,11 @@
 //! steam-rust desktop app: window setup and wiring only.
 
+mod hotkey;
+
 use eframe::egui;
 use sr_client::Client;
 use sr_ui::{AppUi, theme};
-use std::sync::Arc;
+use std::sync::{Arc, mpsc};
 use std::time::Instant;
 
 struct App {
@@ -15,10 +17,26 @@ struct App {
     /// Frames drawn since the last report (a quiet UI draws almost none).
     frames: u32,
     last_report: Instant,
+    /// Registers Shift+Tab while a game runs; each press arrives on `toggles`.
+    hotkey: hotkey::Hotkey,
+    toggles: mpsc::Receiver<()>,
 }
 
 impl eframe::App for App {
+    /// Transparent, so the in-game overlay window can show the game through its dimmed background.
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        egui::Rgba::TRANSPARENT.to_array()
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let want = {
+            let s = self.client.state();
+            s.settings.overlay && !s.running.is_empty()
+        };
+        self.hotkey.set_active(want);
+        while self.toggles.try_recv().is_ok() {
+            self.ui.toggle_overlay(&mut self.client);
+        }
         self.ui.show(ui, &mut self.client);
         if self.timings {
             self.frames += 1;
@@ -62,6 +80,12 @@ fn main() -> eframe::Result {
         Box::new(move |cc| {
             AppUi::setup(&cc.egui_ctx);
             let ctx = cc.egui_ctx.clone();
+            let (toggle_tx, toggles) = mpsc::channel();
+            let toggle_ctx = ctx.clone();
+            let hotkey = hotkey::Hotkey::new(Arc::new(move || {
+                let _ = toggle_tx.send(());
+                toggle_ctx.request_repaint();
+            }));
             let t = Instant::now();
             let client = Client::new(Arc::new(move || ctx.request_repaint()))?;
             if timings {
@@ -76,6 +100,8 @@ fn main() -> eframe::Result {
                 timings,
                 frames: 0,
                 last_report: Instant::now(),
+                hotkey,
+                toggles,
             }))
         }),
     )

@@ -22,6 +22,9 @@ pub struct Settings {
     /// Start the official Steam client in the background for games that need it.
     #[serde(default = "default_true")]
     pub start_steam: bool,
+    /// The Shift+Tab in-game overlay (the shortcut is registered only while a game we started runs).
+    #[serde(default = "default_true")]
+    pub overlay: bool,
 }
 
 fn default_true() -> bool {
@@ -34,7 +37,7 @@ fn default_workers() -> usize {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { library: None, workers: DEFAULT_WORKERS, start_steam: true }
+        Settings { library: None, workers: DEFAULT_WORKERS, start_steam: true, overlay: true }
     }
 }
 
@@ -104,6 +107,11 @@ impl Client {
         self.save_settings();
     }
 
+    pub(crate) fn set_overlay(&mut self, on: bool) {
+        self.state.settings.overlay = on;
+        self.save_settings();
+    }
+
     fn save_settings(&mut self) {
         if let Err(e) = store::save_json(&Settings::path(), &self.state.settings) {
             self.state.notice = Some(format!("Couldn't save the settings: {e:#}"));
@@ -133,6 +141,7 @@ pub(crate) fn handle(client: &mut Client, cmd: Command) {
         Command::SetLibrary(p) => client.set_library(p),
         Command::SetWorkers(n) => client.set_workers(n),
         Command::SetStartSteam(on) => client.set_start_steam(on),
+        Command::SetOverlay(on) => client.set_overlay(on),
         _ => {}
     }
 }
@@ -146,6 +155,9 @@ mod tests {
         let s = Settings::default();
         assert_eq!(s.workers, 8);
         assert!(s.start_steam);
+        assert!(s.overlay);
+        let s: Settings = serde_json::from_str(r#"{"overlay": false}"#).unwrap();
+        assert!(!s.overlay);
         let s: Settings = serde_json::from_str(r#"{"start_steam": false}"#).unwrap();
         assert!(!s.start_steam);
         let s = Settings::default();

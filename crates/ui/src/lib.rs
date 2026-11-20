@@ -13,6 +13,7 @@ mod friends;
 mod game_page;
 mod library;
 mod login;
+mod overlay;
 mod settings_page;
 mod sidebar;
 mod store;
@@ -59,6 +60,7 @@ pub struct AppUi {
     settings: settings_page::SettingsView,
     overlays: dialogs::Overlays,
     friends: friends::FriendsView,
+    overlay: overlay::OverlayView,
     /// What the central page showed last frame, and when it changed (egui time).
     page: Option<(Tab, Option<AppId>, u64)>,
     page_since: f64,
@@ -134,11 +136,17 @@ impl AppUi {
             }
         });
         self.overlays.show(ui.ctx(), client);
+        self.overlay.show(ui.ctx(), client, &mut self.textures, &mut self.friends);
         if let Some(n) = nav.or_else(|| self.overlays.goto.take()) {
             self.navigate(n, client);
         }
         chrome::alt_drag(ui);
         chrome::resize_zones(ui);
+    }
+
+    /// The Shift+Tab shortcut (or the "Show overlay" menu item): show or hide the in-game overlay.
+    pub fn toggle_overlay(&mut self, client: &mut Client) {
+        self.overlay.toggle(client);
     }
 
     /// Switch tab; the store loads its rows when it is opened.
@@ -219,6 +227,10 @@ impl AppUi {
                     }
                 });
                 ui.menu_button("Games", |ui| {
+                    let running = !client.state().running.is_empty() && client.state().settings.overlay;
+                    if running && ui.button("Show overlay (Shift+Tab)").clicked() {
+                        self.overlay.toggle(client);
+                    }
                     if ui.button("View game library").clicked() {
                         self.goto(Tab::Library, client);
                         client.send(Command::Select(None));

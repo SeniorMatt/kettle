@@ -19,6 +19,8 @@ use tokio::sync::mpsc;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RunningGame {
     pub pid: u32,
+    /// When it started (for the session time in the overlay).
+    pub started: std::time::Instant,
 }
 
 /// Why a game could not be started, in words for the user.
@@ -84,12 +86,15 @@ impl Client {
     pub(crate) fn stop_game(&mut self, app: AppId) {
         let Some(g) = self.state.running.get(&app) else { return };
         let pid = g.pid;
+        if pid == 0 {
+            return; // a simulated game (STEAM_RUST_DEMO_RUNNING)
+        }
         self.rt.spawn_blocking(move || terminate_group(pid));
     }
 
     pub(crate) fn game_started(&mut self, app: AppId, pid: u32) {
         self.state.starting_steam.retain(|a| *a != app);
-        self.state.running.insert(app, RunningGame { pid });
+        self.state.running.insert(app, RunningGame { pid, started: std::time::Instant::now() });
     }
 
     pub(crate) fn game_exited(&mut self, app: AppId, seconds: u64, success: bool) {

@@ -14,6 +14,7 @@ mod downloads;
 mod friends;
 mod launch;
 mod manage;
+mod notes;
 mod open;
 mod play;
 mod settings;
@@ -29,6 +30,7 @@ pub use friends::{
     Chat, Delivery, Friend, FriendsState, FriendsStatus, GamePlayed, HistoryState, MAX_TEXT, Me, Message, PersonaState,
     Toast, local_utc_offset,
 };
+pub use notes::MAX_NOTE_CHARS;
 pub use play::{PlayProblem, RunningGame};
 pub use settings::{LibraryChoice, MAX_WORKERS, MIN_WORKERS, Settings};
 pub use sr_steam::storefront::{AppDetails, Platforms, Price, Screenshot, Section, StoreItem};
@@ -97,6 +99,8 @@ pub struct State {
     /// Free bytes by library path, from `Command::CheckFree` (`None` = unknown). At most [`FREE_KEPT`].
     pub free_space: Vec<(PathBuf, Option<u64>)>,
     pub friends: FriendsState,
+    /// The overlay's per-game notes, by app id.
+    pub notes: std::collections::BTreeMap<String, String>,
 }
 
 /// How many disk-space answers are kept.
@@ -155,6 +159,11 @@ const DETAILS_KEPT: usize = 16;
 const SECTIONS_MAX_AGE: Duration = Duration::from_secs(10 * 60);
 
 impl State {
+    /// The note saved for a game ("" when none).
+    pub fn note(&self, app: AppId) -> &str {
+        self.notes.get(&app.0.to_string()).map_or("", String::as_str)
+    }
+
     pub fn game(&self, app: AppId) -> Option<&Game> {
         self.games.iter().find(|g| g.app_id == app)
     }
@@ -213,6 +222,10 @@ pub enum Command {
     SetWorkers(usize),
     /// Start the official Steam client in the background for games that need it.
     SetStartSteam(bool),
+    /// Turn the Shift+Tab in-game overlay on or off.
+    SetOverlay(bool),
+    /// Save a game's overlay note (an empty text deletes it).
+    SetNote(AppId, String),
     /// Load the featured rows (no-op while loading or fresh).
     StoreLoad,
     /// Search the store; an empty query clears the results.
@@ -399,6 +412,7 @@ impl Client {
                 settings,
                 free_space: Vec::new(),
                 friends: FriendsState::default(),
+                notes: notes::Notes::load().apps,
             },
             session: None,
             friends: friends::FriendsInner::default(),
@@ -425,7 +439,10 @@ impl Client {
         };
         c.spawn_local_scan();
         match std::env::var("STEAM_RUST_DEMO").ok().and_then(|v| v.parse::<usize>().ok()) {
-            Some(n) => c.start_demo(n),
+            Some(n) => {
+                c.start_demo(n);
+                c.demo_running();
+            }
             None => c.resume_or_login(),
         }
         Ok(c)
@@ -468,9 +485,11 @@ impl Client {
             Command::ProtonInstall { source, tag, target } => self.proton_install(source, tag, target),
             Command::ProtonCancel => self.proton_cancel(),
             Command::ProtonRemove(dir) => self.proton_remove(dir),
-            c @ (Command::SetLibrary(_) | Command::SetWorkers(_) | Command::SetStartSteam(_)) => {
-                settings::handle(self, c)
-            }
+            c @ (Command::SetLibrary(_)
+            | Command::SetWorkers(_)
+            | Command::SetStartSteam(_)
+            | Command::SetOverlay(_)) => settings::handle(self, c),
+            Command::SetNote(app, text) => self.set_note(app, text),
             Command::StoreLoad => self.store_load(),
             Command::StoreSearch(q) => self.store_search(q),
             Command::StoreDetails(app) => self.store_details(app),
@@ -792,6 +811,15 @@ impl Client {
         self.state.screen = Screen::Library;
         self.merge_installed();
         self.start_friends_demo();
+    }
+
+    /// `STEAM_RUST_DEMO_RUNNING=<appid>`: show a demo game as running, without starting any process.
+    fn demo_running(&mut self) {
+        let app = std::env::var("STEAM_RUST_DEMO_RUNNING").ok().and_then(|v| v.parse::<u32>().ok());
+        if let Some(app) = app {
+            // pid 0 is never signalled (see `stop_game`).
+            self.state.running.insert(AppId(app), RunningGame { pid: 0, started: Instant::now() });
+        }
     }
 
     fn logout(&mut self) {
