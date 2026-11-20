@@ -85,6 +85,11 @@ fn primary_button(ui: &mut Ui, client: &mut Client, game: &sr_model::Game, ov: &
         }
         return;
     }
+    if client.state().starting_steam.contains(&app) {
+        widgets::action_button(ui, icon::PLAY, "STARTING STEAM…", idle);
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(500));
+        return;
+    }
     let label = match client.state().downloads.status(app) {
         DownloadStatus::Active(f) => Some(format!("DOWNLOADING {:.0}%", f * 100.0)),
         DownloadStatus::Queued => Some("QUEUED".to_string()),

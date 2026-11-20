@@ -13,6 +13,7 @@ pub mod proton_releases;
 pub mod redact;
 pub mod run;
 pub mod secrets;
+pub mod steam_client;
 pub mod store;
 pub mod storefront;
 pub mod vdf;

@@ -83,6 +83,8 @@ pub struct State {
     pub running: HashMap<AppId, RunningGame>,
     /// Set when a launch failed; the UI shows it until dismissed.
     pub play_problem: Option<PlayProblem>,
+    /// Games waiting for the Steam client to start before they launch.
+    pub starting_steam: Vec<AppId>,
     pub compat: CompatState,
     pub settings: Settings,
     /// Places a game can be installed into.
@@ -203,6 +205,8 @@ pub enum Command {
     ProtonRemove(PathBuf),
     SetLibrary(Option<PathBuf>),
     SetWorkers(usize),
+    /// Start the official Steam client in the background for games that need it.
+    SetStartSteam(bool),
     /// Load the featured rows (no-op while loading or fresh).
     StoreLoad,
     /// Search the store; an empty query clears the results.
@@ -216,27 +220,93 @@ pub enum Command {
 /// asked for it; results from an older generation are dropped.
 #[derive(Debug)]
 enum Event {
-    Qr { generation: u64, url: String },
-    QrScanned { generation: u64 },
-    LoggedIn { generation: u64, tokens: auth::Tokens },
-    Owned { generation: u64, games: Vec<webapi::OwnedGame>, took: Duration },
-    Installed { apps: HashMap<u32, local::InstalledApp>, took: Duration },
-    DlProgress { job: u64, progress: sr_steam::content::Progress },
-    DlDone { job: u64, result: downloads::DlResult },
-    GameStarted { app: AppId, pid: u32 },
-    GameExited { app: AppId, seconds: u64, success: bool },
+    Qr {
+        generation: u64,
+        url: String,
+    },
+    QrScanned {
+        generation: u64,
+    },
+    LoggedIn {
+        generation: u64,
+        tokens: auth::Tokens,
+    },
+    Owned {
+        generation: u64,
+        games: Vec<webapi::OwnedGame>,
+        took: Duration,
+    },
+    Installed {
+        apps: HashMap<u32, local::InstalledApp>,
+        took: Duration,
+    },
+    DlProgress {
+        job: u64,
+        progress: sr_steam::content::Progress,
+    },
+    DlDone {
+        job: u64,
+        result: downloads::DlResult,
+    },
+    GameStarted {
+        app: AppId,
+        pid: u32,
+    },
+    GameExited {
+        app: AppId,
+        seconds: u64,
+        success: bool,
+    },
     PlayFailed(PlayProblem),
-    Uninstalled { app: AppId, result: Result<(), String> },
-    CompatInfo { generation: u64, result: Result<CompatInfo, String>, last: bool },
-    Releases { source: Source, result: Result<Vec<sr_steam::proton_releases::Release>, String> },
-    ToolProgress { job: u64, progress: sr_steam::proton_releases::Progress },
-    ToolDone { job: u64, result: Result<String, String> },
-    FreeSpace { path: PathBuf, bytes: Option<u64> },
-    LoginFailed { generation: u64, error: String },
+    /// The game needs the Steam client and we are starting it.
+    SteamStarting {
+        app: AppId,
+    },
+    /// The game needs the Steam client but it could not be started (message says why).
+    SteamMissing {
+        app: AppId,
+        message: String,
+    },
+    Uninstalled {
+        app: AppId,
+        result: Result<(), String>,
+    },
+    CompatInfo {
+        generation: u64,
+        result: Result<CompatInfo, String>,
+        last: bool,
+    },
+    Releases {
+        source: Source,
+        result: Result<Vec<sr_steam::proton_releases::Release>, String>,
+    },
+    ToolProgress {
+        job: u64,
+        progress: sr_steam::proton_releases::Progress,
+    },
+    ToolDone {
+        job: u64,
+        result: Result<String, String>,
+    },
+    FreeSpace {
+        path: PathBuf,
+        bytes: Option<u64>,
+    },
+    LoginFailed {
+        generation: u64,
+        error: String,
+    },
     Notice(String),
     StoreSections(Result<Vec<Section>, String>),
-    StoreSearched { generation: u64, query: String, result: Result<Vec<StoreItem>, String> },
-    StoreDetails { app: u32, result: Result<Option<AppDetails>, String> },
+    StoreSearched {
+        generation: u64,
+        query: String,
+        result: Result<Vec<StoreItem>, String>,
+    },
+    StoreDetails {
+        app: u32,
+        result: Result<Option<AppDetails>, String>,
+    },
 }
 
 struct Session {
@@ -259,6 +329,8 @@ pub struct Client {
     /// Play time and last-played as Steam reported them, before our own is added.
     base_play: HashMap<u32, (u32, u64)>,
     play_stats: play::PlayStats,
+    /// Games that need the Steam client but run without it: why, for the notice if they exit early.
+    steam_missing: HashMap<AppId, String>,
     dl_running: Option<downloads::RunningDl>,
     dl_seq: u64,
     tool_job: Option<tools::ToolJob>,
@@ -299,6 +371,7 @@ impl Client {
                 downloads: DownloadsState::default(),
                 running: HashMap::new(),
                 play_problem: None,
+                starting_steam: Vec::new(),
                 compat: CompatState::default(),
                 libraries: settings::library_choices(&settings),
                 settings,
@@ -308,6 +381,7 @@ impl Client {
             installed: HashMap::new(),
             base_play: HashMap::new(),
             play_stats: play::PlayStats::load(),
+            steam_missing: HashMap::new(),
             dl_running: None,
             dl_seq: 0,
             tool_job: None,
@@ -370,7 +444,9 @@ impl Client {
             Command::ProtonInstall { source, tag, target } => self.proton_install(source, tag, target),
             Command::ProtonCancel => self.proton_cancel(),
             Command::ProtonRemove(dir) => self.proton_remove(dir),
-            c @ (Command::SetLibrary(_) | Command::SetWorkers(_)) => settings::handle(self, c),
+            c @ (Command::SetLibrary(_) | Command::SetWorkers(_) | Command::SetStartSteam(_)) => {
+                settings::handle(self, c)
+            }
             Command::StoreLoad => self.store_load(),
             Command::StoreSearch(q) => self.store_search(q),
             Command::StoreDetails(app) => self.store_details(app),
@@ -471,6 +547,8 @@ impl Client {
             Event::GameStarted { app, pid } => self.game_started(app, pid),
             Event::GameExited { app, seconds, success } => self.game_exited(app, seconds, success),
             Event::PlayFailed(problem) => self.play_failed(problem),
+            Event::SteamStarting { app } => self.steam_starting(app),
+            Event::SteamMissing { app, message } => self.steam_missing(app, message),
             Event::Uninstalled { app, result } => {
                 self.state.notice = Some(match result {
                     Ok(()) => format!("{} was uninstalled.", self.state.game(app).map_or("The game", |g| &g.name)),

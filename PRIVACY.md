@@ -29,6 +29,8 @@ All files are readable only by you: folders are mode `0700` and files `0600`.
 | `~/.cache/steam-rust/art/` | Cover art downloaded from Steam's CDN |
 | `~/.cache/steam-rust/store/` | Public store answers and images, kept briefly to make the Store tab fast |
 
+If a game needs the Steam client (Settings, Games tab, on by default), we start the official client minimized with `-silent` before it. We only start the program and read its pid file; nothing is sent to it or to Valve by us for this.
+
 We **never write** to the official Steam client's files. We only read its `steamapps/*.acf`, `libraryfolders.vdf` and `appcache/librarycache`.
 
 ## Network connections

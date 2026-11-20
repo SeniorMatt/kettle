@@ -49,7 +49,7 @@ Pick a small game you own (under 2 GB).
 - [ ] A Windows game already installed by Steam: PLAY → it starts through Proton, with the same saves as in Steam.
 - [ ] Gear → Compatibility…: pick another Proton; the game uses it the next time.
 - [ ] If a game won't start, check the log path in the message (`~/.local/share/steam-rust/logs/`). Then try Gear → Launch via Steam client.
-- [ ] Known limit: games that need the Steam client running (most Steamworks games) only start while the official Steam client is running.
+- [ ] Steamworks games: with Settings → Games → "Start the Steam client in the background" on, PLAY on a game that ships `libsteam_api.so` / `steam_api64.dll` shows STARTING STEAM… and then starts the official client minimized (`-silent`) and the game. With it off, or without an installed client, the game starts anyway; if it exits within 10 s a notice says it needs the Steam client. `sr-cli launch <appid> --dry-run` prints "needs the Steam client: yes/no, running: yes/no" and starts nothing.
 
 ## 6. Proton manager
 

@@ -162,6 +162,10 @@ fn cmd_launch(args: &[String]) -> Result<()> {
     for (k, v) in &p.plan.env {
         println!("env:     {k}={v}");
     }
+    // Only looks; the client is never started from here.
+    let needs = crate::steam_client::uses_steamworks(&p.install_dir);
+    let yn = |b: bool| if b { "yes" } else { "no" };
+    println!("needs the Steam client: {}, running: {}", yn(needs), yn(crate::steam_client::is_running()));
     if args.iter().any(|a| a == "--dry-run") {
         return Ok(());
     }

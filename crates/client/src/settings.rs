@@ -19,6 +19,13 @@ pub struct Settings {
     /// Chunk downloads in flight.
     #[serde(default = "default_workers")]
     pub workers: usize,
+    /// Start the official Steam client in the background for games that need it.
+    #[serde(default = "default_true")]
+    pub start_steam: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_workers() -> usize {
@@ -27,7 +34,7 @@ fn default_workers() -> usize {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { library: None, workers: DEFAULT_WORKERS }
+        Settings { library: None, workers: DEFAULT_WORKERS, start_steam: true }
     }
 }
 
@@ -92,6 +99,11 @@ impl Client {
         self.save_settings();
     }
 
+    pub(crate) fn set_start_steam(&mut self, on: bool) {
+        self.state.settings.start_steam = on;
+        self.save_settings();
+    }
+
     fn save_settings(&mut self) {
         if let Err(e) = store::save_json(&Settings::path(), &self.state.settings) {
             self.state.notice = Some(format!("Couldn't save the settings: {e:#}"));
@@ -120,6 +132,7 @@ pub(crate) fn handle(client: &mut Client, cmd: Command) {
     match cmd {
         Command::SetLibrary(p) => client.set_library(p),
         Command::SetWorkers(n) => client.set_workers(n),
+        Command::SetStartSteam(on) => client.set_start_steam(on),
         _ => {}
     }
 }
@@ -132,6 +145,10 @@ mod tests {
     fn defaults_and_clamping() {
         let s = Settings::default();
         assert_eq!(s.workers, 8);
+        assert!(s.start_steam);
+        let s: Settings = serde_json::from_str(r#"{"start_steam": false}"#).unwrap();
+        assert!(!s.start_steam);
+        let s = Settings::default();
         assert_eq!(s.default_library(), content::default_library());
         let s: Settings = serde_json::from_str(r#"{"workers": 500}"#).unwrap();
         assert_eq!(s.workers, 500); // clamped on load/set, not on parse

@@ -283,6 +283,8 @@ pub struct Prepared {
     pub tool: Option<(String, ChoiceSource)>,
     /// False when only Steam's data says where the game would go (a dry run for a game that isn't installed).
     pub installed: bool,
+    /// The game's folder (where it would be, when not installed).
+    pub install_dir: PathBuf,
 }
 
 /// Launch data for `appid` from the official client's `appinfo.vdf` in any Steam root.
@@ -355,7 +357,14 @@ pub fn prepare_with(info: &AppInfo, installed: Option<&InstalledApp>, opts: &Pre
         compatdata: &compatdata,
     })?;
     let tool = tool.filter(|_| uses_tool).map(|t| (t.internal_name.clone(), source.unwrap_or(ChoiceSource::Newest)));
-    Ok(Prepared { plan, name: info.name.clone(), entry: entry.clone(), tool, installed: installed.is_some() })
+    Ok(Prepared {
+        plan,
+        name: info.name.clone(),
+        entry: entry.clone(),
+        tool,
+        installed: installed.is_some(),
+        install_dir,
+    })
 }
 
 fn pick<'a>(

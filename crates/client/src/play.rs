@@ -11,6 +11,8 @@ use sr_steam::local::InstalledApp;
 use sr_steam::{run, store};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
+use std::time::Duration;
 use tokio::sync::mpsc;
 
 /// A game we started and that has not exited yet.
@@ -56,6 +58,11 @@ impl PlayStats {
     }
 }
 
+/// How long we wait for the Steam client to come up.
+const STEAM_START_TIMEOUT: Duration = Duration::from_secs(90);
+/// A game that needs the client but exits within this time gets an explanation.
+const EARLY_EXIT_SECS: u64 = 10;
+
 /// Does this error mean "no usable compatibility tool"?
 fn is_compat_problem(message: &str) -> bool {
     message.contains("compatibility tool") || message.contains("is a runtime")
@@ -63,13 +70,14 @@ fn is_compat_problem(message: &str) -> bool {
 
 impl Client {
     pub(crate) fn play(&mut self, app: AppId) {
-        if self.state.running.contains_key(&app) {
+        if self.state.running.contains_key(&app) || self.state.starting_steam.contains(&app) {
             return;
         }
         let name = self.state.game(app).map(|g| g.name.clone()).unwrap_or_default();
         let installed = self.installed.get(&app.0).cloned();
         let (tx, wake) = (self.tx.clone(), self.wake.clone());
-        self.rt.spawn_blocking(move || launch(app, name, installed, tx, wake));
+        let start_steam = self.state.settings.start_steam;
+        self.rt.spawn_blocking(move || launch(app, name, installed, start_steam, tx, wake));
     }
 
     /// Stop a running game: end its whole process group (the game, Proton and the helpers).
@@ -80,6 +88,7 @@ impl Client {
     }
 
     pub(crate) fn game_started(&mut self, app: AppId, pid: u32) {
+        self.state.starting_steam.retain(|a| *a != app);
         self.state.running.insert(app, RunningGame { pid });
     }
 
@@ -88,19 +97,42 @@ impl Client {
         self.play_stats.add(app, seconds, super::downloads::now_unix());
         let _ = store::save_json(&PlayStats::path(), &self.play_stats);
         self.merge_installed();
-        if !success && seconds < 5 {
+        let missing = self.steam_missing.remove(&app);
+        if let Some(message) = missing.filter(|_| seconds < EARLY_EXIT_SECS) {
+            self.state.notice = Some(message);
+        } else if !success && seconds < 5 {
             let log = run::log_path(app.0);
             self.state.notice = Some(format!("The game ended right away. See {}", log.display()));
         }
     }
 
     pub(crate) fn play_failed(&mut self, problem: PlayProblem) {
+        self.state.starting_steam.retain(|a| *a != problem.app);
+        self.steam_missing.remove(&problem.app);
         self.state.play_problem = Some(problem);
+    }
+
+    pub(crate) fn steam_starting(&mut self, app: AppId) {
+        if !self.state.starting_steam.contains(&app) {
+            self.state.starting_steam.push(app);
+        }
+    }
+
+    pub(crate) fn steam_missing(&mut self, app: AppId, message: String) {
+        self.state.starting_steam.retain(|a| *a != app);
+        self.steam_missing.insert(app, message);
     }
 }
 
 /// Worker: prepare the plan from Steam's app data and start it.
-fn launch(app: AppId, name: String, installed: Option<InstalledApp>, tx: mpsc::Sender<Event>, wake: Waker) {
+fn launch(
+    app: AppId,
+    name: String,
+    installed: Option<InstalledApp>,
+    start_steam: bool,
+    tx: mpsc::Sender<Event>,
+    wake: Waker,
+) {
     let prepared = run::appinfo_for(app.0).and_then(|info| {
         let info = info.ok_or_else(|| {
             anyhow::anyhow!(
@@ -113,6 +145,11 @@ fn launch(app: AppId, name: String, installed: Option<InstalledApp>, tx: mpsc::S
         let _ = tx.blocking_send(ev);
         wake();
     };
+    let prepared = prepared.inspect(|p| {
+        if start_steam {
+            ensure_steam(app, &p.install_dir, &send);
+        }
+    });
     match prepared.and_then(|p| start(&p.plan, &send)) {
         Ok(pid) => send(Event::GameStarted { app, pid }),
         Err(e) => {
@@ -121,6 +158,25 @@ fn launch(app: AppId, name: String, installed: Option<InstalledApp>, tx: mpsc::S
             send(Event::PlayFailed(PlayProblem { app, name, message, needs_compat_tool }));
         }
     }
+}
+
+/// Games that use the Steamworks API only start while the official client runs: start it first when allowed.
+/// Never fails the launch; if the client can't be started the game still starts, with a note for an early exit.
+fn ensure_steam(app: AppId, install_dir: &std::path::Path, send: &impl Fn(Event)) {
+    use sr_steam::steam_client::{self as sc, Started};
+    if !sc::uses_steamworks(install_dir) || sc::is_running() {
+        return;
+    }
+    send(Event::SteamStarting { app });
+    let why = match sc::ensure_running(STEAM_START_TIMEOUT, &AtomicBool::new(false)) {
+        Ok(Started::AlreadyRunning | Started::StartedNow) => return,
+        Ok(Started::NotInstalled) => {
+            "This game needs the Steam client, and none is installed. Install Steam, or the game can't start."
+                .to_string()
+        }
+        Err(e) => format!("This game needs the Steam client, which could not be started ({e:#})."),
+    };
+    send(Event::SteamMissing { app, message: why });
 }
 
 /// Spawn `plan`; the exit watcher reports through `send`. Split out so a test can run a fake plan.

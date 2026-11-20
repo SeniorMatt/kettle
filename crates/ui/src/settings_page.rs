@@ -15,13 +15,15 @@ use std::sync::Arc;
 pub enum SettingsTab {
     #[default]
     Compatibility,
+    Games,
     Downloads,
     Privacy,
 }
 
 impl SettingsTab {
-    const ALL: [(SettingsTab, &'static str); 3] = [
+    const ALL: [(SettingsTab, &'static str); 4] = [
         (SettingsTab::Compatibility, "Compatibility"),
+        (SettingsTab::Games, "Games"),
         (SettingsTab::Downloads, "Downloads"),
         (SettingsTab::Privacy, "Privacy"),
     ];
@@ -79,6 +81,7 @@ impl SettingsView {
                 ui.spacing_mut().item_spacing.y = 8.0;
                 match self.tab {
                     SettingsTab::Compatibility => self.compatibility(ui, client),
+                    SettingsTab::Games => games(ui, client),
                     SettingsTab::Downloads => self.downloads(ui, client),
                     SettingsTab::Privacy => privacy(ui, client),
                 }
@@ -317,6 +320,21 @@ fn install_status(ui: &mut Ui, client: &mut Client, i: &ToolInstall) {
 }
 
 // ---- privacy ---------------------------------------------------------------
+
+fn games(ui: &mut Ui, client: &mut Client) {
+    widgets::section_title(ui, "STEAM CLIENT");
+    let mut on = client.state().settings.start_steam;
+    if ui.checkbox(&mut on, "Start the Steam client in the background for games that need it").changed() {
+        client.send(Command::SetStartSteam(on));
+    }
+    ui.label(
+        RichText::new(
+            "Most games use the Steamworks API, which only works while the official Steam client runs. \
+             We start it minimized before such a game. Nothing is sent to it; it is only started.",
+        )
+        .color(theme::TEXT_DIM),
+    );
+}
 
 fn privacy(ui: &mut Ui, client: &mut Client) {
     widgets::section_title(ui, "PRIVACY");
