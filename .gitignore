@@ -1,0 +1,6 @@
+target/
+*.log
+/refs/screenshots/*.png
+/refs/screenshots/*.jpg
+BRIEF.md
+HANDOFF.md
