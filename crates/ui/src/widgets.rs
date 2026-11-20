@@ -1,6 +1,6 @@
 //! Small reusable widgets drawn with the painter.
 
-use crate::theme;
+use crate::{anim, theme};
 use egui::{Color32, Pos2, Rect, Response, Sense, Ui, Vec2, epaint::Mesh};
 
 /// Fill `rect` with a left-to-right gradient.
@@ -37,9 +37,12 @@ pub fn action_button(ui: &mut Ui, icon: &str, label: &str, colors: (Color32, Col
     let galley = ui.painter().layout_no_wrap(text, font, Color32::WHITE);
     let size = Vec2::new((galley.size().x + 56.0).max(150.0), 46.0);
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
-    let lift = ui.ctx().animate_bool_with_time(resp.id, resp.hovered(), 0.1);
-    let (a, b) = (colors.0.gamma_multiply(1.0 + 0.15 * lift), colors.1.gamma_multiply(1.0 + 0.15 * lift));
-    gradient(ui, rect, a, b);
+    // Brighten on hover, darken and shrink a little while pressed.
+    let lift = anim::animate_bool(ui.ctx(), resp.id.with("hover"), resp.hovered(), anim::FAST);
+    let press = anim::animate_bool(ui.ctx(), resp.id.with("press"), resp.is_pointer_button_down_on(), 0.08);
+    let k = 1.0 + 0.15 * lift - 0.18 * press;
+    let rect = rect.shrink(1.5 * press);
+    gradient(ui, rect, colors.0.gamma_multiply(k), colors.1.gamma_multiply(k));
     let pos = rect.center() - galley.size() / 2.0;
     ui.painter().galley(pos, galley, Color32::WHITE);
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -48,26 +51,59 @@ pub fn action_button(ui: &mut Ui, icon: &str, label: &str, colors: (Color32, Col
 /// A square icon button (gear, info, ...) that lightens on hover.
 pub fn icon_button(ui: &mut Ui, icon: &str, size: f32, tooltip: &str) -> Response {
     let (rect, resp) = ui.allocate_exact_size(Vec2::splat(size), Sense::click());
-    if resp.hovered() {
-        ui.painter().rect_filled(rect, theme::BUTTON_RADIUS, theme::BG_ROW_SELECTED);
+    let t = anim::animate_bool(ui.ctx(), resp.id.with("hover"), resp.hovered(), anim::FAST);
+    let press = anim::animate_bool(ui.ctx(), resp.id.with("press"), resp.is_pointer_button_down_on(), 0.08);
+    if t > 0.0 {
+        ui.painter().rect_filled(
+            rect,
+            theme::BUTTON_RADIUS,
+            theme::BG_ROW_SELECTED.gamma_multiply(t * (1.0 - 0.3 * press)),
+        );
     }
-    let color = if resp.hovered() { theme::TEXT } else { theme::TEXT_DIM };
+    let color = theme::TEXT_DIM.lerp_to_gamma(theme::TEXT, t);
     ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, icon, theme::regular(size * 0.55), color);
     resp.on_hover_text(tooltip)
 }
 
 /// A text label that can be clicked, brightening on hover (nav tabs, links).
+/// The active-tab underline is drawn by the caller so it can slide.
 pub fn text_tab(ui: &mut Ui, text: &str, font: egui::FontId, active: bool) -> Response {
-    let color = if active { theme::ACCENT } else { theme::TEXT };
-    let galley = ui.painter().layout_no_wrap(text.to_string(), font, color);
+    let galley = ui.painter().layout_no_wrap(text.to_string(), font, theme::TEXT);
     let (rect, resp) = ui.allocate_exact_size(galley.size() + Vec2::new(0.0, 4.0), Sense::click());
-    let color = if resp.hovered() && !active { Color32::WHITE } else { color };
+    let hover = anim::animate_bool(ui.ctx(), resp.id.with("hover"), resp.hovered() && !active, anim::FAST);
+    let on = anim::animate_bool(ui.ctx(), resp.id.with("on"), active, anim::NORMAL);
+    let color = theme::TEXT.lerp_to_gamma(Color32::WHITE, hover).lerp_to_gamma(theme::ACCENT, on);
     ui.painter().galley_with_override_text_color(Pos2::new(rect.left(), rect.top() + 2.0), galley, color);
-    if active {
-        let y = rect.bottom() + 1.0;
-        ui.painter().line_segment([Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)], (2.0, theme::ACCENT));
-    }
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// A soft light band sweeping over a loading placeholder. Repaints (about 20
+/// times a second) only while it is drawn, i.e. while it is visible and loading.
+pub fn shimmer(ui: &Ui, rect: Rect) {
+    const PERIOD: f64 = 1.4;
+    let t = (ui.input(|i| i.time) % PERIOD / PERIOD) as f32;
+    let band = rect.width() * 0.6;
+    let x = rect.left() - band + (rect.width() + band) * t;
+    let (x0, x1) = (x.max(rect.left()), (x + band).min(rect.right()));
+    if x1 > x0 {
+        let centre = x + band / 2.0;
+        let glow =
+            |v: f32| Color32::from_white_alpha((12.0 * (1.0 - (v - centre).abs() / (band / 2.0)).max(0.0)) as u8);
+        let mid = centre.clamp(x0, x1);
+        for (a, b) in [(x0, mid), (mid, x1)] {
+            if b > a {
+                let r = Rect::from_min_max(Pos2::new(a, rect.top()), Pos2::new(b, rect.bottom()));
+                gradient(ui, r, glow(a), glow(b));
+            }
+        }
+    }
+    ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+}
+
+/// Placeholder for an image that is still loading.
+pub fn placeholder(ui: &Ui, rect: Rect) {
+    ui.painter().rect_filled(rect, theme::RADIUS, theme::BG_CAPSULE);
+    shimmer(ui, rect);
 }
 
 /// Paint `tex` into `rect`, cropping to keep its aspect ratio ("cover").
@@ -85,10 +121,15 @@ pub fn image_cover(ui: &Ui, rect: Rect, tex: &egui::TextureHandle, tint: Color32
 }
 
 /// Paint `tex` inside `bounds`, scaled to fit, anchored bottom-left.
-pub fn image_fit_bottom_left(ui: &Ui, bounds: Rect, tex: &egui::TextureHandle) {
+pub fn image_fit_bottom_left(ui: &Ui, bounds: Rect, tex: &egui::TextureHandle, alpha: f32) {
     let [w, h] = tex.size().map(|v| v as f32);
     let s = (bounds.width() / w).min(bounds.height() / h);
     let size = Vec2::new(w * s, h * s);
     let rect = Rect::from_min_size(Pos2::new(bounds.left(), bounds.bottom() - size.y), size);
-    ui.painter().image(tex.id(), rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+    ui.painter().image(
+        tex.id(),
+        rect,
+        Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+        Color32::WHITE.gamma_multiply(alpha),
+    );
 }

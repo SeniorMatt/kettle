@@ -26,8 +26,9 @@ fn hero(ui: &mut Ui, client: &Client, tex: &mut Textures, app: AppId, name: &str
     let h = (w * theme::HERO_ASPECT).clamp(240.0, 460.0);
     let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), egui::Sense::hover());
     match tex.get(client, app, ArtKind::Hero) {
-        Art::Ready(t) => widgets::image_cover(ui, rect, t, Color32::WHITE),
-        _ => widgets::vgradient(ui, rect, theme::BG_CAPSULE, theme::BG_MAIN),
+        Art::Ready(t, a) => widgets::image_cover(ui, rect, t, Color32::WHITE.gamma_multiply(a)),
+        Art::Loading => widgets::placeholder(ui, rect),
+        Art::Missing => widgets::vgradient(ui, rect, theme::BG_CAPSULE, theme::BG_MAIN),
     }
     // Fade into the action bar.
     let fade = Rect::from_min_max(Pos2::new(rect.left(), rect.bottom() - 90.0), rect.right_bottom());
@@ -36,7 +37,7 @@ fn hero(ui: &mut Ui, client: &Client, tex: &mut Textures, app: AppId, name: &str
     let logo_bounds =
         Rect::from_min_size(Pos2::new(rect.left() + 40.0, rect.top() + h * 0.25), Vec2::new(w * 0.36, h * 0.6));
     match tex.get(client, app, ArtKind::Logo) {
-        Art::Ready(t) => widgets::image_fit_bottom_left(ui, logo_bounds, t),
+        Art::Ready(t, a) => widgets::image_fit_bottom_left(ui, logo_bounds, t, a),
         Art::Missing => {
             let p = Pos2::new(logo_bounds.left(), logo_bounds.bottom());
             ui.painter().text(p, egui::Align2::LEFT_BOTTOM, name, theme::bold(40.0), Color32::WHITE);
@@ -76,6 +77,9 @@ fn action_bar(ui: &mut Ui, client: &mut Client, game: &sr_model::Game) {
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
+                if widgets::icon_button(ui, icon::SHOPPING_CART, 34.0, "Store page").clicked() {
+                    client.send(Command::OpenStorePage(game.app_id));
+                }
                 widgets::icon_button(ui, icon::STAR, 34.0, "Add to Favorites");
                 widgets::icon_button(ui, icon::INFO, 34.0, "Game info");
                 widgets::icon_button(ui, icon::GEAR, 34.0, "Manage");

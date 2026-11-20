@@ -31,6 +31,15 @@ pub const TEXT_DIM: Color32 = Color32::from_rgb(0x8b, 0x92, 0x9a);
 /// Not-installed games in the list.
 pub const TEXT_UNINSTALLED: Color32 = Color32::from_rgb(0x6e, 0x75, 0x7e);
 pub const TEXT_HEADING: Color32 = Color32::from_rgb(0xb8, 0xbc, 0xbf);
+/// Hairline around the window (we draw our own frame).
+pub const WINDOW_BORDER: Color32 = Color32::from_rgb(0x2c, 0x31, 0x3b);
+/// Close button hover.
+pub const CLOSE_HOVER: Color32 = Color32::from_rgb(0xe8, 0x11, 0x23);
+/// Store discount box (dark green with light green text, like the store).
+pub const DISCOUNT_BG: Color32 = Color32::from_rgb(0x4c, 0x6b, 0x22);
+pub const DISCOUNT_TEXT: Color32 = Color32::from_rgb(0xbe, 0xee, 0x11);
+/// Price tag background next to a discount box.
+pub const PRICE_BG: Color32 = Color32::from_rgb(0x30, 0x3a, 0x44);
 pub const ACCENT: Color32 = Color32::from_rgb(0x1a, 0x9f, 0xff);
 
 /// Play button gradient (left → right).
@@ -50,6 +59,12 @@ pub const LIST_ROW_H: f32 = 26.0;
 pub const CAPSULE_W: f32 = 150.0;
 pub const CAPSULE_H: f32 = 225.0;
 pub const GRID_GAP: f32 = 16.0;
+pub const WINDOW_BUTTON_W: f32 = 44.0;
+/// Invisible zone along each window edge that starts a resize.
+pub const RESIZE_EDGE: f32 = 6.0;
+pub const STORE_CARD_W: f32 = 230.0;
+pub const STORE_CARD_H: f32 = 107.0 + 30.0;
+pub const PAGE_SLIDE: f32 = 8.0;
 pub const PAGE_PAD: f32 = 24.0;
 pub const HERO_ASPECT: f32 = 1240.0 / 3840.0;
 pub const RADIUS: CornerRadius = CornerRadius::same(2);

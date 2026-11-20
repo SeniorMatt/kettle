@@ -21,6 +21,7 @@ All files are readable only by you: folders are mode `0700` and files `0600`.
 | `~/.local/share/steam-rust/accounts.json` | Account names and SteamIDs you've signed in with (no secrets) |
 | `~/.cache/steam-rust/library-<steamid>.json` | Your owned-games list, for instant startup |
 | `~/.cache/steam-rust/art/` | Cover art downloaded from Steam's CDN |
+| `~/.cache/steam-rust/store/` | Public store answers and images, kept briefly to make the Store tab fast |
 
 We **never write** to the official Steam client's files. We only read its `steamapps/*.acf`, `libraryfolders.vdf` and `appcache/librarycache`.
 
@@ -32,6 +33,8 @@ We **never write** to the official Steam client's files. We only read its `steam
 | Steam CM servers (`*.steamserver.net`) | The client connection (encrypted) |
 | `shared.steamstatic.com` | Cover art (only the app ID is sent) |
 | `media.steampowered.com` | Small game icons |
+| `store.steampowered.com` | Public store data for the Store tab: featured lists, search and app details. No login or cookies; only the country (`us`) and language (`english`) are sent, plus the search text or app ID you look at |
+| `*.steamstatic.com` | Store screenshots and capsules (only the image URL is requested) |
 
 All HTTPS uses rustls with certificate verification.
 

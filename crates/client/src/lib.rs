@@ -11,12 +11,16 @@
 mod art;
 mod demo;
 mod launch;
+mod open;
+mod web_image;
 
 pub use art::ArtImage;
+pub use sr_steam::storefront::{AppDetails, Platforms, Price, Screenshot, Section, StoreItem};
+pub use web_image::WebImage;
 
 use sr_model::{Account, AppId, Game, InstallState, SteamId};
-use sr_steam::{auth, local, secrets, store, webapi};
-use std::collections::HashMap;
+use sr_steam::{auth, local, secrets, store, storefront, webapi};
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -58,6 +62,7 @@ pub struct State {
     /// Last non-fatal problem, shown in the status bar.
     pub notice: Option<String>,
     pub timings: Timings,
+    pub store: StoreState,
 }
 
 /// Startup milestones, for the performance log.
@@ -67,6 +72,40 @@ pub struct Timings {
     pub local_scan: Option<Duration>,
     pub owned_fetch: Option<Duration>,
 }
+
+/// A value that is fetched in the background.
+#[derive(Debug, Clone, Default)]
+pub enum Load<T> {
+    #[default]
+    Idle,
+    Loading,
+    Ready(T),
+    Failed(String),
+}
+
+/// Live search results. `query` is what `items` answers.
+#[derive(Debug, Clone, Default)]
+pub struct SearchState {
+    pub query: String,
+    pub items: Vec<StoreItem>,
+    pub loading: bool,
+    pub error: Option<String>,
+}
+
+/// Public store data. Needs no login.
+#[derive(Debug, Clone, Default)]
+pub struct StoreState {
+    pub sections: Load<Arc<Vec<Section>>>,
+    pub search: SearchState,
+    /// Details of recently opened apps (at most [`DETAILS_KEPT`]).
+    pub details: HashMap<u32, Load<Arc<AppDetails>>>,
+    details_order: VecDeque<u32>,
+}
+
+/// How many app detail pages stay in memory.
+const DETAILS_KEPT: usize = 16;
+/// Featured rows are fetched again when older than this.
+const SECTIONS_MAX_AGE: Duration = Duration::from_secs(10 * 60);
 
 impl State {
     pub fn game(&self, app: AppId) -> Option<&Game> {
@@ -82,6 +121,13 @@ pub enum Command {
     Select(Option<AppId>),
     Play(AppId),
     Install(AppId),
+    /// Load the featured rows (no-op while loading or fresh).
+    StoreLoad,
+    /// Search the store; an empty query clears the results.
+    StoreSearch(String),
+    StoreDetails(AppId),
+    /// Open the app's store page in the system browser.
+    OpenStorePage(AppId),
 }
 
 /// Results of background work. `generation` ties a result to the session that
@@ -95,6 +141,9 @@ enum Event {
     Installed { apps: HashMap<u32, local::InstalledApp>, took: Duration },
     LoginFailed { generation: u64, error: String },
     Notice(String),
+    StoreSections(Result<Vec<Section>, String>),
+    StoreSearched { generation: u64, query: String, result: Result<Vec<StoreItem>, String> },
+    StoreDetails { app: u32, result: Result<Option<AppDetails>, String> },
 }
 
 struct Session {
@@ -120,6 +169,10 @@ pub struct Client {
     wake: Waker,
     generation: Arc<AtomicU64>,
     art: art::ArtLoader,
+    web_images: web_image::WebImageLoader,
+    /// Newest store search; older answers are dropped.
+    search_gen: u64,
+    sections_at: Option<Instant>,
 }
 
 impl Client {
@@ -137,10 +190,14 @@ impl Client {
                 refreshing: false,
                 notice: None,
                 timings: Timings::default(),
+                store: StoreState::default(),
             },
             session: None,
             installed: HashMap::new(),
             art: art::ArtLoader::new(roots, wake.clone()),
+            web_images: web_image::WebImageLoader::new(wake.clone()),
+            search_gen: 0,
+            sections_at: None,
             rt,
             tx,
             rx,
@@ -174,6 +231,12 @@ impl Client {
             Command::Select(app) => self.state.selected = app,
             Command::Play(app) => self.notice_on_err(launch::play(app)),
             Command::Install(app) => self.notice_on_err(launch::install(app)),
+            Command::StoreLoad => self.store_load(),
+            Command::StoreSearch(q) => self.store_search(q),
+            Command::StoreDetails(app) => self.store_details(app),
+            Command::OpenStorePage(app) => {
+                self.notice_on_err(open::url(&format!("https://store.steampowered.com/app/{app}")));
+            }
         }
     }
 
@@ -191,6 +254,19 @@ impl Client {
     /// Decoded images that finished since the last call.
     pub fn take_art(&self) -> Vec<ArtImage> {
         self.art.take()
+    }
+
+    /// Ask for a store image by URL; cheap to call every frame for visible ones.
+    pub fn request_web_image(&self, url: &str) {
+        self.web_images.request(url);
+    }
+
+    pub fn forget_web_image(&self, url: &str) {
+        self.web_images.forget(url);
+    }
+
+    pub fn take_web_images(&self) -> Vec<WebImage> {
+        self.web_images.take()
     }
 
     // ---- reducer -------------------------------------------------------
@@ -250,9 +326,42 @@ impl Client {
                 self.merge_installed();
             }
             Event::Notice(msg) => self.state.notice = Some(msg),
+            Event::StoreSections(result) => self.apply_sections(result),
+            Event::StoreSearched { generation, query, result } if generation == self.search_gen => {
+                let s = &mut self.state.store.search;
+                s.loading = false;
+                s.query = query;
+                match result {
+                    Ok(items) => (s.items, s.error) = (items, None),
+                    Err(e) => (s.items, s.error) = (Vec::new(), Some(e)),
+                }
+            }
+            Event::StoreDetails { app, result } => self.apply_details(app, result),
             // Stale result from an older generation.
             _ => {}
         }
+    }
+
+    fn apply_sections(&mut self, result: Result<Vec<Section>, String>) {
+        self.state.store.sections = match result {
+            Ok(v) => {
+                self.sections_at = Some(Instant::now());
+                Load::Ready(Arc::new(v))
+            }
+            Err(e) => Load::Failed(e),
+        };
+    }
+
+    fn apply_details(&mut self, app: u32, result: Result<Option<AppDetails>, String>) {
+        let st = &mut self.state.store;
+        st.details.insert(
+            app,
+            match result {
+                Ok(Some(d)) => Load::Ready(Arc::new(d)),
+                Ok(None) => Load::Failed("The store has no page for this app.".into()),
+                Err(e) => Load::Failed(e),
+            },
+        );
     }
 
     /// Recompute install state and notify views that `games` changed.
@@ -278,6 +387,70 @@ impl Client {
         if let Err(e) = r {
             self.state.notice = Some(format!("{e:#}"));
         }
+    }
+
+    // ---- store ---------------------------------------------------------
+
+    /// Run `job` on a blocking worker, send its event and wake the UI.
+    fn spawn_store<T: Send + 'static>(
+        &self,
+        job: impl FnOnce() -> anyhow::Result<T> + Send + 'static,
+        event: impl FnOnce(Result<T, String>) -> Event + Send + 'static,
+    ) {
+        let (tx, wake) = (self.tx.clone(), self.wake.clone());
+        self.rt.spawn_blocking(move || {
+            let _ = tx.blocking_send(event(job().map_err(|e| format!("{e:#}"))));
+            wake();
+        });
+    }
+
+    fn store_load(&mut self) {
+        let fresh = self.sections_at.is_some_and(|t| t.elapsed() < SECTIONS_MAX_AGE);
+        match self.state.store.sections {
+            Load::Loading => return,
+            Load::Ready(_) if fresh => return,
+            _ => {}
+        }
+        // Keep showing the old rows while a refresh runs.
+        if !matches!(self.state.store.sections, Load::Ready(_)) {
+            self.state.store.sections = Load::Loading;
+        }
+        self.spawn_store(storefront::featured_sections, Event::StoreSections);
+    }
+
+    fn store_search(&mut self, query: String) {
+        self.search_gen += 1;
+        let generation = self.search_gen;
+        let query = query.trim().to_string();
+        let s = &mut self.state.store.search;
+        s.error = None;
+        if query.is_empty() {
+            *s = SearchState::default();
+            return;
+        }
+        s.loading = true;
+        let q = query.clone();
+        self.spawn_store(
+            move || storefront::search(&q),
+            move |result| Event::StoreSearched { generation, query, result },
+        );
+    }
+
+    fn store_details(&mut self, app: AppId) {
+        let st = &mut self.state.store;
+        if matches!(st.details.get(&app.0), Some(Load::Loading | Load::Ready(_))) {
+            return;
+        }
+        st.details.insert(app.0, Load::Loading);
+        st.details_order.retain(|a| *a != app.0);
+        st.details_order.push_back(app.0);
+        while st.details_order.len() > DETAILS_KEPT {
+            if let Some(old) = st.details_order.pop_front() {
+                st.details.remove(&old);
+            }
+        }
+        let id = app.0;
+        self.spawn_store(move || storefront::app_details(id), move |result| Event::StoreDetails { app: id, result });
     }
 
     // ---- session -------------------------------------------------------

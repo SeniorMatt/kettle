@@ -1,7 +1,7 @@
 //! Library home: the "ALL GAMES" grid of portrait covers, virtualized by row.
 
 use crate::textures::{Art, Textures};
-use crate::{theme, widgets};
+use crate::{anim, theme, widgets};
 use egui::{Color32, Pos2, Rect, RichText, Sense, Ui, Vec2};
 use sr_client::{Client, Command};
 use sr_model::{ArtKind, Game};
@@ -67,6 +67,9 @@ impl LibraryView {
         let cell = Vec2::new(theme::CAPSULE_W + theme::GRID_GAP, theme::CAPSULE_H + theme::GRID_GAP);
         let usable = ui.available_width() - 2.0 * pad;
         let cols = ((usable + theme::GRID_GAP) / cell.x).floor().max(1.0) as usize;
+        let pitch = column_pitch(usable, cols);
+        // With a single column the cover is centered instead.
+        let left = pad + if cols == 1 { (usable - theme::CAPSULE_W) / 2.0 } else { 0.0 };
         let rows = self.order.len().div_ceil(cols);
         let mut clicked = None;
         egui::ScrollArea::vertical().auto_shrink(false).show_rows(ui, cell.y, rows, |ui, range| {
@@ -75,7 +78,7 @@ impl LibraryView {
                 let (row_rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), cell.y), Sense::hover());
                 for col in 0..cols {
                     let Some(&gi) = self.order.get(row * cols + col) else { break };
-                    let min = Pos2::new(row_rect.left() + pad + col as f32 * cell.x, row_rect.top());
+                    let min = Pos2::new(row_rect.left() + left + col as f32 * pitch, row_rect.top());
                     let rect = Rect::from_min_size(min, Vec2::new(theme::CAPSULE_W, theme::CAPSULE_H));
                     let game = &client.state().games[gi];
                     let id = ui.id().with(("capsule", row * cols + col));
@@ -107,26 +110,44 @@ impl LibraryView {
     }
 }
 
-/// One cover. Grows slightly and brightens on hover.
+/// Distance between the left edges of neighbouring covers: the leftover width
+/// is shared out between the columns so the grid fills the page like Steam's.
+fn column_pitch(usable: f32, cols: usize) -> f32 {
+    let base = theme::CAPSULE_W + theme::GRID_GAP;
+    if cols < 2 {
+        return base;
+    }
+    let leftover = usable - (cols as f32 * theme::CAPSULE_W + (cols - 1) as f32 * theme::GRID_GAP);
+    base + leftover.max(0.0) / (cols - 1) as f32
+}
+
+/// One cover. Lifts and brightens on hover, with a soft shadow.
 fn capsule(ui: &mut Ui, client: &Client, tex: &mut Textures, rect: Rect, game: &Game, id: egui::Id) -> egui::Response {
     let resp = ui.interact(rect, id, Sense::click());
-    let t = ui.ctx().animate_bool_with_time(id, resp.hovered(), 0.12);
-    let rect = rect.expand(4.0 * t);
+    let t = anim::animate_bool(ui.ctx(), id.with("hover"), resp.hovered(), anim::FAST);
+    let rect = rect.expand(4.0 * t).translate(Vec2::new(0.0, -3.0 * t));
+    if t > 0.0 {
+        let shadow = egui::epaint::Shadow {
+            offset: [0, (6.0 * t) as i8],
+            blur: (14.0 * t) as u8,
+            spread: 0,
+            color: Color32::from_black_alpha((110.0 * t) as u8),
+        };
+        ui.painter().add(shadow.as_shape(rect, theme::RADIUS));
+    }
     let painter = ui.painter();
     match tex.get(client, game.app_id, ArtKind::Capsule) {
-        Art::Ready(texture) => {
-            let tint = Color32::from_gray((215.0 + 40.0 * t) as u8);
+        Art::Ready(texture, alpha) => {
+            let tint = Color32::from_gray((215.0 + 40.0 * t) as u8).gamma_multiply(alpha);
             widgets::image_cover(ui, rect, texture, tint);
         }
-        Art::Loading => {
-            painter.rect_filled(rect, theme::RADIUS, theme::BG_CAPSULE);
-        }
+        Art::Loading => widgets::placeholder(ui, rect),
         Art::Missing => {
             // No portrait art: fall back to the landscape header, centered.
             painter.rect_filled(rect, theme::RADIUS, theme::BG_CAPSULE);
             let header = Rect::from_center_size(rect.center(), Vec2::new(rect.width(), rect.width() * 215.0 / 460.0));
             match tex.get(client, game.app_id, ArtKind::Header) {
-                Art::Ready(h) => widgets::image_cover(ui, header, h, Color32::WHITE),
+                Art::Ready(h, alpha) => widgets::image_cover(ui, header, h, Color32::WHITE.gamma_multiply(alpha)),
                 _ => {
                     let text_rect = rect.shrink(10.0);
                     let galley =

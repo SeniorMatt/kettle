@@ -2,7 +2,7 @@
 //! The list is virtualized: only visible rows are laid out.
 
 use crate::textures::{Art, Textures};
-use crate::{theme, widgets};
+use crate::{anim, theme, widgets};
 use egui::{Pos2, Rect, RichText, Sense, Ui, Vec2};
 use egui_phosphor::regular as icon;
 use sr_client::{Client, Command};
@@ -39,13 +39,9 @@ impl SidebarView {
     fn home_row(&self, ui: &mut Ui, client: &mut Client) {
         let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 40.0), Sense::click());
         let home = client.state().selected.is_none();
-        let bg = if home {
-            theme::BG_ROW_SELECTED
-        } else if resp.hovered() {
-            theme::BG_ROW_HOVER
-        } else {
-            theme::BG_SIDEBAR
-        };
+        let hover = anim::animate_bool(ui.ctx(), resp.id.with("hover"), resp.hovered(), anim::FAST);
+        let bg =
+            if home { theme::BG_ROW_SELECTED } else { theme::BG_SIDEBAR.lerp_to_gamma(theme::BG_ROW_HOVER, hover) };
         ui.painter().rect_filled(rect.shrink2(Vec2::new(8.0, 4.0)), theme::RADIUS, bg);
         let text = format!("{}   Home", icon::HOUSE);
         ui.painter().text(
@@ -133,14 +129,18 @@ impl SidebarView {
                     let selected = state.selected == Some(g.app_id);
                     let (rect, resp) =
                         ui.allocate_exact_size(Vec2::new(ui.available_width(), theme::LIST_ROW_H), Sense::click());
-                    if selected || resp.hovered() {
-                        let bg = if selected { theme::BG_ROW_SELECTED } else { theme::BG_ROW_HOVER };
-                        ui.painter().rect_filled(rect, 0.0, bg);
+                    let hover = anim::animate_bool(ui.ctx(), resp.id.with("hover"), resp.hovered(), anim::FAST);
+                    if selected {
+                        ui.painter().rect_filled(rect, 0.0, theme::BG_ROW_SELECTED);
+                    } else if hover > 0.0 {
+                        ui.painter().rect_filled(rect, 0.0, theme::BG_ROW_HOVER.gamma_multiply(hover));
                     }
                     let icon_rect =
                         Rect::from_center_size(Pos2::new(rect.left() + 28.0, rect.center().y), Vec2::splat(16.0));
                     match tex.get(client, g.app_id, ArtKind::Icon) {
-                        Art::Ready(t) => widgets::image_cover(ui, icon_rect, t, egui::Color32::WHITE),
+                        Art::Ready(t, a) => {
+                            widgets::image_cover(ui, icon_rect, t, egui::Color32::WHITE.gamma_multiply(a))
+                        }
                         _ => {
                             ui.painter().rect_filled(icon_rect, 1.0, theme::BG_CAPSULE);
                         }

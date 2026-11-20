@@ -10,3 +10,4 @@ publish.workspace = true
 sr-client = { path = "../client" }
 sr-ui = { path = "../ui" }
 eframe = { version = "=0.36.2", default-features = false, features = ["wgpu", "x11", "wayland"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
