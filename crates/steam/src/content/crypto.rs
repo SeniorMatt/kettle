@@ -32,7 +32,9 @@ pub fn decrypt_filename(key: &DepotKey, b64: &str) -> Result<String> {
 /// Decrypt a manifest file name: base64, then `decrypt`, then cut at the NUL.
 /// Keeps the backslashes Windows-made depots use.
 pub fn decrypt_filename_raw(key: &DepotKey, b64: &str) -> Result<String> {
-    let raw = base64::engine::general_purpose::STANDARD.decode(b64.trim())?;
+    // Steam wraps long base64 names with line breaks, so strip all whitespace.
+    let clean: String = b64.chars().filter(|c| !c.is_ascii_whitespace()).collect();
+    let raw = base64::engine::general_purpose::STANDARD.decode(clean)?;
     let mut plain = decrypt(key, &raw)?;
     if let Some(nul) = plain.iter().position(|&b| b == 0) {
         plain.truncate(nul);

@@ -5,11 +5,14 @@
 
 mod anim;
 mod chrome;
+mod dialogs;
+mod downloads_page;
 mod fmt;
 mod fonts;
 mod game_page;
 mod library;
 mod login;
+mod settings_page;
 mod sidebar;
 mod store;
 mod textures;
@@ -21,6 +24,17 @@ use egui_phosphor::regular as icon;
 use sr_client::{Client, Command, Screen};
 use sr_model::AppId;
 
+pub(crate) use settings_page::SettingsTab;
+
+/// A page change asked for by a dialog or a page (handled once per frame by [`AppUi`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Nav {
+    /// A game's page in the library.
+    Game(AppId),
+    Downloads,
+    Settings(SettingsTab),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum Tab {
     Store,
@@ -28,6 +42,9 @@ enum Tab {
     Library,
     Community,
     Profile,
+    /// Reached from the bottom bar and menus, not from the tab row.
+    Downloads,
+    Settings,
 }
 
 /// All view-local state.
@@ -38,6 +55,8 @@ pub struct AppUi {
     library: library::LibraryView,
     sidebar: sidebar::SidebarView,
     store: store::StoreView,
+    settings: settings_page::SettingsView,
+    overlays: dialogs::Overlays,
     /// What the central page showed last frame, and when it changed (egui time).
     page: Option<(Tab, Option<AppId>, u64)>,
     page_since: f64,
@@ -77,6 +96,7 @@ impl AppUi {
         self.nav_bar(ui, client);
         self.bottom_bar(ui, client);
         self.shortcuts(ui, client);
+        let mut nav = self.overlays.goto.take();
         let selected = client.state().selected;
         let store_page = self.store.page_id();
         let key = (self.tab, selected, store_page);
@@ -95,7 +115,11 @@ impl AppUi {
             ui.set_opacity(enter);
             ui.add_space(theme::PAGE_SLIDE * (1.0 - enter));
             match (self.tab, selected) {
-                (Tab::Library, Some(app)) => game_page::show(ui, client, &mut self.textures, app),
+                (Tab::Library, Some(app)) => {
+                    game_page::show(ui, client, &mut self.textures, app, &mut self.overlays);
+                }
+                (Tab::Downloads, _) => downloads_page::show(ui, client, &mut self.textures, &mut nav),
+                (Tab::Settings, _) => self.settings.show(ui, client),
                 (Tab::Library, None) => self.library.show(ui, client, &mut self.textures),
                 (Tab::Store, _) => self.store.show(ui, client, &mut self.textures),
                 (tab, _) => {
@@ -106,6 +130,10 @@ impl AppUi {
                 }
             }
         });
+        self.overlays.show(ui.ctx(), client);
+        if let Some(n) = nav.or_else(|| self.overlays.goto.take()) {
+            self.navigate(n, client);
+        }
         chrome::alt_drag(ui);
         chrome::resize_zones(ui);
     }
@@ -115,7 +143,24 @@ impl AppUi {
         if tab == Tab::Store && self.tab != Tab::Store {
             client.send(Command::StoreLoad);
         }
+        if tab == Tab::Settings && self.tab != Tab::Settings {
+            self.settings.opened(client);
+        }
         self.tab = tab;
+    }
+
+    fn navigate(&mut self, nav: Nav, client: &mut Client) {
+        match nav {
+            Nav::Game(app) => {
+                self.goto(Tab::Library, client);
+                client.send(Command::Select(Some(app)));
+            }
+            Nav::Downloads => self.goto(Tab::Downloads, client),
+            Nav::Settings(tab) => {
+                self.settings.tab = tab;
+                self.goto(Tab::Settings, client);
+            }
+        }
     }
 
     /// Ctrl+Tab and Ctrl+Shift+Tab cycle the top tabs.
@@ -140,6 +185,9 @@ impl AppUi {
                 ui.visuals_mut().widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
                 ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
                 ui.menu_button(theme::APP_NAME, |ui| {
+                    if ui.button("Settings").clicked() {
+                        self.navigate(Nav::Settings(SettingsTab::default()), client);
+                    }
                     if ui.button("Sign out").clicked() {
                         client.send(Command::Logout);
                     }
@@ -153,6 +201,9 @@ impl AppUi {
                     }
                     if ui.button("Library").clicked() {
                         self.goto(Tab::Library, client);
+                    }
+                    if ui.button("Downloads").clicked() {
+                        self.goto(Tab::Downloads, client);
                     }
                     if ui.button("Refresh library").clicked() {
                         client.send(Command::RefreshLibrary);
@@ -195,6 +246,8 @@ impl AppUi {
                 if back.clicked() {
                     if self.tab == Tab::Store {
                         self.store.back();
+                    } else if matches!(self.tab, Tab::Downloads | Tab::Settings) {
+                        self.goto(Tab::Library, client);
                     } else {
                         client.send(Command::Select(None));
                     }
@@ -236,14 +289,10 @@ impl AppUi {
         egui::Panel::bottom("bottom").exact_size(theme::BOTTOM_BAR_H).frame(frame).show_separator_line(false).show(
             ui,
             |ui| {
-                // Truly centered, whatever the side items measure.
-                ui.painter().text(
-                    ui.max_rect().center(),
-                    egui::Align2::CENTER_CENTER,
-                    format!("{}  Downloads", icon::DOWNLOAD_SIMPLE),
-                    theme::medium(13.0),
-                    theme::TEXT_DIM,
-                );
+                if downloads_button(ui, client) {
+                    self.goto(Tab::Downloads, client);
+                }
+                let bar_w = ui.max_rect().width();
                 ui.horizontal_centered(|ui| {
                     ui.style_mut().override_font_id = Some(theme::medium(13.0));
                     ui.label(RichText::new(format!("{}  Add a Game", icon::PLUS)).color(theme::TEXT_DIM));
@@ -254,11 +303,57 @@ impl AppUi {
                         );
                         if let Some(n) = notice {
                             ui.add_space(24.0);
-                            ui.label(RichText::new(n).color(theme::TEXT_DIM).small()).on_hover_text("Last message");
+                            // A fixed-width slot, so a long message is cut short instead of running
+                            // into the centered Downloads button or the left item.
+                            let slot = egui::vec2((bar_w / 2.0 - 354.0).max(80.0), ui.available_height());
+                            let layout = Layout::right_to_left(Align::Center);
+                            ui.allocate_ui_with_layout(slot, layout, |ui| {
+                                let text = RichText::new(&n).color(theme::TEXT_DIM).small();
+                                ui.add(egui::Label::new(text).truncate()).on_hover_text(&n);
+                            });
                         }
                     });
                 });
             },
         );
     }
+}
+
+/// The centered "Downloads" button. While something downloads it also shows the name, the percentage, the
+/// speed and a thin gliding progress bar. Returns true when clicked.
+fn downloads_button(ui: &mut Ui, client: &Client) -> bool {
+    let bar = ui.max_rect();
+    let rect = egui::Rect::from_center_size(bar.center(), egui::vec2(380.0, bar.height()));
+    let resp = ui.interact(rect, Id::new("downloads-button"), egui::Sense::click());
+    let hover = anim::animate_bool(ui.ctx(), resp.id.with("hover"), resp.hovered(), anim::FAST);
+    let color = theme::TEXT_DIM.lerp_to_gamma(theme::TEXT, hover);
+    let painter = ui.painter();
+    match &client.state().downloads.active {
+        Some(a) => {
+            let shown = anim::glide(ui.ctx(), Id::new(("dl-bar", a.item.request.app.0)), a.fraction(), 4.0);
+            let line = format!(
+                "{}  {}  {:.0}%  {}",
+                icon::DOWNLOAD_SIMPLE,
+                a.item.request.name,
+                shown * 100.0,
+                fmt::speed(a.bytes_per_sec)
+            );
+            painter.text(
+                rect.center() - egui::vec2(0.0, 6.0),
+                egui::Align2::CENTER_CENTER,
+                line,
+                theme::medium(12.0),
+                color,
+            );
+            let track = egui::Rect::from_center_size(rect.center() + egui::vec2(0.0, 9.0), egui::vec2(240.0, 3.0));
+            painter.rect_filled(track, theme::RADIUS, theme::BG_TOP);
+            let fill = egui::Rect::from_min_size(track.min, egui::vec2(track.width() * shown, track.height()));
+            painter.rect_filled(fill, theme::RADIUS, theme::ACCENT);
+        }
+        None => {
+            let text = format!("{}  Downloads", icon::DOWNLOAD_SIMPLE);
+            painter.text(rect.center(), egui::Align2::CENTER_CENTER, text, theme::medium(13.0), color);
+        }
+    }
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
 }

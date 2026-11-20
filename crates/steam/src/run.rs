@@ -296,7 +296,21 @@ pub fn appinfo_for(appid: u32) -> Result<Option<AppInfo>> {
             return Ok(Some(info));
         }
     }
-    Ok(None)
+    Ok(saved_appinfo(appid))
+}
+
+/// PICS data the downloader saved when it installed the app: lets games we
+/// installed start without the official client ever having seen them.
+fn saved_appinfo(appid: u32) -> Option<AppInfo> {
+    let mut libraries = vec![crate::content::default_library()];
+    for root in local::steam_roots() {
+        libraries.extend(local::library_folders(&root));
+    }
+    libraries.iter().find_map(|lib| {
+        let text = std::fs::read_to_string(crate::content::appinfo_path(lib, appid)).ok()?;
+        let doc = crate::vdf::parse(text.trim().trim_matches('\0'));
+        Some(AppInfo::from_vdf(appid, doc.get("appinfo").unwrap_or(&doc)))
+    })
 }
 
 /// Discover everything needed and build the plan for `appid`. Use [`prepare_with`] when the caller already has
@@ -415,6 +429,25 @@ pub fn spawn(plan: &LaunchPlan, on_exit: impl FnOnce(Finished) + Send + 'static)
 
 #[cfg(test)]
 mod tests {
+    /// An app only we installed (absent from Steam's appinfo.vdf) still gets launch data from the saved PICS text.
+    #[test]
+    fn saved_appinfo_is_used_when_steam_has_none() {
+        let lib = std::env::temp_dir().join(format!("sr-saved-appinfo-{}", std::process::id()));
+        let appid = 4_000_000_123;
+        let path = crate::content::appinfo_path(&lib, appid);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let pics = r#""appinfo" { "common" { "name" "Only Ours" "oslist" "linux" }
+            "config" { "installdir" "Ours" "launch" { "0" { "executable" "run.sh" } } } }"#;
+        std::fs::write(&path, pics).unwrap();
+        // SAFETY: tests in this module don't read STEAM_RUST_LIBRARY concurrently.
+        unsafe { std::env::set_var("STEAM_RUST_LIBRARY", &lib) };
+        let info = appinfo_for(appid).unwrap().expect("found in saved data");
+        unsafe { std::env::remove_var("STEAM_RUST_LIBRARY") };
+        std::fs::remove_dir_all(&lib).unwrap();
+        assert_eq!(info.launch.len(), 1);
+        assert_eq!(info.launch[0].executable, "run.sh");
+    }
+
     use super::*;
     use crate::compat::ToolOrigin;
 

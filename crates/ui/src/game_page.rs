@@ -1,14 +1,15 @@
 //! A game's page: hero banner with logo, the action bar (Play / Install and
 //! stats), and details below.
 
+use crate::dialogs::Overlays;
 use crate::textures::{Art, Textures};
 use crate::{fmt, theme, widgets};
 use egui::{Color32, Pos2, Rect, RichText, Ui, Vec2};
 use egui_phosphor::regular as icon;
-use sr_client::{Client, Command};
+use sr_client::{Client, Command, DownloadStatus};
 use sr_model::{AppId, ArtKind, InstallState};
 
-pub fn show(ui: &mut Ui, client: &mut Client, tex: &mut Textures, app: AppId) {
+pub fn show(ui: &mut Ui, client: &mut Client, tex: &mut Textures, app: AppId, ov: &mut Overlays) {
     let Some(game) = client.state().game(app).cloned() else {
         client.send(Command::Select(None));
         return;
@@ -16,7 +17,7 @@ pub fn show(ui: &mut Ui, client: &mut Client, tex: &mut Textures, app: AppId) {
     egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
         ui.spacing_mut().item_spacing = Vec2::ZERO;
         hero(ui, client, tex, app, &game.name);
-        action_bar(ui, client, &game);
+        action_bar(ui, client, &game, ov);
         details(ui, &game);
     });
 }
@@ -46,28 +47,12 @@ fn hero(ui: &mut Ui, client: &Client, tex: &mut Textures, app: AppId, name: &str
     }
 }
 
-fn action_bar(ui: &mut Ui, client: &mut Client, game: &sr_model::Game) {
+fn action_bar(ui: &mut Ui, client: &mut Client, game: &sr_model::Game, ov: &mut Overlays) {
     let frame = egui::Frame::new().fill(theme::BG_ACTION_BAR).inner_margin(egui::Margin::symmetric(32, 16));
     frame.show(ui, |ui| {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 28.0;
-            let resp = match game.install {
-                InstallState::Installed { .. } => {
-                    widgets::action_button(ui, icon::PLAY, "PLAY", (theme::PLAY_A, theme::PLAY_B))
-                }
-                InstallState::UpdateRequired { .. } => {
-                    widgets::action_button(ui, icon::DOWNLOAD_SIMPLE, "UPDATE", (theme::INSTALL_A, theme::INSTALL_B))
-                }
-                _ => widgets::action_button(ui, icon::DOWNLOAD_SIMPLE, "INSTALL", (theme::INSTALL_A, theme::INSTALL_B)),
-            };
-            if resp.clicked() {
-                let cmd = if game.install.is_installed() {
-                    Command::Play(game.app_id)
-                } else {
-                    Command::Install(game.app_id)
-                };
-                client.send(cmd);
-            }
+            primary_button(ui, client, game, ov);
             stat(ui, "LAST PLAYED", &fmt::last_played(game.last_played, fmt::now_unix()));
             stat(ui, "PLAY TIME", &fmt::playtime(game.playtime_minutes));
             if let InstallState::Installed { size_bytes, .. } | InstallState::UpdateRequired { size_bytes, .. } =
@@ -82,9 +67,85 @@ fn action_bar(ui: &mut Ui, client: &mut Client, game: &sr_model::Game) {
                 }
                 widgets::icon_button(ui, icon::STAR, 34.0, "Add to Favorites");
                 widgets::icon_button(ui, icon::INFO, 34.0, "Game info");
-                widgets::icon_button(ui, icon::GEAR, 34.0, "Manage");
+                let gear = widgets::icon_button(ui, icon::GEAR, 34.0, "Manage");
+                manage_menu(&gear, client, game, ov);
             });
         });
+    });
+}
+
+/// The big button: Play, Stop, Install, Update, or the state of the download.
+fn primary_button(ui: &mut Ui, client: &mut Client, game: &sr_model::Game, ov: &mut Overlays) {
+    let app = game.app_id;
+    let idle = (theme::BG_ROW_SELECTED, theme::BG_CAPSULE);
+    if client.state().running.contains_key(&app) {
+        widgets::action_button(ui, icon::PLAY, "RUNNING", (theme::PLAY_B, theme::PLAY_B.gamma_multiply(0.6)));
+        if widgets::button(ui, "STOP", widgets::ButtonStyle::Danger, true).clicked() {
+            client.send(Command::Stop(app));
+        }
+        return;
+    }
+    let label = match client.state().downloads.status(app) {
+        DownloadStatus::Active(f) => Some(format!("DOWNLOADING {:.0}%", f * 100.0)),
+        DownloadStatus::Queued => Some("QUEUED".to_string()),
+        DownloadStatus::Paused => Some("PAUSED".to_string()),
+        DownloadStatus::None => None,
+    };
+    if let Some(label) = label {
+        if widgets::action_button(ui, icon::DOWNLOAD_SIMPLE, &label, idle).clicked() {
+            ov.goto = Some(crate::Nav::Downloads);
+        }
+        return;
+    }
+    match game.install {
+        InstallState::Installed { .. } => {
+            if widgets::action_button(ui, icon::PLAY, "PLAY", (theme::PLAY_A, theme::PLAY_B)).clicked() {
+                client.send(Command::Play(app));
+            }
+        }
+        InstallState::UpdateRequired { .. } => {
+            if widgets::action_button(ui, icon::DOWNLOAD_SIMPLE, "UPDATE", (theme::INSTALL_A, theme::INSTALL_B))
+                .clicked()
+            {
+                client.send(Command::Update(app));
+            }
+        }
+        _ => {
+            if widgets::action_button(ui, icon::DOWNLOAD_SIMPLE, "INSTALL", (theme::INSTALL_A, theme::INSTALL_B))
+                .clicked()
+            {
+                ov.open_install(app, &game.name);
+            }
+        }
+    }
+}
+
+/// The gear menu. Items that don't apply right now are shown dim.
+fn manage_menu(gear: &egui::Response, client: &mut Client, game: &sr_model::Game, ov: &mut Overlays) {
+    let app = game.app_id;
+    let installed = game.install.is_installed();
+    let free =
+        client.state().downloads.status(app) == DownloadStatus::None && !client.state().running.contains_key(&app);
+    egui::Popup::menu(gear).show(|ui| {
+        ui.set_min_width(200.0);
+        if ui.add_enabled(installed && free, egui::Button::new("Verify files")).clicked() {
+            client.send(Command::Verify(app));
+            ov.goto = Some(crate::Nav::Downloads);
+        }
+        if ui.button("Compatibility...").clicked() {
+            ov.open_compat(client, app);
+        }
+        if ui.add_enabled(installed, egui::Button::new("Browse local files")).clicked() {
+            client.send(Command::BrowseFiles(app));
+        }
+        if ui.button("Launch via Steam client").clicked() {
+            client.send(Command::LaunchViaSteam(app));
+        }
+        ui.separator();
+        let uninstall = egui::Button::new(RichText::new("Uninstall...").color(theme::ERROR_TEXT));
+        if ui.add_enabled(installed && free, uninstall).clicked() {
+            ov.open_uninstall(app);
+        }
     });
 }
 

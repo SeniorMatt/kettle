@@ -20,7 +20,7 @@ steam-rust is a native Steam client. It talks to Steam's servers directly (CM pr
 |---|---|---|
 | `sr-model` | `crates/model` | Plain data types: `AppId`, `Game`, `Account`, `InstallState`. No I/O and no dependencies besides serde. |
 | `sr-steam` | `crates/steam` | Everything that talks to Steam or the disk: `auth` (QR login), `cm` (CM servers via steam-vent), `webapi`, `local` (reads an existing official Steam install, read-only), `vdf` (text KeyValues parser), `secrets` (keyring), `cache` (our own XDG files), `art` (cover-art lookup). |
-| `sr-client` | `crates/client` | `State`, `Command`, `Event` and the reducer. Owns the tokio runtime and turns Commands into tasks. |
+| `sr-client` | `crates/client` | `State`, `Command`, `Event` and the reducer. Owns the tokio runtime and turns Commands into tasks. Modules: `downloads` (queue, one active download, progress events tagged with a job number), `play` (own launcher, running games, local play time), `tools` (Proton manager), `manage` (uninstall, browse files), `settings`. |
 | `sr-ui` | `crates/ui` | egui views and widgets. `theme` holds every color, size and font as named tokens. |
 | `steam-rust` | `crates/app` | The binary: eframe setup (wgpu), fonts, and wiring client and ui together. |
 | `sr-cli` | `crates/steam/src/bin` | A developer CLI that exercises `sr-steam` without a GUI. |

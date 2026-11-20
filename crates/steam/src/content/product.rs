@@ -61,6 +61,9 @@ pub struct AppInfo {
     pub depots: Vec<DepotInfo>,
     pub branches: BTreeMap<String, Branch>,
     pub launch: Vec<LaunchEntry>,
+    /// The PICS text as received; saved next to the install so the launcher
+    /// works without the official client's `appinfo.vdf`.
+    pub raw: String,
 }
 
 impl AppInfo {
@@ -85,7 +88,7 @@ fn num(node: &Node, key: &str) -> u64 {
 pub fn parse(appid: u32, text: &str) -> Result<AppInfo> {
     let doc = vdf::parse(text.trim().trim_matches('\0'));
     let root = doc.get("appinfo").unwrap_or(&doc);
-    let mut app = AppInfo { appid, ..Default::default() };
+    let mut app = AppInfo { appid, raw: text.to_string(), ..Default::default() };
     if let Some(c) = root.get("common") {
         app.name = c.get_str("name").unwrap_or_default().to_string();
         app.kind = c.get_str("type").unwrap_or_default().to_string();

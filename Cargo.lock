@@ -4102,7 +4102,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "image",
+ "libc",
  "serde",
+ "serde_json",
  "sr-model",
  "sr-steam",
  "tokio",

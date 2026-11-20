@@ -19,6 +19,30 @@ pub fn bytes(b: u64) -> String {
     if i == 0 { format!("{b} B") } else { format!("{v:.1} {}", UNITS[i]) }
 }
 
+/// "12.3 MB/s"; "-" when the speed is not known yet.
+pub fn speed(bytes_per_sec: f64) -> String {
+    if bytes_per_sec < 1.0 { "-".into() } else { format!("{}/s", bytes(bytes_per_sec as u64)) }
+}
+
+/// "1 h 05 min", "4 min 10 s", "12 s".
+pub fn duration(secs: u64) -> String {
+    match secs {
+        s if s >= 3600 => format!("{} h {:02} min", s / 3600, s % 3600 / 60),
+        s if s >= 60 => format!("{} min {:02} s", s / 60, s % 60),
+        s => format!("{s} s"),
+    }
+}
+
+/// "just now", "5 min ago", "3 h ago", "2 d ago".
+pub fn ago(unix: u64, now: u64) -> String {
+    match now.saturating_sub(unix) {
+        s if s < 60 => "just now".into(),
+        s if s < 3600 => format!("{} min ago", s / 60),
+        s if s < 86_400 => format!("{} h ago", s / 3600),
+        s => format!("{} d ago", s / 86_400),
+    }
+}
+
 /// "Today", "Yesterday", or "12 Nov" / "12 Nov 2024" for older years.
 pub fn last_played(unix: u64, now: u64) -> String {
     if unix == 0 {
@@ -64,6 +88,17 @@ mod tests {
         assert_eq!(last_played(now - 86_400, now), "Yesterday");
         assert_eq!(last_played(1_700_000_000, now), "14 Nov 2023");
         assert_eq!(civil(0), (1970, 1, 1));
+    }
+
+    #[test]
+    fn rates_and_durations() {
+        assert_eq!(speed(0.0), "-");
+        assert_eq!(speed(2.0 * 1024.0 * 1024.0), "2.0 MB/s");
+        assert_eq!(duration(12), "12 s");
+        assert_eq!(duration(250), "4 min 10 s");
+        assert_eq!(duration(3900), "1 h 05 min");
+        assert_eq!(ago(100, 130), "just now");
+        assert_eq!(ago(0, 7200), "2 h ago");
     }
 
     #[test]

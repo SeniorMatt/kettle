@@ -71,3 +71,28 @@ pub fn since(ctx: &Context, start: f64, dur: f32) -> f32 {
     }
     ease_out(t)
 }
+
+/// Move a stored value towards `target` at a steady rate (`per_sec` of the distance per second, 0..1 fractions
+/// feel smooth around 3.0). Meant for progress bars that get a new number a few times a second: the bar glides
+/// between updates instead of jumping. Repaints at about 15 Hz, and only while the value is still moving, so a
+/// bar that is full or paused costs nothing. The first call for an id returns `target` at once.
+pub fn glide(ctx: &Context, id: Id, target: f32, per_sec: f32) -> f32 {
+    #[derive(Clone, Copy)]
+    struct Glide {
+        value: f32,
+        at: f64,
+    }
+    let now = ctx.input(|i| i.time);
+    let Some(g) = ctx.data(|d| d.get_temp::<Glide>(id)) else {
+        ctx.data_mut(|d| d.insert_temp(id, Glide { value: target, at: now }));
+        return target;
+    };
+    let dt = (now - g.at).max(0.0) as f32;
+    let step = (target - g.value) * (1.0 - (-per_sec * dt).exp());
+    let value = if (target - g.value).abs() < 0.0005 { target } else { g.value + step };
+    ctx.data_mut(|d| d.insert_temp(id, Glide { value, at: now }));
+    if (target - value).abs() >= 0.0005 {
+        ctx.request_repaint_after(std::time::Duration::from_millis(66));
+    }
+    value
+}

@@ -20,6 +20,12 @@ All files are readable only by you: folders are mode `0700` and files `0600`.
 |---|---|
 | `~/.local/share/steam-rust/accounts.json` | Account names and SteamIDs you've signed in with (no secrets) |
 | `~/.cache/steam-rust/library-<steamid>.json` | Your owned-games list, for instant startup |
+| `~/.local/share/steam-rust/settings.json` | Your default download folder and the number of parallel downloads |
+| `~/.local/share/steam-rust/playtime.json` | Play time we measured ourselves, per game (never sent anywhere) |
+| `~/.local/share/steam-rust/compat_choices.json` | Which compatibility tool you picked per game |
+| `~/.local/share/steam-rust/logs/` | Output of the last run of each game we started |
+| `~/.local/share/steam-rust/compatibilitytools.d/` | Compatibility tools (Proton, ...) you installed from the app |
+| `~/.local/share/steam-rust/library/` | Games installed by the app, unless you pick another folder |
 | `~/.cache/steam-rust/art/` | Cover art downloaded from Steam's CDN |
 | `~/.cache/steam-rust/store/` | Public store answers and images, kept briefly to make the Store tab fast |
 

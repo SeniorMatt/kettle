@@ -5,6 +5,9 @@
 use sr_model::{AppId, Game};
 use sr_steam::local;
 
+/// Steamworks SDK Redist: free to download without a login.
+const DEMO_DOWNLOAD_APP: u32 = 1007;
+
 pub fn games(target: usize) -> Vec<Game> {
     let installed = local::installed_apps();
     let mut ids: Vec<u32> = Vec::new();
@@ -15,6 +18,8 @@ pub fn games(target: usize) -> Vec<Game> {
     }
     ids.extend(installed.keys().copied());
     ids.retain(|id| !installed.get(id).is_some_and(|a| local::is_tool_app(a.appid, &a.name)));
+    // A small app that anonymous logins may download, so the install flow can be tried without an account.
+    ids.push(DEMO_DOWNLOAD_APP);
     ids.sort_unstable();
     ids.dedup();
     if ids.is_empty() {
@@ -24,7 +29,10 @@ pub fn games(target: usize) -> Vec<Game> {
     for i in 0..target.max(ids.len()) {
         let id = ids[i % ids.len()];
         let lap = i / ids.len();
-        let base = installed.get(&id).map(|a| a.name.clone()).unwrap_or_else(|| format!("App {id}"));
+        let base = installed.get(&id).map(|a| a.name.clone()).unwrap_or_else(|| match id {
+            DEMO_DOWNLOAD_APP => "Steamworks SDK Redist".to_string(),
+            _ => format!("App {id}"),
+        });
         let name = if lap == 0 { base } else { format!("{base} ({})", lap + 1) };
         let mut g = Game::new(AppId(id), name);
         g.playtime_minutes = (id % 5000) * (lap as u32 + 1);

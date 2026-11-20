@@ -41,6 +41,13 @@ pub const DISCOUNT_TEXT: Color32 = Color32::from_rgb(0xbe, 0xee, 0x11);
 /// Price tag background next to a discount box.
 pub const PRICE_BG: Color32 = Color32::from_rgb(0x30, 0x3a, 0x44);
 pub const ACCENT: Color32 = Color32::from_rgb(0x1a, 0x9f, 0xff);
+/// Destructive buttons (uninstall) and error text.
+pub const DANGER: Color32 = Color32::from_rgb(0xa8, 0x32, 0x32);
+pub const ERROR_TEXT: Color32 = Color32::from_rgb(0xe0, 0x6c, 0x5c);
+/// Download progress for verifying (hashing) instead of fetching.
+pub const VERIFY: Color32 = Color32::from_rgb(0x75, 0xb0, 0x22);
+/// A card on a page (download rows, settings groups).
+pub const BG_CARD: Color32 = Color32::from_rgb(0x23, 0x27, 0x30);
 
 /// Play button gradient (left → right).
 pub const PLAY_A: Color32 = Color32::from_rgb(0x75, 0xb0, 0x22);

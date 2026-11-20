@@ -100,10 +100,16 @@ pub fn is_tool_app(appid: u32, name: &str) -> bool {
         || name.starts_with("Steamworks Common Redistributables")
 }
 
-/// All apps installed under all known libraries of all Steam roots.
+/// All apps installed under all known libraries of all Steam roots and our own library.
 pub fn installed_apps() -> HashMap<u32, InstalledApp> {
+    installed_apps_with(&[])
+}
+
+/// Like [`installed_apps`], plus library folders the user chose (`extra`).
+pub fn installed_apps_with(extra: &[PathBuf]) -> HashMap<u32, InstalledApp> {
     let mut out = HashMap::new();
-    for root in steam_roots().into_iter().chain([crate::content::default_library()]) {
+    let ours = [crate::content::default_library()];
+    for root in steam_roots().into_iter().chain(ours).chain(extra.iter().cloned()) {
         for lib in library_folders(&root) {
             let apps = lib.join("steamapps");
             let Ok(rd) = std::fs::read_dir(&apps) else { continue };

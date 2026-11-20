@@ -10,17 +10,32 @@
 
 mod art;
 mod demo;
+mod downloads;
 mod launch;
+mod manage;
 mod open;
+mod play;
+mod settings;
+mod tools;
 mod web_image;
 
 pub use art::ArtImage;
+pub use downloads::{
+    ActiveDownload, DownloadItem, DownloadKind, DownloadPhase, DownloadRequest, DownloadStatus, DownloadsState,
+    FinishedDownload, OsChoice, Outcome, PausedDownload, StopKind,
+};
+pub use play::{PlayProblem, RunningGame};
+pub use settings::{LibraryChoice, MAX_WORKERS, MIN_WORKERS, Settings};
 pub use sr_steam::storefront::{AppDetails, Platforms, Price, Screenshot, Section, StoreItem};
+pub use tools::{
+    CompatInfo, CompatState, ReleaseInfo, Source, ToolInfo, ToolInstall, ToolKind, ToolOrigin, ToolPhase, ToolTarget,
+};
 pub use web_image::WebImage;
 
 use sr_model::{Account, AppId, Game, InstallState, SteamId};
 use sr_steam::{auth, local, secrets, store, storefront, webapi};
 use std::collections::{HashMap, VecDeque};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -63,7 +78,21 @@ pub struct State {
     pub notice: Option<String>,
     pub timings: Timings,
     pub store: StoreState,
+    pub downloads: DownloadsState,
+    /// Games we started that have not exited yet.
+    pub running: HashMap<AppId, RunningGame>,
+    /// Set when a launch failed; the UI shows it until dismissed.
+    pub play_problem: Option<PlayProblem>,
+    pub compat: CompatState,
+    pub settings: Settings,
+    /// Places a game can be installed into.
+    pub libraries: Vec<LibraryChoice>,
+    /// Free bytes by library path, from `Command::CheckFree` (`None` = unknown). At most [`FREE_KEPT`].
+    pub free_space: Vec<(PathBuf, Option<u64>)>,
 }
+
+/// How many disk-space answers are kept.
+const FREE_KEPT: usize = 8;
 
 /// Startup milestones, for the performance log.
 #[derive(Debug, Clone, Default)]
@@ -81,6 +110,16 @@ pub enum Load<T> {
     Loading,
     Ready(T),
     Failed(String),
+}
+
+impl<T> Load<T> {
+    /// The value, once it has arrived.
+    pub fn ready(&self) -> Option<&T> {
+        match self {
+            Load::Ready(v) => Some(v),
+            _ => None,
+        }
+    }
 }
 
 /// Live search results. `query` is what `items` answers.
@@ -119,8 +158,51 @@ pub enum Command {
     Logout,
     RefreshLibrary,
     Select(Option<AppId>),
+    /// Start the game with our own launcher.
     Play(AppId),
-    Install(AppId),
+    /// Stop a game we started (ends its process group).
+    Stop(AppId),
+    /// Start the game through the official client (`steam://`).
+    LaunchViaSteam(AppId),
+    /// Dismiss the "could not start" message.
+    DismissPlayProblem,
+    /// Add a download (install, update or verify) to the queue.
+    Download(DownloadRequest),
+    /// Queue a verify of an installed game, in its own library.
+    Verify(AppId),
+    /// Queue an update of an installed game, in its own library.
+    Update(AppId),
+    PauseDownload(AppId),
+    ResumeDownload(AppId),
+    /// Cancel an active, queued or paused download.
+    CancelDownload(AppId),
+    ClearFinishedDownloads,
+    /// Delete an installed game. `confirmed` must be true for games in a Steam library.
+    Uninstall {
+        app: AppId,
+        confirmed: bool,
+    },
+    /// Open the game's install folder in the file manager.
+    BrowseFiles(AppId),
+    /// Ask how much space is free where `PathBuf` is (answer in `State::free_space`).
+    CheckFree(PathBuf),
+    CompatLoad,
+    /// Our tool override for a game (`None` = use Steam's choice).
+    SetCompatTool {
+        app: AppId,
+        tool: Option<String>,
+    },
+    /// Fetch the lists of downloadable tools; `true` bypasses the one-hour cache.
+    ProtonReleases(bool),
+    ProtonInstall {
+        source: Source,
+        tag: String,
+        target: ToolTarget,
+    },
+    ProtonCancel,
+    ProtonRemove(PathBuf),
+    SetLibrary(Option<PathBuf>),
+    SetWorkers(usize),
     /// Load the featured rows (no-op while loading or fresh).
     StoreLoad,
     /// Search the store; an empty query clears the results.
@@ -139,6 +221,17 @@ enum Event {
     LoggedIn { generation: u64, tokens: auth::Tokens },
     Owned { generation: u64, games: Vec<webapi::OwnedGame>, took: Duration },
     Installed { apps: HashMap<u32, local::InstalledApp>, took: Duration },
+    DlProgress { job: u64, progress: sr_steam::content::Progress },
+    DlDone { job: u64, result: downloads::DlResult },
+    GameStarted { app: AppId, pid: u32 },
+    GameExited { app: AppId, seconds: u64, success: bool },
+    PlayFailed(PlayProblem),
+    Uninstalled { app: AppId, result: Result<(), String> },
+    CompatInfo { generation: u64, result: Result<CompatInfo, String>, last: bool },
+    Releases { source: Source, result: Result<Vec<sr_steam::proton_releases::Release>, String> },
+    ToolProgress { job: u64, progress: sr_steam::proton_releases::Progress },
+    ToolDone { job: u64, result: Result<String, String> },
+    FreeSpace { path: PathBuf, bytes: Option<u64> },
     LoginFailed { generation: u64, error: String },
     Notice(String),
     StoreSections(Result<Vec<Section>, String>),
@@ -163,6 +256,17 @@ pub struct Client {
     state: State,
     session: Option<Session>,
     installed: HashMap<u32, local::InstalledApp>,
+    /// Play time and last-played as Steam reported them, before our own is added.
+    base_play: HashMap<u32, (u32, u64)>,
+    play_stats: play::PlayStats,
+    dl_running: Option<downloads::RunningDl>,
+    dl_seq: u64,
+    tool_job: Option<tools::ToolJob>,
+    tool_seq: u64,
+    compat_seq: u64,
+    compat_scanning: bool,
+    /// Full release records behind `CompatState::available` (needed to install).
+    releases: HashMap<&'static str, Vec<sr_steam::proton_releases::Release>>,
     rt: tokio::runtime::Runtime,
     tx: mpsc::Sender<Event>,
     rx: mpsc::Receiver<Event>,
@@ -180,6 +284,7 @@ impl Client {
         let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build()?;
         let (tx, rx) = mpsc::channel(EVENT_QUEUE);
         let roots = local::steam_roots();
+        let settings = Settings::load();
         let mut c = Self {
             state: State {
                 screen: Screen::Login(LoginState::default()),
@@ -191,9 +296,25 @@ impl Client {
                 notice: None,
                 timings: Timings::default(),
                 store: StoreState::default(),
+                downloads: DownloadsState::default(),
+                running: HashMap::new(),
+                play_problem: None,
+                compat: CompatState::default(),
+                libraries: settings::library_choices(&settings),
+                settings,
+                free_space: Vec::new(),
             },
             session: None,
             installed: HashMap::new(),
+            base_play: HashMap::new(),
+            play_stats: play::PlayStats::load(),
+            dl_running: None,
+            dl_seq: 0,
+            tool_job: None,
+            tool_seq: 0,
+            compat_seq: 0,
+            compat_scanning: false,
+            releases: HashMap::new(),
             art: art::ArtLoader::new(roots, wake.clone()),
             web_images: web_image::WebImageLoader::new(wake.clone()),
             search_gen: 0,
@@ -229,8 +350,27 @@ impl Client {
             Command::Logout => self.logout(),
             Command::RefreshLibrary => self.spawn_refresh(),
             Command::Select(app) => self.state.selected = app,
-            Command::Play(app) => self.notice_on_err(launch::play(app)),
-            Command::Install(app) => self.notice_on_err(launch::install(app)),
+            Command::Play(app) => self.play(app),
+            Command::Stop(app) => self.stop_game(app),
+            Command::LaunchViaSteam(app) => self.notice_on_err(launch::play(app)),
+            Command::DismissPlayProblem => self.state.play_problem = None,
+            Command::Download(req) => self.dl_enqueue(req),
+            Command::Verify(app) => self.dl_verify(app),
+            Command::Update(app) => self.dl_update(app),
+            Command::PauseDownload(app) => self.dl_pause(app),
+            Command::ResumeDownload(app) => self.dl_resume(app),
+            Command::CancelDownload(app) => self.dl_cancel(app),
+            Command::ClearFinishedDownloads => self.dl_clear_finished(),
+            Command::Uninstall { app, confirmed } => self.uninstall(app, confirmed),
+            Command::BrowseFiles(app) => self.browse_files(app),
+            Command::CheckFree(path) => self.check_free(path),
+            Command::CompatLoad => self.compat_load(),
+            Command::SetCompatTool { app, tool } => self.set_compat_tool(app.0, tool),
+            Command::ProtonReleases(refresh) => self.proton_releases(refresh),
+            Command::ProtonInstall { source, tag, target } => self.proton_install(source, tag, target),
+            Command::ProtonCancel => self.proton_cancel(),
+            Command::ProtonRemove(dir) => self.proton_remove(dir),
+            c @ (Command::SetLibrary(_) | Command::SetWorkers(_)) => settings::handle(self, c),
             Command::StoreLoad => self.store_load(),
             Command::StoreSearch(q) => self.store_search(q),
             Command::StoreDetails(app) => self.store_details(app),
@@ -318,12 +458,37 @@ impl Client {
                     let _ = store::save_json(&library_cache_path(acct.steam_id), &list);
                 }
                 self.state.games = list;
+                self.capture_base_play();
                 self.merge_installed();
             }
             Event::Installed { apps, took } => {
                 self.state.timings.local_scan = Some(took);
                 self.installed = apps;
                 self.merge_installed();
+            }
+            Event::DlProgress { job, progress } => self.dl_progress(job, progress),
+            Event::DlDone { job, result } => self.dl_done(job, result),
+            Event::GameStarted { app, pid } => self.game_started(app, pid),
+            Event::GameExited { app, seconds, success } => self.game_exited(app, seconds, success),
+            Event::PlayFailed(problem) => self.play_failed(problem),
+            Event::Uninstalled { app, result } => {
+                self.state.notice = Some(match result {
+                    Ok(()) => format!("{} was uninstalled.", self.state.game(app).map_or("The game", |g| &g.name)),
+                    Err(e) => format!("Uninstall failed: {e}"),
+                });
+                self.spawn_local_scan();
+            }
+            Event::CompatInfo { generation, result, last } => self.apply_compat_info(generation, result, last),
+            Event::Releases { source, result } => self.apply_releases(source, result),
+            Event::ToolProgress { job, progress } => self.tool_progress(job, progress),
+            Event::ToolDone { job, result } => self.tool_done(job, result),
+            Event::FreeSpace { path, bytes } => {
+                let f = &mut self.state.free_space;
+                f.retain(|(p, _)| *p != path);
+                f.push((path, bytes));
+                if f.len() > FREE_KEPT {
+                    f.remove(0);
+                }
             }
             Event::Notice(msg) => self.state.notice = Some(msg),
             Event::StoreSections(result) => self.apply_sections(result),
@@ -369,8 +534,14 @@ impl Client {
         self.state.library_rev += 1;
         self.art.set_icon_hashes(self.state.games.iter().map(|g| (g.app_id, g.icon_hash.clone())).collect());
         for g in &mut self.state.games {
+            // Steam's numbers plus the time we measured ourselves.
+            if let Some(&(minutes, last)) = self.base_play.get(&g.app_id.0) {
+                let (secs, last_run) = self.play_stats.get(g.app_id);
+                g.playtime_minutes = minutes.saturating_add((secs / 60) as u32);
+                g.last_played = last.max(last_run);
+            }
             g.install = match self.installed.get(&g.app_id.0) {
-                Some(a) => {
+                Some(a) if a.fully_installed() || a.state_flags & 2 != 0 => {
                     let path = a.install_dir.display().to_string();
                     if a.state_flags & 2 != 0 {
                         InstallState::UpdateRequired { size_bytes: a.size_on_disk, path }
@@ -378,9 +549,24 @@ impl Client {
                         InstallState::Installed { size_bytes: a.size_on_disk, path }
                     }
                 }
-                None => InstallState::NotInstalled,
+                _ => InstallState::NotInstalled,
             };
         }
+    }
+
+    /// Remember the play time and last-played Steam reported, so [`Self::merge_installed`] can add ours on top
+    /// every time without counting it twice.
+    fn capture_base_play(&mut self) {
+        self.base_play = self.state.games.iter().map(|g| (g.app_id.0, (g.playtime_minutes, g.last_played))).collect();
+    }
+
+    fn check_free(&mut self, path: PathBuf) {
+        let (tx, wake) = (self.tx.clone(), self.wake.clone());
+        self.rt.spawn_blocking(move || {
+            let bytes = downloads::free_space(&path);
+            let _ = tx.blocking_send(Event::FreeSpace { path, bytes });
+            wake();
+        });
     }
 
     fn notice_on_err(&mut self, r: anyhow::Result<()>) {
@@ -476,6 +662,7 @@ impl Client {
         let t = Instant::now();
         if let Some(cached) = store::load_json::<Vec<Game>>(&library_cache_path(account.steam_id)) {
             self.state.games = cached;
+            self.capture_base_play();
             self.state.timings.cached_library = Some(t.elapsed());
             self.merge_installed();
         }
@@ -488,6 +675,7 @@ impl Client {
     fn start_demo(&mut self, n: usize) {
         let t = Instant::now();
         self.state.games = demo::games(n);
+        self.capture_base_play();
         self.state.timings.cached_library = Some(t.elapsed());
         self.state.account = Some(Account { account_name: "demo".into(), steam_id: SteamId(0) });
         self.state.screen = Screen::Library;
@@ -495,6 +683,8 @@ impl Client {
     }
 
     fn logout(&mut self) {
+        // Downloads belong to the account that asked for them.
+        self.dl_cancel_all();
         if let Some(s) = self.session.take() {
             self.notice_on_err(secrets::delete_refresh_token(&s.account.account_name));
             forget_account(&s.account);
@@ -567,9 +757,10 @@ impl Client {
 
     fn spawn_local_scan(&self) {
         let (tx, wake) = (self.tx.clone(), self.wake.clone());
+        let extra = self.extra_libraries();
         self.rt.spawn_blocking(move || {
             let t = Instant::now();
-            let apps = local::installed_apps();
+            let apps = local::installed_apps_with(&extra);
             let _ = tx.blocking_send(Event::Installed { apps, took: t.elapsed() });
             wake();
         });

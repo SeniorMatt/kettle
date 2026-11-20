@@ -44,9 +44,13 @@ impl CmLink for Connection {
     }
 }
 
-/// Where our own downloads go unless the caller says otherwise.
+/// Where our own downloads go unless the caller says otherwise. `STEAM_RUST_LIBRARY` overrides it, so tests
+/// and demos never touch the real data folder.
 pub fn default_library() -> PathBuf {
-    crate::store::data_dir().join("library")
+    match std::env::var_os("STEAM_RUST_LIBRARY").filter(|v| !v.is_empty()) {
+        Some(dir) => PathBuf::from(dir),
+        None => crate::store::data_dir().join("library"),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -291,6 +295,7 @@ async fn run<C: CmLink>(conn: &C, opts: &Options, cancel: &CancelToken, rep: &mu
     };
     std::fs::create_dir_all(&dir)?;
     acf::save(&opts.library, &state)?;
+    save_appinfo(&opts.library, &app)?;
     let marker = write_marker(&opts.library, &app, &plans, &opts.branch)?;
 
     let (plans, stats) = apply_blocking(plans, cdn, dir.clone(), opts, cancel, rep).await?;
@@ -507,4 +512,21 @@ impl Download {
     pub fn join(self) -> Result<Summary> {
         self.thread.join().map_err(|_| anyhow::anyhow!("download thread panicked"))?
     }
+}
+
+/// Where the PICS data of an app we installed is kept:
+/// `<library>/steamapps/steam-rust/appinfo_<appid>.vdf` (a folder the official
+/// client ignores).
+pub fn appinfo_path(library: &Path, appid: u32) -> PathBuf {
+    library.join("steamapps").join("steam-rust").join(format!("appinfo_{appid}.vdf"))
+}
+
+fn save_appinfo(library: &Path, app: &AppInfo) -> Result<()> {
+    if app.raw.is_empty() {
+        return Ok(());
+    }
+    let path = appinfo_path(library, app.appid);
+    std::fs::create_dir_all(path.parent().expect("has parent"))?;
+    std::fs::write(path, app.raw.as_bytes())?;
+    Ok(())
 }

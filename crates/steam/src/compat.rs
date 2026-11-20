@@ -88,9 +88,12 @@ pub fn custom_tool_dirs() -> Vec<(PathBuf, ToolOrigin)> {
     out
 }
 
-/// Our own install target: `<data_dir>/compatibilitytools.d`.
+/// Our own install target: `<data_dir>/compatibilitytools.d`. `STEAM_RUST_TOOLS_DIR` overrides it (tests, demos).
 pub fn our_tools_dir() -> PathBuf {
-    store::data_dir().join("compatibilitytools.d")
+    match std::env::var_os("STEAM_RUST_TOOLS_DIR").filter(|v| !v.is_empty()) {
+        Some(dir) => PathBuf::from(dir),
+        None => store::data_dir().join("compatibilitytools.d"),
+    }
 }
 
 fn push_unique(out: &mut Vec<(PathBuf, ToolOrigin)>, dir: PathBuf, origin: ToolOrigin) {

@@ -2,6 +2,7 @@
 //! Payments are never handled in the app: "Buy" just opens the store page.
 
 use anyhow::{Result, bail};
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 /// Only Valve's store is opened from the UI; anything else is refused.
@@ -18,6 +19,38 @@ pub fn url(url: &str) -> Result<()> {
         let _ = child.wait();
     });
     Ok(())
+}
+
+/// Open a game's install folder in the file manager. Only folders in `allowed` (the install folders of
+/// installed games) are opened, compared after resolving symlinks; anything else is refused.
+pub fn folder(dir: &Path, allowed: &[&Path]) -> Result<()> {
+    let real = dir.canonicalize()?;
+    if !real.is_dir() || !allowed.iter().any(|a| a.canonicalize().is_ok_and(|a| a == real)) {
+        bail!("refusing to open {}", dir.display());
+    }
+    let mut child = folder_launcher(&real).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn()?;
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn folder_launcher(dir: &Path) -> Command {
+    let mut c = Command::new("explorer");
+    c.arg(dir);
+    c
+}
+
+#[cfg(not(target_os = "windows"))]
+fn folder_launcher(dir: &Path) -> Command {
+    // Not a URL and always absolute, so it can't be taken for an option.
+    #[cfg(target_os = "macos")]
+    let mut c = Command::new("open");
+    #[cfg(not(target_os = "macos"))]
+    let mut c = Command::new("xdg-open");
+    c.arg(dir);
+    c
 }
 
 #[cfg(target_os = "windows")]
@@ -49,5 +82,15 @@ mod tests {
     fn refuses_foreign_urls() {
         assert!(super::url("https://evil.example/").is_err());
         assert!(super::url("file:///etc/passwd").is_err());
+    }
+
+    #[test]
+    fn folders_must_be_installed_games() {
+        let tmp = std::env::temp_dir();
+        assert!(super::folder(&tmp, &[]).is_err());
+        assert!(super::folder(&tmp, &[std::path::Path::new("/etc")]).is_err());
+        assert!(
+            super::folder(std::path::Path::new("/nonexistent/x"), &[std::path::Path::new("/nonexistent/x")]).is_err()
+        );
     }
 }
