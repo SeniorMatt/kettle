@@ -11,6 +11,7 @@
 mod art;
 mod demo;
 mod downloads;
+mod friends;
 mod launch;
 mod manage;
 mod open;
@@ -23,6 +24,10 @@ pub use art::ArtImage;
 pub use downloads::{
     ActiveDownload, DownloadItem, DownloadKind, DownloadPhase, DownloadRequest, DownloadStatus, DownloadsState,
     FinishedDownload, OsChoice, Outcome, PausedDownload, StopKind,
+};
+pub use friends::{
+    Chat, Delivery, Friend, FriendsState, FriendsStatus, GamePlayed, HistoryState, MAX_TEXT, Me, Message, PersonaState,
+    Toast, local_utc_offset,
 };
 pub use play::{PlayProblem, RunningGame};
 pub use settings::{LibraryChoice, MAX_WORKERS, MIN_WORKERS, Settings};
@@ -91,6 +96,7 @@ pub struct State {
     pub libraries: Vec<LibraryChoice>,
     /// Free bytes by library path, from `Command::CheckFree` (`None` = unknown). At most [`FREE_KEPT`].
     pub free_space: Vec<(PathBuf, Option<u64>)>,
+    pub friends: FriendsState,
 }
 
 /// How many disk-space answers are kept.
@@ -214,6 +220,17 @@ pub enum Command {
     StoreDetails(AppId),
     /// Open the app's store page in the system browser.
     OpenStorePage(AppId),
+    /// Show the friends panel.
+    OpenFriends,
+    CloseFriends,
+    /// Open (or switch to) the chat with a friend; clears its unread count.
+    OpenChat(SteamId),
+    /// Close a chat tab.
+    CloseChat(SteamId),
+    /// Back from a chat to the friends list.
+    ShowFriendList,
+    SendChat(SteamId, String),
+    SetPersonaState(PersonaState),
 }
 
 /// Results of background work. `generation` ties a result to the session that
@@ -307,6 +324,10 @@ enum Event {
         app: u32,
         result: Result<Option<AppDetails>, String>,
     },
+    Friends {
+        generation: u64,
+        ev: sr_steam::friends::FriendsEvent,
+    },
 }
 
 struct Session {
@@ -325,6 +346,7 @@ impl Drop for Session {
 pub struct Client {
     state: State,
     session: Option<Session>,
+    friends: friends::FriendsInner,
     installed: HashMap<u32, local::InstalledApp>,
     /// Play time and last-played as Steam reported them, before our own is added.
     base_play: HashMap<u32, (u32, u64)>,
@@ -376,8 +398,10 @@ impl Client {
                 libraries: settings::library_choices(&settings),
                 settings,
                 free_space: Vec::new(),
+                friends: FriendsState::default(),
             },
             session: None,
+            friends: friends::FriendsInner::default(),
             installed: HashMap::new(),
             base_play: HashMap::new(),
             play_stats: play::PlayStats::load(),
@@ -450,6 +474,13 @@ impl Client {
             Command::StoreLoad => self.store_load(),
             Command::StoreSearch(q) => self.store_search(q),
             Command::StoreDetails(app) => self.store_details(app),
+            Command::OpenFriends => self.friends_open(true),
+            Command::CloseFriends => self.friends_open(false),
+            Command::OpenChat(id) => self.open_chat(id),
+            Command::CloseChat(id) => self.close_chat(id),
+            Command::ShowFriendList => self.show_friend_list(),
+            Command::SendChat(id, text) => self.send_chat(id, text),
+            Command::SetPersonaState(s) => self.set_persona_state(s),
             Command::OpenStorePage(app) => {
                 self.notice_on_err(open::url(&format!("https://store.steampowered.com/app/{app}")));
             }
@@ -580,6 +611,7 @@ impl Client {
                 }
             }
             Event::StoreDetails { app, result } => self.apply_details(app, result),
+            Event::Friends { generation, ev } if generation == current => self.apply_friends(ev),
             // Stale result from an older generation.
             _ => {}
         }
@@ -748,6 +780,7 @@ impl Client {
         self.state.screen = Screen::Library;
         self.session = Some(Session { account, refresh_token });
         self.spawn_refresh();
+        self.start_friends();
     }
 
     fn start_demo(&mut self, n: usize) {
@@ -758,6 +791,7 @@ impl Client {
         self.state.account = Some(Account { account_name: "demo".into(), steam_id: SteamId(0) });
         self.state.screen = Screen::Library;
         self.merge_installed();
+        self.start_friends_demo();
     }
 
     fn logout(&mut self) {
@@ -776,6 +810,8 @@ impl Client {
                 unsafe { token.as_bytes_mut() }.fill(0);
             });
         }
+        self.bump_generation();
+        self.reset_friends();
         self.state.account = None;
         self.state.games.clear();
         self.state.library_rev += 1;

@@ -56,12 +56,22 @@ pub const PLAY_B: Color32 = Color32::from_rgb(0x58, 0x8a, 0x1b);
 pub const INSTALL_A: Color32 = Color32::from_rgb(0x47, 0xbf, 0xff);
 pub const INSTALL_B: Color32 = Color32::from_rgb(0x1a, 0x44, 0xc2);
 
+/// Friend names by state, as in the official friends list.
+pub const FRIEND_INGAME: Color32 = Color32::from_rgb(0x90, 0xba, 0x3c);
+pub const FRIEND_ONLINE: Color32 = Color32::from_rgb(0x57, 0xcb, 0xde);
+pub const FRIEND_AWAY: Color32 = Color32::from_rgb(0x4a, 0x8f, 0x9f);
+pub const FRIEND_OFFLINE: Color32 = Color32::from_rgb(0x7a, 0x80, 0x88);
+/// Chat bubbles: ours and theirs.
+pub const CHAT_MINE: Color32 = Color32::from_rgb(0x1f, 0x4b, 0x73);
+pub const CHAT_THEIRS: Color32 = Color32::from_rgb(0x2f, 0x33, 0x3d);
+
 // ---- sizes (points) -----------------------------------------------------
 
 pub const MENU_BAR_H: f32 = 26.0;
 pub const NAV_BAR_H: f32 = 52.0;
 pub const BOTTOM_BAR_H: f32 = 40.0;
 pub const SIDEBAR_W: f32 = 280.0;
+pub const FRIENDS_W: f32 = 320.0;
 pub const LIST_ROW_H: f32 = 26.0;
 pub const CAPSULE_W: f32 = 150.0;
 pub const CAPSULE_H: f32 = 225.0;

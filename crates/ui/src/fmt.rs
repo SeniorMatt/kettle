@@ -73,6 +73,12 @@ fn civil(days: i64) -> (i64, usize, u32) {
     (yoe + era * 400 + i64::from(m <= 2), m, d)
 }
 
+/// "14:05" for a Unix time, shifted by `offset` seconds east of UTC.
+pub fn clock(unix: u64, offset: i64) -> String {
+    let t = (unix as i64 + offset).rem_euclid(86_400);
+    format!("{:02}:{:02}", t / 3600, t % 3600 / 60)
+}
+
 pub fn now_unix() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
@@ -80,6 +86,13 @@ pub fn now_unix() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clock_wraps_days() {
+        assert_eq!(clock(3600 * 14 + 300, 0), "14:05");
+        assert_eq!(clock(3600 * 23, 7200), "01:00");
+        assert_eq!(clock(60, -3600), "23:01");
+    }
 
     #[test]
     fn dates() {

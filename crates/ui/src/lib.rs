@@ -9,6 +9,7 @@ mod dialogs;
 mod downloads_page;
 mod fmt;
 mod fonts;
+mod friends;
 mod game_page;
 mod library;
 mod login;
@@ -57,6 +58,7 @@ pub struct AppUi {
     store: store::StoreView,
     settings: settings_page::SettingsView,
     overlays: dialogs::Overlays,
+    friends: friends::FriendsView,
     /// What the central page showed last frame, and when it changed (egui time).
     page: Option<(Tab, Option<AppId>, u64)>,
     page_since: f64,
@@ -110,6 +112,7 @@ impl AppUi {
             let library_rev = client.state().library_rev;
             self.sidebar.show(ui, client, &mut self.textures, library_rev);
         }
+        self.friends.show_panel(ui, client, &mut self.textures);
         egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::BG_MAIN)).show(ui, |ui| {
             // Pages fade in and slide up by a few points.
             ui.set_opacity(enter);
@@ -210,7 +213,10 @@ impl AppUi {
                     }
                 });
                 ui.menu_button("Friends", |ui| {
-                    ui.label(RichText::new("Friends are coming in a later version.").color(theme::TEXT_DIM));
+                    let open = client.state().friends.open;
+                    if ui.button(if open { "Hide friends & chat" } else { "Show friends & chat" }).clicked() {
+                        client.send(if open { Command::CloseFriends } else { Command::OpenFriends });
+                    }
                 });
                 ui.menu_button("Games", |ui| {
                     if ui.button("View game library").clicked() {
@@ -297,15 +303,23 @@ impl AppUi {
                     ui.style_mut().override_font_id = Some(theme::medium(13.0));
                     ui.label(RichText::new(format!("{}  Add a Game", icon::PLUS)).color(theme::TEXT_DIM));
                     let notice = client.state().notice.clone();
+                    let toast = self.friends.current_toast(ui.ctx(), client);
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        ui.label(
-                            RichText::new(format!("Friends & Chat  {}", icon::CHAT_CIRCLE)).color(theme::TEXT_DIM),
-                        );
-                        if let Some(n) = notice {
+                        if friends::bottom_button(ui, client) {
+                            let open = client.state().friends.open;
+                            client.send(if open { Command::CloseFriends } else { Command::OpenFriends });
+                        }
+                        // A fixed-width slot, so a long message is cut short instead of running
+                        // into the centered Downloads button or the left item.
+                        let slot_w = (bar_w / 2.0 - 354.0).max(80.0);
+                        if let Some(t) = toast {
                             ui.add_space(24.0);
-                            // A fixed-width slot, so a long message is cut short instead of running
-                            // into the centered Downloads button or the left item.
-                            let slot = egui::vec2((bar_w / 2.0 - 354.0).max(80.0), ui.available_height());
+                            if friends::toast_label(ui, &t, slot_w) {
+                                client.send(Command::OpenChat(t.friend));
+                            }
+                        } else if let Some(n) = notice {
+                            ui.add_space(24.0);
+                            let slot = egui::vec2(slot_w, ui.available_height());
                             let layout = Layout::right_to_left(Align::Center);
                             ui.allocate_ui_with_layout(slot, layout, |ui| {
                                 let text = RichText::new(&n).color(theme::TEXT_DIM).small();
