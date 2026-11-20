@@ -1,0 +1,9 @@
+[package]
+name = "steam-rust"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+sr-steam = { path = "../steam" }

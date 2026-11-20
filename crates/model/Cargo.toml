@@ -1,0 +1,10 @@
+[package]
+name = "sr-model"
+description = "Plain data types shared by all steam-rust crates. No I/O."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
