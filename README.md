@@ -11,7 +11,14 @@ Early development. What works so far:
 - QR-code login with the Steam mobile app. No password is ever entered or stored, and the refresh token is kept in the system keyring (Secret Service: GNOME Keyring, KWallet, KeePassXC).
 - Owned games through the Steam Web API.
 - Detecting games already installed by the official client: Debian/Ubuntu package, native `~/.local/share/Steam`, Flatpak and Snap layouts.
-- A native desktop app (egui + wgpu): sign-in screen, library grid, sidebar with search, game pages. Play and Install go through the official client (`steam://`) for now.
+- A native desktop app (egui + wgpu): sign-in screen, library grid, sidebar with search, game pages, a Store tab, a custom title bar (Alt+drag moves the window, Ctrl+Tab switches tabs) and subtle animations.
+- Downloads straight from Steam's content servers: a queue with pause, resume, verify and uninstall. Games go into Steam-format libraries, so the official client can use them too.
+- Launching games ourselves: native, Proton or umu. Steam's compatdata prefixes are shared, so saves are too. Games that need the Steam client get the installed client started in the background (`-silent`).
+- A compatibility tool manager: Steam's Protons plus GE-Proton, Proton-CachyOS, Proton-EM, Proton-Sarek and Luxtorpeda, with a per-game choice.
+- Friends and chat, and a Shift+Tab in-game overlay while a game we started is running.
+- Linux first. Windows builds from the same code (`scripts/build-windows.sh`).
+
+Manual testing: see [TESTING.md](TESTING.md).
 
 Privacy: no telemetry, only Valve's servers. See [PRIVACY.md](PRIVACY.md) for exactly what is stored and sent.
 
