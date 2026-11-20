@@ -1,9 +1,12 @@
 [package]
 name = "steam-rust"
+description = "The steam-rust desktop app: window setup and wiring."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
 [dependencies]
-sr-steam = { path = "../steam" }
+sr-client = { path = "../client" }
+sr-ui = { path = "../ui" }
+eframe = { version = "=0.36.2", default-features = false, features = ["wgpu", "x11", "wayland"] }

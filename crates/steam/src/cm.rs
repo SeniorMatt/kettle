@@ -15,7 +15,10 @@ pub struct Cm {
 
 pub async fn connect(account: &str, refresh_token: &str) -> Result<Cm> {
     let servers = ServerList::discover().await.context("CM server discovery")?;
-    let conn = Connection::access(&servers, account, refresh_token).await.context("CM logon")?;
+    let conn = Connection::access(&servers, account, refresh_token)
+        .await
+        .context("CM logon")
+        .map_err(|e| crate::redact::safe_error(&e, &[refresh_token]))?;
     // The license list is pushed right after logon; it may already be buffered.
     let mut lic = conn
         .take_unprocessed()

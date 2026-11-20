@@ -1,0 +1,15 @@
+[package]
+name = "sr-client"
+description = "Application state, commands, events and the reducer. Runs background work."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+sr-model = { path = "../model" }
+sr-steam = { path = "../steam" }
+anyhow = "1"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }

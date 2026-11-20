@@ -116,12 +116,22 @@ fn parse_manifest(doc: &Node, steamapps: &Path) -> Option<InstalledApp> {
 }
 
 /// Cached library art for an app from the official client's cache, if any.
-/// Supports the 2024+ per-app folder layout and the older flat layout.
+/// Layouts: `librarycache/<appid>/<file>`, `librarycache/<appid>/<hash>/<file>`
+/// (2024+ client) and the older flat `librarycache/<appid>_<file>`.
 pub fn cached_art(root: &Path, appid: u32, file: &str) -> Option<PathBuf> {
     let cache = root.join("appcache/librarycache");
-    let per_app = cache.join(appid.to_string()).join(file);
-    if per_app.is_file() {
-        return Some(per_app);
+    let dir = cache.join(appid.to_string());
+    let direct = dir.join(file);
+    if direct.is_file() {
+        return Some(direct);
+    }
+    if let Ok(rd) = std::fs::read_dir(&dir) {
+        for e in rd.flatten() {
+            let nested = e.path().join(file);
+            if nested.is_file() {
+                return Some(nested);
+            }
+        }
     }
     let flat = cache.join(format!("{appid}_{file}"));
     flat.is_file().then_some(flat)

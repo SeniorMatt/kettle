@@ -69,6 +69,9 @@ pub struct Game {
     pub playtime_minutes: u32,
     /// Unix seconds; 0 = never.
     pub last_played: u64,
+    /// Hash of the 32x32 list icon (empty if unknown).
+    #[serde(default)]
+    pub icon_hash: String,
     #[serde(skip)]
     pub install: InstallState,
 }
@@ -76,7 +79,15 @@ pub struct Game {
 impl Game {
     pub fn new(app_id: AppId, name: String) -> Self {
         let sort_key = sort_key(&name);
-        Self { app_id, name, sort_key, playtime_minutes: 0, last_played: 0, install: InstallState::NotInstalled }
+        Self {
+            app_id,
+            name,
+            sort_key,
+            playtime_minutes: 0,
+            last_played: 0,
+            icon_hash: String::new(),
+            install: InstallState::NotInstalled,
+        }
     }
 }
 
@@ -100,6 +111,8 @@ pub enum ArtKind {
     Logo,
     /// 460x215 store header (fallback when there's no capsule).
     Header,
+    /// 32x32 list icon; its file name is a per-app hash.
+    Icon,
 }
 
 impl ArtKind {
@@ -109,6 +122,7 @@ impl ArtKind {
             Self::Hero => "library_hero.jpg",
             Self::Logo => "logo.png",
             Self::Header => "header.jpg",
+            Self::Icon => "icon.jpg",
         }
     }
 }

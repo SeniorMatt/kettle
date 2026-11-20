@@ -3,7 +3,7 @@
 //!   sr-cli login            QR login; writes the QR to ~/.cache/steam-rust/qr.svg
 //!   sr-cli owned <account>  owned games via Web API (token from keyring)
 //!   sr-cli cm <account>     CM logon + license count
-//!   sr-cli logout <account> remove the stored token
+//!   sr-cli logout <account> revoke and remove the stored token
 
 use anyhow::{Context, Result, bail};
 use sr_steam::{auth, cm, local, secrets, store};
@@ -17,9 +17,21 @@ fn main() -> Result<()> {
         Some("login") => cmd_login(),
         Some("owned") => cmd_owned(&account()?),
         Some("cm") => cmd_cm(&account()?),
-        Some("logout") => secrets::delete_refresh_token(&account()?),
+        Some("logout") => cmd_logout(&account()?),
         _ => bail!("usage: sr-cli local | login | owned <account> | cm <account> | logout <account>"),
     }
+}
+
+fn cmd_logout(account: &str) -> Result<()> {
+    if let Some(token) = secrets::load_refresh_token(account)? {
+        // Best effort: the local copy is removed even if Steam can't be reached.
+        if let Err(e) = auth::revoke_refresh_token(&token) {
+            eprintln!("Couldn't revoke the token on Steam's servers: {e:#}");
+        }
+    }
+    secrets::delete_refresh_token(account)?;
+    println!("Signed out {account}");
+    Ok(())
 }
 
 fn cmd_local() -> Result<()> {
@@ -36,12 +48,19 @@ fn cmd_login() -> Result<()> {
     let mut s = auth::begin_qr("steam-rust (Linux)")?;
     let svg_path = store::cache_dir().join("qr.svg");
     let write_qr = |url: &str| -> Result<()> {
-        std::fs::create_dir_all(store::cache_dir())?;
-        std::fs::write(&svg_path, auth::qr_svg(url)?)?;
+        store::write_private(&svg_path, auth::qr_svg(url)?.as_bytes())?;
         println!("Scan the QR in {} with the Steam mobile app", svg_path.display());
         Ok(())
     };
     write_qr(&s.challenge_url)?;
+    // Delete the QR file however this function ends.
+    struct Cleanup(std::path::PathBuf);
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+    let _cleanup = Cleanup(svg_path.clone());
     let deadline = Instant::now() + std::time::Duration::from_secs(600);
     while Instant::now() < deadline {
         std::thread::sleep(s.interval);
@@ -51,7 +70,6 @@ fn cmd_login() -> Result<()> {
             auth::Poll::NewChallenge(url) => write_qr(&url)?,
             auth::Poll::Done(t) => {
                 secrets::save_refresh_token(&t.account_name, &t.refresh_token)?;
-                let _ = std::fs::remove_file(&svg_path);
                 println!("Logged in as {} ({}); token saved to the keyring", t.account_name, t.steamid);
                 return Ok(());
             }

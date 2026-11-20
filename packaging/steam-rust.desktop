@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=steam-rust
+Comment=Fast native game library client (unofficial)
+Exec=steam-rust
+Icon=steam-rust
+Categories=Game;
+Terminal=false
+StartupWMClass=steam-rust

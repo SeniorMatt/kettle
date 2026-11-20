@@ -4,3 +4,4 @@ target/
 /refs/screenshots/*.jpg
 BRIEF.md
 HANDOFF.md
+dist/

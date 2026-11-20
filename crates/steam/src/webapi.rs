@@ -33,6 +33,9 @@ pub fn owned_games(access_token: &str, steamid: u64) -> Result<Vec<OwnedGame>> {
         "https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?access_token={access_token}&steamid={steamid}\
          &include_appinfo=true&include_played_free_games=true&skip_unvetted_apps=false"
     );
-    let w: Wrap = ureq::get(&url).call().context("GetOwnedGames")?.body_mut().read_json()?;
-    Ok(w.response.games)
+    let fetch = || -> Result<Vec<OwnedGame>> {
+        let w: Wrap = crate::http::agent().get(&url).call().context("GetOwnedGames")?.body_mut().read_json()?;
+        Ok(w.response.games)
+    };
+    fetch().map_err(|e| crate::redact::safe_error(&e, &[access_token]))
 }
