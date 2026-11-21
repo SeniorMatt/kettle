@@ -6,6 +6,30 @@ A fast, native Steam client written in Rust: egui + wgpu, with no Chromium and n
 
 ## Status
 
+<!-- status:start -->
+**Kettle does 29.4% of what Steam does** (42 of 143 features; see the [roadmap](docs/roadmap.md)).
+
+![Status](docs/images/status.svg)
+
+| Area | Built |
+|---|---|
+| Account | 4/9 (44%) |
+| Library | 5/20 (25%) |
+| Store | 3/11 (27%) |
+| Downloads | 6/16 (38%) |
+| Play | 5/12 (42%) |
+| Compatibility | 4/7 (57%) |
+| Cloud | 0/4 (0%) |
+| Friends | 2/8 (25%) |
+| Chat | 1/7 (14%) |
+| Overlay | 2/7 (29%) |
+| Community | 0/13 (0%) |
+| Notifications | 1/3 (33%) |
+| Settings | 4/10 (40%) |
+| Interface | 2/8 (25%) |
+| Platform | 3/8 (38%) |
+<!-- status:end -->
+
 Early development. What works so far:
 
 - QR-code login with the Steam mobile app. No password is ever entered or stored, and the refresh token is kept in the system keyring (Secret Service: GNOME Keyring, KWallet, KeePassXC).
