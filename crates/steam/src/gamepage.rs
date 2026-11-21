@@ -57,10 +57,11 @@ pub fn fetch_news(app: u32) -> Result<Vec<NewsItem>> {
         .ok()
         .and_then(|t| SystemTime::now().duration_since(t).ok())
         .is_some_and(|age| age < NEWS_TTL);
-    if fresh && let Ok(bytes) = std::fs::read(&path) {
-        if let Ok(items) = parse_news(&bytes) {
-            return Ok(items);
-        }
+    if fresh
+        && let Ok(bytes) = std::fs::read(&path)
+        && let Ok(items) = parse_news(&bytes)
+    {
+        return Ok(items);
     }
     let resp = crate::http::agent().get(&news_url(app)).call().context("news request failed")?;
     let bytes = resp.into_body().with_config().limit(MAX_JSON_BYTES).read_to_vec()?;
@@ -93,7 +94,7 @@ pub fn parse_news(bytes: &[u8]) -> Result<Vec<NewsItem>> {
             })
         })
         .collect();
-    out.sort_by(|a, b| b.date.cmp(&a.date));
+    out.sort_by_key(|n| std::cmp::Reverse(n.date));
     out.truncate(NEWS_COUNT);
     Ok(out)
 }
