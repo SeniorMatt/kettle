@@ -21,6 +21,7 @@ pub mod run;
 pub mod secrets;
 pub mod steam_client;
 pub mod store;
+pub mod store_more;
 pub mod storefront;
 pub mod vdf;
 pub mod webapi;

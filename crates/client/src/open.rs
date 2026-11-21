@@ -6,13 +6,26 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 /// Only Valve's store is opened from the UI; anything else is refused.
-const ALLOWED_PREFIXES: [&str; 3] =
-    ["https://store.steampowered.com/", "https://help.steampowered.com/", "https://github.com/SeniorMatt/kettle"];
+const ALLOWED_PREFIXES: [&str; 8] = [
+    "https://store.steampowered.com/",
+    "https://help.steampowered.com/",
+    "https://github.com/SeniorMatt/kettle",
+    // Trailers (mp4/webm) from Steam's video CDN, opened in the system player.
+    "https://video.fastly.steamstatic.com/store_trailers/",
+    "https://video.akamai.steamstatic.com/store_trailers/",
+    "https://video.cloudflare.steamstatic.com/store_trailers/",
+    "https://cdn.akamai.steamstatic.com/steam/apps/",
+    "https://cdn.cloudflare.steamstatic.com/steam/apps/",
+];
+
+fn allowed(url: &str) -> bool {
+    ALLOWED_PREFIXES.iter().any(|p| url.starts_with(p))
+}
 
 /// Start the browser and return at once. A thread reaps the child so no
 /// zombie is left behind; the UI thread never waits.
 pub fn url(url: &str) -> Result<()> {
-    if !ALLOWED_PREFIXES.iter().any(|p| url.starts_with(p)) {
+    if !allowed(url) {
         bail!("refusing to open {url}");
     }
     let mut child = launcher(url).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn()?;
@@ -79,6 +92,15 @@ fn launcher(url: &str) -> Command {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn trailers_on_the_video_cdn_are_allowed() {
+        assert!(super::allowed("https://video.fastly.steamstatic.com/store_trailers/1/2/movie_max.mp4"));
+        assert!(super::allowed("https://store.steampowered.com/app/620"));
+        assert!(!super::allowed("http://video.fastly.steamstatic.com/store_trailers/1.mp4"));
+        assert!(!super::allowed("https://video.fastly.steamstatic.com.evil.example/store_trailers/1.mp4"));
+        assert!(!super::allowed("https://video.fastly.steamstatic.com/other/1.mp4"));
+    }
+
     #[test]
     fn refuses_foreign_urls() {
         assert!(super::url("https://evil.example/").is_err());

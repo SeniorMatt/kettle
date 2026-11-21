@@ -1,6 +1,9 @@
 //! The Store tab: featured carousel, rows of capsules, live search and an app
 //! page. Reads `client.state().store` and sends commands; payments are never
-//! handled here, "Add to Cart" opens the store page in the system browser.
+//! handled here, "Add to Cart" opens the store page in the system browser. `extra` has Browse, Wishlist, reviews
+//! and trailers.
+
+mod extra;
 
 use crate::textures::{Art, Textures};
 use crate::{anim, theme, widgets};
@@ -26,7 +29,13 @@ enum Page {
     #[default]
     Home,
     App(u32),
+    Browse,
+    Wishlist,
 }
+
+/// History ids of the pages that have no app id (apps use `id + 1`, which stays far below these).
+const BROWSE_ID: u64 = 1 << 40;
+const WISHLIST_ID: u64 = (1 << 40) + 1;
 
 #[derive(Default)]
 pub struct StoreView {
@@ -42,6 +51,8 @@ pub struct StoreView {
     /// First visible card per row (the arrows page through a row).
     offsets: HashMap<String, usize>,
     shot: usize,
+    /// Text typed in the "More tags" list on the Browse page.
+    tag_filter: String,
 }
 
 impl StoreView {
@@ -50,6 +61,8 @@ impl StoreView {
         match self.page {
             Page::Home => 0,
             Page::App(id) => u64::from(id) + 1,
+            Page::Browse => BROWSE_ID,
+            Page::Wishlist => WISHLIST_ID,
         }
     }
 
@@ -57,6 +70,8 @@ impl StoreView {
     pub fn set_page_id(&mut self, client: &mut Client, id: u64) {
         match id {
             0 => self.page = Page::Home,
+            BROWSE_ID => self.go(client, Page::Browse),
+            WISHLIST_ID => self.go(client, Page::Wishlist),
             n => self.open_app(client, (n - 1) as u32),
         }
     }
@@ -70,12 +85,28 @@ impl StoreView {
         self.page = Page::App(id);
         self.shot = 0;
         client.send(Command::StoreDetails(sr_model::AppId(id)));
+        client.send(Command::StoreMore(sr_client::StoreCmd::Reviews(sr_model::AppId(id))));
+    }
+
+    /// Switch to Home, Browse or Wishlist and ask for what that page shows.
+    fn go(&mut self, client: &mut Client, page: Page) {
+        self.page = page;
+        match page {
+            Page::Browse => extra::start_browse(client),
+            Page::Wishlist => {
+                client.send(Command::StoreMore(sr_client::StoreCmd::Wishlist { refresh: false }));
+            }
+            Page::Home => client.send(Command::StoreLoad),
+            Page::App(_) => {}
+        }
     }
 
     pub fn show(&mut self, ui: &mut Ui, client: &mut Client, tex: &mut Textures) {
         match self.page {
             Page::Home => self.home(ui, client, tex),
             Page::App(id) => self.app_page(ui, client, tex, id),
+            Page::Browse => extra::browse_page(self, ui, client, tex),
+            Page::Wishlist => extra::wishlist_page(self, ui, client, tex),
         }
     }
 
@@ -87,9 +118,14 @@ impl StoreView {
             ui.add_space(theme::PAGE_PAD);
             column(ui, |ui| {
                 self.search_box(ui, client);
+                ui.add_space(10.0);
+                if let Some(p) = extra::nav(ui, self.page) {
+                    self.go(client, p);
+                }
                 ui.add_space(18.0);
                 if self.search.trim().is_empty() {
                     self.featured(ui, client, tex);
+                    extra::region_note(ui);
                 } else {
                     self.results(ui, client, tex);
                 }
@@ -364,6 +400,7 @@ impl StoreView {
             ui.vertical(|ui| {
                 ui.set_width(main_w);
                 self.screenshots(ui, client, tex, d, main_w);
+                extra::trailers(ui, client, tex, d);
             });
             ui.add_space(24.0);
             ui.vertical(|ui| {
@@ -373,6 +410,8 @@ impl StoreView {
         });
         ui.add_space(24.0);
         purchase_box(ui, client, d);
+        ui.add_space(24.0);
+        extra::reviews_section(ui, client, d.id);
     }
 
     fn screenshots(&mut self, ui: &mut Ui, client: &mut Client, tex: &mut Textures, d: &AppDetails, w: f32) {

@@ -30,6 +30,7 @@ mod play;
 mod profile;
 mod settings;
 mod shortcuts;
+mod store_more;
 #[cfg(target_os = "linux")]
 mod steamworks_host;
 mod storage;
@@ -76,8 +77,13 @@ pub use play::{PlayProblem, RunningGame};
 pub use profile::{EditPhase, ProfileEntry, ProfileLoad, ProfileState};
 pub use settings::{LibraryChoice, MAX_WORKERS, MIN_WORKERS, Settings};
 pub use sr_steam::community::{EditableProfile, MostPlayed, Privacy, ProfileXml, avatar_full_url};
-pub use sr_steam::storefront::{AppDetails, Platforms, Price, Screenshot, Section, StoreItem};
+pub use sr_steam::storefront::{AppDetails, Movie, Platforms, Price, Screenshot, Section, StoreItem};
+pub use sr_steam::store_more::thousands;
 pub use storage::MoveState;
+pub use store_more::{
+    store_region,
+    BrowseKind, BrowseState, Review, ReviewSummary, Reviews, StoreCmd, StoreMoreState, Tag, WishItem, Wishlist,
+};
 pub use sysinfo::system_info;
 pub use tools::{
     CompatInfo, CompatState, ReleaseInfo, Source, ToolInfo, ToolInstall, ToolKind, ToolOrigin, ToolPhase, ToolTarget,
@@ -219,6 +225,8 @@ pub struct StoreState {
     /// Details of recently opened apps (at most [`DETAILS_KEPT`]).
     pub details: HashMap<u32, Load<Arc<AppDetails>>>,
     details_order: VecDeque<u32>,
+    /// Reviews, wishlist, tags and the browse list.
+    pub more: StoreMoreState,
 }
 
 /// How many app detail pages stay in memory.
@@ -323,6 +331,8 @@ pub enum Command {
     /// Search the store; an empty query clears the results.
     StoreSearch(String),
     StoreDetails(AppId),
+    /// Reviews, wishlist, tags and browse lists (see `store_more`).
+    StoreMore(StoreCmd),
     /// Open the app's store page in the system browser.
     OpenStorePage(AppId),
     /// Show the friends panel.
@@ -462,6 +472,7 @@ enum Event {
         app: u32,
         result: Result<Option<AppDetails>, String>,
     },
+    StoreMore(store_more::StoreEvent),
     Friends {
         generation: u64,
         ev: sr_steam::friends::FriendsEvent,
@@ -650,6 +661,7 @@ impl Client {
             Command::StoreLoad => self.store_load(),
             Command::StoreSearch(q) => self.store_search(q),
             Command::StoreDetails(app) => self.store_details(app),
+            Command::StoreMore(c) => self.store_more_cmd(c),
             Command::OpenFriends => self.friends_open(true),
             Command::CloseFriends => self.friends_open(false),
             Command::OpenChat(id) => self.open_chat(id),
@@ -808,6 +820,7 @@ impl Client {
                 }
             }
             Event::StoreDetails { app, result } => self.apply_details(app, result),
+            Event::StoreMore(ev) => self.apply_store_more(ev),
             Event::Friends { generation, ev } if generation == current => self.apply_friends(ev),
             Event::Profile { generation, ev } if generation == current => self.apply_profile(ev),
             // Stale result from an older generation.
@@ -926,6 +939,7 @@ impl Client {
     }
 
     fn store_load(&mut self) {
+        self.sync_store_language();
         let fresh = self.sections_at.is_some_and(|t| t.elapsed() < SECTIONS_MAX_AGE);
         match self.state.store.sections {
             Load::Loading => return,
@@ -940,6 +954,7 @@ impl Client {
     }
 
     fn store_search(&mut self, query: String) {
+        self.sync_store_language();
         self.search_gen += 1;
         let generation = self.search_gen;
         let query = query.trim().to_string();
@@ -958,6 +973,7 @@ impl Client {
     }
 
     fn store_details(&mut self, app: AppId) {
+        self.sync_store_language();
         let st = &mut self.state.store;
         if matches!(st.details.get(&app.0), Some(Load::Loading | Load::Ready(_))) {
             return;
@@ -1126,6 +1142,10 @@ impl Client {
             let mut last = 0;
             while let Some((id, cm)) = hub.wait_online(last).await {
                 last = id;
+                // The country Steam saw at login decides the store's currency; without it Steam uses the IP.
+                if let Some(cc) = cm.conn.ip_country_code() {
+                    storefront::set_country(&cc);
+                }
                 let t = Instant::now();
                 let ev = match sr_steam::cm::owned_games(&cm.conn, steamid).await {
                     Ok(games) => Event::Owned { generation, games, took: t.elapsed() },
