@@ -165,7 +165,7 @@ Nothing here is a promise. The owner decides what comes next. Bugs found on real
 - [x] Settings: compatibility page
 - [x] Settings: privacy page with sign-out
 - [x] Settings: games page (overlay, Steam client helper)
-- [ ] Settings: looks like the official client's settings window
+- [x] Settings: looks like the official client's settings window
 - [ ] Settings: interface (language, start page, scale)
 - [ ] Settings: library folders management
 - [ ] Settings: in-game (screenshot key, overlay key)
@@ -177,7 +177,7 @@ Nothing here is a promise. The owner decides what comes next. Bugs found on real
 - [x] Interface: custom title bar, resize edges, Alt+drag, Ctrl+Tab
 - [x] Interface: subtle animations, near-zero idle CPU
 - [x] Interface: closing the window is immediate (0.1-0.4 s, X11)
-- [ ] Interface: menus and drop-downs look like Steam
+- [x] Interface: menus and drop-downs look like Steam
 - [ ] Interface: system tray icon
 - [ ] Interface: Big Picture / gamepad UI
 - [ ] Interface: translations (Russian first)

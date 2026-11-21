@@ -1,9 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="900" height="520" viewBox="0 0 900 520" font-family="Inter, Segoe UI, sans-serif">
 <rect width="900" height="520" rx="10" fill="#171a21"/>
-<text x="16" y="34" font-size="20" font-weight="700" fill="#dcdedf">Kettle vs. Steam: 31.0%</text>
-<text x="16" y="56" font-size="13" fill="#8f98a0">45 of 145 features built. Green = built and tested, grey = still to do.</text>
+<text x="16" y="34" font-size="20" font-weight="700" fill="#dcdedf">Kettle vs. Steam: 32.4%</text>
+<text x="16" y="56" font-size="13" fill="#8f98a0">47 of 145 features built. Green = built and tested, grey = still to do.</text>
 <rect x="588" y="22" width="300" height="14" rx="7" fill="#3d4450"/>
-<rect x="588" y="22" width="93.1" height="14" rx="7" fill="#59bf40"/>
+<rect x="588" y="22" width="97.2" height="14" rx="7" fill="#59bf40"/>
 <rect x="16.0" y="78.0" width="70.5" height="32.3" rx="2" fill="#59bf40"/>
 <rect x="88.5" y="78.0" width="70.5" height="32.3" rx="2" fill="#59bf40"/>
 <rect x="161.0" y="78.0" width="70.5" height="32.3" rx="2" fill="#59bf40"/>
@@ -103,14 +103,14 @@
 <rect x="435.9" y="372.0" width="43.3" height="42.7" rx="2" fill="#59bf40"/>
 <rect x="481.2" y="372.0" width="43.3" height="42.7" rx="2" fill="#59bf40"/>
 <rect x="526.5" y="372.0" width="43.3" height="42.7" rx="2" fill="#59bf40"/>
-<rect x="390.6" y="416.7" width="43.3" height="42.7" rx="2" fill="#3d4450"/>
+<rect x="390.6" y="416.7" width="43.3" height="42.7" rx="2" fill="#59bf40"/>
 <rect x="435.9" y="416.7" width="43.3" height="42.7" rx="2" fill="#3d4450"/>
 <rect x="481.2" y="416.7" width="43.3" height="42.7" rx="2" fill="#3d4450"/>
 <rect x="526.5" y="416.7" width="43.3" height="42.7" rx="2" fill="#3d4450"/>
 <rect x="390.6" y="461.3" width="43.3" height="42.7" rx="2" fill="#3d4450"/>
 <rect x="435.9" y="461.3" width="43.3" height="42.7" rx="2" fill="#3d4450"/>
 <rect x="391.6" y="373.0" width="94" height="18" rx="3" fill="#000" fill-opacity="0.55"/>
-<text x="396.6" y="386.0" font-size="12" font-weight="600" fill="#dcdedf">Settings 40%</text>
+<text x="396.6" y="386.0" font-size="12" font-weight="600" fill="#dcdedf">Settings 50%</text>
 <rect x="577.8" y="78.0" width="48.4" height="40.5" rx="2" fill="#59bf40"/>
 <rect x="628.2" y="78.0" width="48.4" height="40.5" rx="2" fill="#59bf40"/>
 <rect x="678.6" y="78.0" width="48.4" height="40.5" rx="2" fill="#3d4450"/>
@@ -124,13 +124,13 @@
 <rect x="734.9" y="78.0" width="48.4" height="40.5" rx="2" fill="#59bf40"/>
 <rect x="785.3" y="78.0" width="48.4" height="40.5" rx="2" fill="#59bf40"/>
 <rect x="835.6" y="78.0" width="48.4" height="40.5" rx="2" fill="#59bf40"/>
-<rect x="734.9" y="120.5" width="48.4" height="40.5" rx="2" fill="#3d4450"/>
+<rect x="734.9" y="120.5" width="48.4" height="40.5" rx="2" fill="#59bf40"/>
 <rect x="785.3" y="120.5" width="48.4" height="40.5" rx="2" fill="#3d4450"/>
 <rect x="835.6" y="120.5" width="48.4" height="40.5" rx="2" fill="#3d4450"/>
 <rect x="734.9" y="163.0" width="48.4" height="40.5" rx="2" fill="#3d4450"/>
 <rect x="785.3" y="163.0" width="48.4" height="40.5" rx="2" fill="#3d4450"/>
 <rect x="735.9" y="79.0" width="101" height="18" rx="3" fill="#000" fill-opacity="0.55"/>
-<text x="740.9" y="92.0" font-size="12" font-weight="600" fill="#dcdedf">Interface 38%</text>
+<text x="740.9" y="92.0" font-size="12" font-weight="600" fill="#dcdedf">Interface 50%</text>
 <rect x="577.8" y="211.5" width="39.6" height="49.4" rx="2" fill="#59bf40"/>
 <rect x="619.5" y="211.5" width="39.6" height="49.4" rx="2" fill="#59bf40"/>
 <rect x="661.1" y="211.5" width="39.6" height="49.4" rx="2" fill="#59bf40"/>

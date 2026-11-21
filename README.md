@@ -7,7 +7,7 @@ A fast, native Steam client written in Rust: egui + wgpu, with no Chromium and n
 ## Status
 
 <!-- status:start -->
-**Kettle does 31.0% of what Steam does** (45 of 145 features; see the [roadmap](docs/roadmap.md)).
+**Kettle does 32.4% of what Steam does** (47 of 145 features; see the [roadmap](docs/roadmap.md)).
 
 ![Status](docs/images/status.svg)
 
@@ -25,8 +25,8 @@ A fast, native Steam client written in Rust: egui + wgpu, with no Chromium and n
 | Overlay | 2/7 (29%) |
 | Community | 0/13 (0%) |
 | Notifications | 1/3 (33%) |
-| Settings | 4/10 (40%) |
-| Interface | 3/8 (38%) |
+| Settings | 5/10 (50%) |
+| Interface | 4/8 (50%) |
 | Platform | 3/8 (38%) |
 <!-- status:end -->
 

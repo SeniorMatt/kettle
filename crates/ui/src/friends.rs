@@ -177,7 +177,7 @@ impl FriendsView {
         child.visuals_mut().override_text_color = Some(state_color(fs.my_state));
         child.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
         child.visuals_mut().widgets.inactive.bg_stroke = Stroke::NONE;
-        child.menu_button(format!("{} {}", fs.my_state.label(), icon::CARET_DOWN), |ui| {
+        crate::widgets::menu_button(&mut child, format!("{} {}", fs.my_state.label(), icon::CARET_DOWN), |ui| {
             for s in [
                 PersonaState::Online,
                 PersonaState::Away,

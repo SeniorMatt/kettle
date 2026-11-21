@@ -1,6 +1,7 @@
 //! Left column of the library: Home, filters, search and the game list.
 //! The list is virtualized: only visible rows are laid out.
 
+use crate::dialogs::Overlays;
 use crate::textures::{Art, Textures};
 use crate::{anim, theme, widgets};
 use egui::{Pos2, Rect, RichText, Sense, Ui, Vec2};
@@ -19,7 +20,7 @@ pub struct SidebarView {
 }
 
 impl SidebarView {
-    pub fn show(&mut self, ui: &mut Ui, client: &mut Client, tex: &mut Textures, library_rev: u64) {
+    pub fn show(&mut self, ui: &mut Ui, client: &mut Client, tex: &mut Textures, ov: &mut Overlays, library_rev: u64) {
         let frame = egui::Frame::new().fill(theme::BG_SIDEBAR);
         egui::Panel::left("sidebar")
             .exact_size(theme::SIDEBAR_W)
@@ -32,7 +33,7 @@ impl SidebarView {
                 self.filter_row(ui);
                 self.search_box(ui);
                 self.refresh_rows(client, library_rev);
-                self.list(ui, client, tex);
+                self.list(ui, client, tex, ov);
             });
     }
 
@@ -109,7 +110,7 @@ impl SidebarView {
         self.rows_key = Some(key);
     }
 
-    fn list(&mut self, ui: &mut Ui, client: &mut Client, tex: &mut Textures) {
+    fn list(&mut self, ui: &mut Ui, client: &mut Client, tex: &mut Textures, ov: &mut Overlays) {
         let label = if self.installed_only { "INSTALLED" } else { "ALL" };
         ui.horizontal(|ui| {
             ui.add_space(16.0);
@@ -118,6 +119,9 @@ impl SidebarView {
         });
         ui.add_space(4.0);
         let mut clicked = None;
+        // Rows whose right-click menu is open (or was just asked for); the menu needs `client` mutably, so it
+        // is drawn after the list, which holds `client` shared.
+        let mut menus = Vec::new();
         egui::ScrollArea::vertical().auto_shrink(false).show_rows(
             ui,
             theme::LIST_ROW_H,
@@ -156,9 +160,15 @@ impl SidebarView {
                     if resp.clicked() {
                         clicked = Some(g.app_id);
                     }
+                    if resp.secondary_clicked() || resp.context_menu_opened() {
+                        menus.push((resp, g.app_id));
+                    }
                 }
             },
         );
+        for (resp, app) in menus {
+            crate::game_menu::context(&resp, client, app, ov);
+        }
         if let Some(app) = clicked {
             client.send(Command::Select(Some(app)));
         }

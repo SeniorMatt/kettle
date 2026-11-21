@@ -153,19 +153,27 @@ pub fn button(ui: &mut Ui, label: &str, style: ButtonStyle, enabled: bool) -> Re
     let (rect, resp) = ui.allocate_exact_size(size, sense);
     let hover = anim::animate_bool(ui.ctx(), resp.id.with("hover"), resp.hovered() && enabled, anim::FAST);
     let press = anim::animate_bool(ui.ctx(), resp.id.with("press"), resp.is_pointer_button_down_on(), 0.08);
+    let primary = style == ButtonStyle::Primary && enabled;
     let base = match style {
-        ButtonStyle::Primary => theme::INSTALL_B,
-        ButtonStyle::Secondary => theme::BG_INPUT,
+        ButtonStyle::Primary => theme::BTN_PRIMARY_B,
+        ButtonStyle::Secondary => theme::BTN_FLAT,
         ButtonStyle::Danger => theme::DANGER,
     };
-    let lit = base.lerp_to_gamma(Color32::WHITE, 0.12);
+    let lit =
+        if style == ButtonStyle::Secondary { theme::BTN_FLAT_HOVER } else { base.lerp_to_gamma(Color32::WHITE, 0.12) };
     let mut bg = base.lerp_to_gamma(lit, hover).gamma_multiply(1.0 - 0.15 * press);
     let mut fg = Color32::WHITE;
     if !enabled {
-        bg = theme::BG_INPUT.gamma_multiply(0.6);
+        bg = theme::BTN_FLAT.gamma_multiply(0.6);
         fg = theme::TEXT_UNINSTALLED;
     }
-    ui.painter().rect_filled(rect, theme::BUTTON_RADIUS, bg);
+    if primary {
+        // Steam's blue button: a left-to-right gradient that brightens on hover.
+        let k = (1.0 + 0.12 * hover) * (1.0 - 0.15 * press);
+        gradient(ui, rect, theme::BTN_PRIMARY_A.gamma_multiply(k), theme::BTN_PRIMARY_B.gamma_multiply(k));
+    } else {
+        ui.painter().rect_filled(rect, theme::BUTTON_RADIUS, bg);
+    }
     ui.painter().galley_with_override_text_color(rect.center() - galley.size() / 2.0, galley, fg);
     if enabled { resp.on_hover_cursor(egui::CursorIcon::PointingHand) } else { resp }
 }
@@ -196,4 +204,165 @@ pub fn link(ui: &mut Ui, text: &str) -> Response {
     let color = theme::TEXT_DIM.lerp_to_gamma(theme::ACCENT, hover);
     ui.painter().galley_with_override_text_color(rect.min, galley, color);
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+// ---- menus and drop-downs ---------------------------------------------------
+
+/// A menu button for the menu bar and for menus inside forms: the popup gets [`theme::menu_style`].
+pub fn menu_button(ui: &mut Ui, text: impl Into<egui::WidgetText>, content: impl FnOnce(&mut Ui)) -> Response {
+    let config = egui::containers::menu::MenuConfig::new().style(theme::menu_style);
+    egui::containers::menu::MenuButton::new(text.into())
+        .config(config)
+        .ui(ui, |ui| {
+            ui.set_min_width(theme::MENU_MIN_W);
+            content(ui);
+        })
+        .0
+}
+
+/// A popup menu opened by clicking `anchor` (for example the gear button), in the shared menu style.
+pub fn popup_menu(anchor: &Response, content: impl FnOnce(&mut Ui)) {
+    egui::Popup::menu(anchor).style(theme::menu_style).show(|ui| {
+        ui.set_min_width(theme::MENU_MIN_W);
+        content(ui);
+    });
+}
+
+/// A right-click menu on `target`, in the shared menu style. Call it every frame; it draws only while open.
+pub fn context_menu(target: &Response, content: impl FnOnce(&mut Ui)) {
+    egui::Popup::context_menu(target).style(theme::menu_style).show(|ui| {
+        ui.set_min_width(theme::MENU_MIN_W);
+        content(ui);
+    });
+}
+
+/// A thin line between groups of menu items.
+pub fn menu_separator(ui: &mut Ui) {
+    // The menu is as wide as its widest item so far: asking for all available width would stretch it
+    // across the screen.
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.min_rect().width(), 9.0), Sense::hover());
+    let y = rect.center().y.round();
+    ui.painter().hline(rect.x_range(), y, egui::Stroke::new(1.0, theme::MENU_SEP));
+}
+
+/// Plain information in a menu (version line), padded like the items.
+pub fn menu_label(ui: &mut Ui, text: &str, dim: bool) {
+    let color = if dim { theme::MENU_SELECTED.lerp_to_gamma(Color32::WHITE, 0.45) } else { theme::TEXT };
+    let padding = ui.spacing().button_padding;
+    ui.add_space(padding.y);
+    ui.horizontal(|ui| {
+        ui.add_space(padding.x);
+        ui.label(egui::RichText::new(text).color(color));
+        ui.add_space(padding.x);
+    });
+    ui.add_space(padding.y);
+}
+
+/// A drop-down field with a list that looks like a menu: dark field, small chevron on the right.
+pub fn combo<R>(
+    ui: &mut Ui,
+    id: impl std::hash::Hash + std::fmt::Debug,
+    width: f32,
+    selected: impl Into<egui::WidgetText>,
+    list: impl FnOnce(&mut Ui) -> R,
+) {
+    egui::ComboBox::from_id_salt(id)
+        .width(width)
+        .selected_text(selected)
+        .popup_style(egui::style::StyleModifier::from(theme::menu_style))
+        .icon(|ui, rect, visuals, _open| {
+            let color = visuals.fg_stroke.color;
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                egui_phosphor::regular::CARET_DOWN,
+                theme::regular(12.0),
+                color,
+            );
+        })
+        .show_ui(ui, list);
+}
+
+// ---- settings controls ------------------------------------------------------
+
+/// A Steam-style switch: a pill with a knob that slides over (about 120 ms). Returns the click response;
+/// the value is flipped in place.
+pub fn toggle(ui: &mut Ui, on: &mut bool) -> Response {
+    let (rect, mut resp) = ui.allocate_exact_size(Vec2::new(theme::TOGGLE_W, theme::TOGGLE_H), Sense::click());
+    if resp.clicked() {
+        *on = !*on;
+        resp.mark_changed();
+    }
+    let t = anim::animate_bool(ui.ctx(), resp.id.with("on"), *on, 0.12);
+    let hover = anim::animate_bool(ui.ctx(), resp.id.with("hover"), resp.hovered(), anim::FAST);
+    let track = theme::TOGGLE_OFF.lerp_to_gamma(theme::ACCENT, t).lerp_to_gamma(Color32::WHITE, 0.08 * hover);
+    ui.painter().rect_filled(rect, theme::TOGGLE_H / 2.0, track);
+    let r = theme::TOGGLE_H / 2.0 - 2.0;
+    let x = rect.left() + theme::TOGGLE_H / 2.0 + (theme::TOGGLE_W - theme::TOGGLE_H) * t;
+    ui.painter().circle_filled(Pos2::new(x, rect.center().y), r, Color32::WHITE);
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// Vertical room above and below each settings row.
+const ROW_PAD: f32 = 14.0;
+
+/// Text of a settings row: label (white) over an optional description (grey), wrapped to `width`.
+fn row_text(
+    ui: &Ui,
+    label: &str,
+    desc: &str,
+    width: f32,
+) -> (std::sync::Arc<egui::Galley>, Option<std::sync::Arc<egui::Galley>>) {
+    let name = ui.painter().layout(label.to_string(), theme::regular(14.0), Color32::WHITE, width);
+    let note =
+        (!desc.is_empty()).then(|| ui.painter().layout(desc.to_string(), theme::regular(12.5), theme::TEXT_DIM, width));
+    (name, note)
+}
+
+/// A settings row: label and description on the left, the control on the right (right-aligned, vertically
+/// centred), a hairline underneath.
+pub fn setting_row(ui: &mut Ui, label: &str, desc: &str, control: impl FnOnce(&mut Ui)) {
+    let width = ui.available_width();
+    let text_w = (width * 0.62).max(160.0);
+    let (name, note) = row_text(ui, label, desc, text_w);
+    let text_h = name.size().y + note.as_ref().map_or(0.0, |n| n.size().y + 3.0);
+    let row_h = text_h.max(30.0) + 2.0 * ROW_PAD;
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, row_h), Sense::hover());
+    let top = rect.top() + (row_h - text_h) / 2.0;
+    ui.painter().galley(Pos2::new(rect.left(), top), name.clone(), Color32::WHITE);
+    if let Some(n) = note {
+        ui.painter().galley(Pos2::new(rect.left(), top + name.size().y + 3.0), n, theme::TEXT_DIM);
+    }
+    let control_rect = Rect::from_min_max(Pos2::new(rect.left() + text_w + 12.0, rect.top()), rect.right_bottom());
+    let mut child = ui.new_child(
+        egui::UiBuilder::new().max_rect(control_rect).layout(egui::Layout::right_to_left(egui::Align::Center)),
+    );
+    control(&mut child);
+    row_line(ui, rect);
+}
+
+/// A settings row whose control is wide (a text field, a list): label and description on top, the control
+/// below at full width.
+pub fn setting_block(ui: &mut Ui, label: &str, desc: &str, control: impl FnOnce(&mut Ui)) {
+    ui.add_space(ROW_PAD);
+    ui.label(egui::RichText::new(label).font(theme::regular(14.0)).color(Color32::WHITE));
+    if !desc.is_empty() {
+        ui.add_space(3.0);
+        ui.label(egui::RichText::new(desc).font(theme::regular(12.5)).color(theme::TEXT_DIM));
+    }
+    ui.add_space(10.0);
+    control(ui);
+    ui.add_space(ROW_PAD);
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 0.0), Sense::hover());
+    row_line(ui, rect);
+}
+
+fn row_line(ui: &Ui, rect: Rect) {
+    ui.painter().hline(rect.x_range(), rect.bottom().round() - 0.5, egui::Stroke::new(1.0, theme::SETTINGS_SEP));
+}
+
+/// The big white title at the top of a settings page.
+pub fn page_title(ui: &mut Ui, text: &str) {
+    ui.label(egui::RichText::new(text).font(theme::bold(26.0)).color(Color32::WHITE));
+    ui.add_space(10.0);
 }

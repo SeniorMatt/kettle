@@ -10,6 +10,7 @@ mod downloads_page;
 mod fmt;
 mod fonts;
 mod friends;
+mod game_menu;
 mod game_page;
 mod library;
 mod login;
@@ -46,7 +47,6 @@ enum Tab {
     Profile,
     /// Reached from the bottom bar and menus, not from the tab row.
     Downloads,
-    Settings,
 }
 
 /// All view-local state.
@@ -112,7 +112,7 @@ impl AppUi {
         let enter = anim::since(ui.ctx(), self.page_since, 0.18);
         if self.tab == Tab::Library {
             let library_rev = client.state().library_rev;
-            self.sidebar.show(ui, client, &mut self.textures, library_rev);
+            self.sidebar.show(ui, client, &mut self.textures, &mut self.overlays, library_rev);
         }
         self.friends.show_panel(ui, client, &mut self.textures);
         egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::BG_MAIN)).show(ui, |ui| {
@@ -124,8 +124,7 @@ impl AppUi {
                     game_page::show(ui, client, &mut self.textures, app, &mut self.overlays);
                 }
                 (Tab::Downloads, _) => downloads_page::show(ui, client, &mut self.textures, &mut nav),
-                (Tab::Settings, _) => self.settings.show(ui, client),
-                (Tab::Library, None) => self.library.show(ui, client, &mut self.textures),
+                (Tab::Library, None) => self.library.show(ui, client, &mut self.textures, &mut self.overlays),
                 (Tab::Store, _) => self.store.show(ui, client, &mut self.textures),
                 (tab, _) => {
                     ui.centered_and_justified(|ui| {
@@ -136,9 +135,10 @@ impl AppUi {
             }
         });
         self.overlays.show(ui.ctx(), client);
+        self.settings.show(ui.ctx(), client);
         self.overlay.show(ui.ctx(), client, &mut self.textures, &mut self.friends);
         if let Some(n) = nav.or_else(|| self.overlays.goto.take()) {
-            self.navigate(n, client);
+            self.navigate(ui.ctx(), n, client);
         }
         chrome::alt_drag(ui);
         chrome::resize_zones(ui);
@@ -154,23 +154,17 @@ impl AppUi {
         if tab == Tab::Store && self.tab != Tab::Store {
             client.send(Command::StoreLoad);
         }
-        if tab == Tab::Settings && self.tab != Tab::Settings {
-            self.settings.opened(client);
-        }
         self.tab = tab;
     }
 
-    fn navigate(&mut self, nav: Nav, client: &mut Client) {
+    fn navigate(&mut self, ctx: &egui::Context, nav: Nav, client: &mut Client) {
         match nav {
             Nav::Game(app) => {
                 self.goto(Tab::Library, client);
                 client.send(Command::Select(Some(app)));
             }
             Nav::Downloads => self.goto(Tab::Downloads, client),
-            Nav::Settings(tab) => {
-                self.settings.tab = tab;
-                self.goto(Tab::Settings, client);
-            }
+            Nav::Settings(tab) => self.settings.open(tab, client, ctx),
         }
     }
 
@@ -191,14 +185,17 @@ impl AppUi {
             chrome::drag_region(ui);
             ui.horizontal_centered(|ui| {
                 ui.style_mut().override_font_id = Some(theme::regular(13.0));
-                ui.visuals_mut().override_text_color = Some(theme::TEXT_HEADING);
                 // Plain text items; a box shows only on hover/open.
+                ui.visuals_mut().widgets.inactive.fg_stroke.color = theme::TEXT_HEADING;
+                ui.visuals_mut().widgets.hovered.weak_bg_fill = theme::BG_ROW_SELECTED;
+                ui.visuals_mut().widgets.open.weak_bg_fill = theme::MENU_BG;
                 ui.visuals_mut().widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
                 ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
-                ui.menu_button(theme::APP_NAME, |ui| {
+                widgets::menu_button(ui, theme::APP_NAME, |ui| {
                     if ui.button("Settings").clicked() {
-                        self.navigate(Nav::Settings(SettingsTab::default()), client);
+                        self.navigate(ui.ctx(), Nav::Settings(SettingsTab::default()), client);
                     }
+                    widgets::menu_separator(ui);
                     if ui.button("Sign out").clicked() {
                         client.send(Command::Logout);
                     }
@@ -206,7 +203,7 @@ impl AppUi {
                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                     }
                 });
-                ui.menu_button("View", |ui| {
+                widgets::menu_button(ui, "View", |ui| {
                     if ui.button("Store").clicked() {
                         self.goto(Tab::Store, client);
                     }
@@ -220,13 +217,13 @@ impl AppUi {
                         client.send(Command::RefreshLibrary);
                     }
                 });
-                ui.menu_button("Friends", |ui| {
+                widgets::menu_button(ui, "Friends", |ui| {
                     let open = client.state().friends.open;
                     if ui.button(if open { "Hide friends & chat" } else { "Show friends & chat" }).clicked() {
                         client.send(if open { Command::CloseFriends } else { Command::OpenFriends });
                     }
                 });
-                ui.menu_button("Games", |ui| {
+                widgets::menu_button(ui, "Games", |ui| {
                     let running = !client.state().running.is_empty() && client.state().settings.overlay;
                     if running && ui.button("Show overlay (Shift+Tab)").clicked() {
                         self.overlay.toggle(client);
@@ -236,9 +233,9 @@ impl AppUi {
                         client.send(Command::Select(None));
                     }
                 });
-                ui.menu_button("Help", |ui| {
-                    ui.label(format!("{} {}", theme::APP_NAME, env!("CARGO_PKG_VERSION")));
-                    ui.label(RichText::new("Unofficial. Not affiliated with Valve.").color(theme::TEXT_DIM));
+                widgets::menu_button(ui, "Help", |ui| {
+                    widgets::menu_label(ui, &format!("{} {}", theme::APP_NAME, env!("CARGO_PKG_VERSION")), false);
+                    widgets::menu_label(ui, "Unofficial. Not affiliated with Valve.", true);
                 });
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     chrome::window_buttons(ui);
@@ -282,7 +279,7 @@ impl AppUi {
                 if back.clicked() {
                     if self.tab == Tab::Store {
                         self.store.back();
-                    } else if matches!(self.tab, Tab::Downloads | Tab::Settings) {
+                    } else if matches!(self.tab, Tab::Downloads) {
                         self.goto(Tab::Library, client);
                     } else {
                         client.send(Command::Select(None));

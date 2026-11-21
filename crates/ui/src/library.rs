@@ -1,5 +1,6 @@
 //! Library home: the "ALL GAMES" grid of portrait covers, virtualized by row.
 
+use crate::dialogs::Overlays;
 use crate::textures::{Art, Textures};
 use crate::{anim, theme, widgets};
 use egui::{Color32, Pos2, Rect, RichText, Sense, Ui, Vec2};
@@ -35,7 +36,7 @@ pub struct LibraryView {
 }
 
 impl LibraryView {
-    pub fn show(&mut self, ui: &mut Ui, client: &mut Client, tex: &mut Textures) {
+    pub fn show(&mut self, ui: &mut Ui, client: &mut Client, tex: &mut Textures, ov: &mut Overlays) {
         self.refresh_order(client);
         let pad = theme::PAGE_PAD;
         ui.add_space(pad);
@@ -45,7 +46,7 @@ impl LibraryView {
             ui.label(RichText::new(format!("ALL GAMES ({n})")).font(theme::bold(14.0)).color(theme::TEXT_HEADING));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(pad);
-                egui::ComboBox::from_id_salt("sort").selected_text(self.sort.label()).width(140.0).show_ui(ui, |ui| {
+                widgets::combo(ui, "sort", 140.0, self.sort.label(), |ui| {
                     for s in Sort::ALL {
                         ui.selectable_value(&mut self.sort, s, s.label());
                     }
@@ -82,9 +83,12 @@ impl LibraryView {
                     let rect = Rect::from_min_size(min, Vec2::new(theme::CAPSULE_W, theme::CAPSULE_H));
                     let game = &client.state().games[gi];
                     let id = ui.id().with(("capsule", row * cols + col));
-                    if capsule(ui, client, tex, rect, game, id).clicked() {
-                        clicked = Some(game.app_id);
+                    let app = game.app_id;
+                    let resp = capsule(ui, client, tex, rect, game, id);
+                    if resp.clicked() {
+                        clicked = Some(app);
                     }
+                    crate::game_menu::context(&resp, client, app, ov);
                 }
             }
         });

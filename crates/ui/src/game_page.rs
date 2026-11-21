@@ -68,7 +68,7 @@ fn action_bar(ui: &mut Ui, client: &mut Client, game: &sr_model::Game, ov: &mut 
                 widgets::icon_button(ui, icon::STAR, 34.0, "Add to Favorites");
                 widgets::icon_button(ui, icon::INFO, 34.0, "Game info");
                 let gear = widgets::icon_button(ui, icon::GEAR, 34.0, "Manage");
-                manage_menu(&gear, client, game, ov);
+                crate::game_menu::manage(&gear, client, game, ov);
             });
         });
     });
@@ -123,35 +123,6 @@ fn primary_button(ui: &mut Ui, client: &mut Client, game: &sr_model::Game, ov: &
             }
         }
     }
-}
-
-/// The gear menu. Items that don't apply right now are shown dim.
-fn manage_menu(gear: &egui::Response, client: &mut Client, game: &sr_model::Game, ov: &mut Overlays) {
-    let app = game.app_id;
-    let installed = game.install.is_installed();
-    let free =
-        client.state().downloads.status(app) == DownloadStatus::None && !client.state().running.contains_key(&app);
-    egui::Popup::menu(gear).show(|ui| {
-        ui.set_min_width(200.0);
-        if ui.add_enabled(installed && free, egui::Button::new("Verify files")).clicked() {
-            client.send(Command::Verify(app));
-            ov.goto = Some(crate::Nav::Downloads);
-        }
-        if ui.button("Compatibility...").clicked() {
-            ov.open_compat(client, app);
-        }
-        if ui.add_enabled(installed, egui::Button::new("Browse local files")).clicked() {
-            client.send(Command::BrowseFiles(app));
-        }
-        if ui.button("Launch via Steam client").clicked() {
-            client.send(Command::LaunchViaSteam(app));
-        }
-        ui.separator();
-        let uninstall = egui::Button::new(RichText::new("Uninstall...").color(theme::ERROR_TEXT));
-        if ui.add_enabled(installed && free, uninstall).clicked() {
-            ov.open_uninstall(app);
-        }
-    });
 }
 
 fn stat(ui: &mut Ui, label: &str, value: &str) {

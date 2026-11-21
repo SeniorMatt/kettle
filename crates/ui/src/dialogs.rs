@@ -68,14 +68,12 @@ impl Overlays {
             ui.set_width(DIALOG_W);
             title(ui, &format!("Install {}", d.name));
             field(ui, "INSTALL TO");
-            egui::ComboBox::from_id_salt("install-lib")
-                .width(DIALOG_W)
-                .selected_text(format!("{}  ({})", lib.path.display(), lib.label))
-                .show_ui(ui, |ui| {
-                    for (i, l) in libs.iter().enumerate() {
-                        ui.selectable_value(&mut d.library, i, format!("{}  ({})", l.path.display(), l.label));
-                    }
-                });
+            let chosen = format!("{}  ({})", lib.path.display(), lib.label);
+            widgets::combo(ui, "install-lib", DIALOG_W, chosen, |ui| {
+                for (i, l) in libs.iter().enumerate() {
+                    ui.selectable_value(&mut d.library, i, format!("{}  ({})", l.path.display(), l.label));
+                }
+            });
             if !lib.ours {
                 ui.label(
                     RichText::new("This is a Steam library folder. The game will be written into it.")
@@ -84,7 +82,7 @@ impl Overlays {
                 );
             }
             field(ui, "PLATFORM");
-            egui::ComboBox::from_id_salt("install-os").width(DIALOG_W).selected_text(d.os.label()).show_ui(ui, |ui| {
+            widgets::combo(ui, "install-os", DIALOG_W, d.os.label(), |ui| {
                 for os in [OsChoice::Auto, OsChoice::Linux, OsChoice::Windows] {
                     ui.selectable_value(&mut d.os, os, os.label());
                 }

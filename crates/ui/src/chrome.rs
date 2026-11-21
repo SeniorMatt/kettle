@@ -31,19 +31,26 @@ pub fn window_buttons(ui: &mut Ui) {
     let ctx = ui.ctx().clone();
     ui.spacing_mut().item_spacing.x = 0.0;
     let maximized = is_maximized(&ctx);
-    if window_button(ui, icon::X, true).clicked() {
+    if window_button(ui, icon::X, true, theme::MENU_BAR_H).clicked() {
         ctx.send_viewport_cmd(ViewportCommand::Close);
     }
-    if window_button(ui, if maximized { icon::COPY } else { icon::SQUARE }, false).clicked() {
+    if window_button(ui, if maximized { icon::COPY } else { icon::SQUARE }, false, theme::MENU_BAR_H).clicked() {
         toggle_maximize(&ctx);
     }
-    if window_button(ui, icon::MINUS, false).clicked() {
+    if window_button(ui, icon::MINUS, false, theme::MENU_BAR_H).clicked() {
         ctx.send_viewport_cmd(ViewportCommand::Minimized(true));
     }
 }
 
-fn window_button(ui: &mut Ui, glyph: &str, close: bool) -> egui::Response {
-    let size = Vec2::new(theme::WINDOW_BUTTON_W, theme::MENU_BAR_H);
+/// Just a close button, for secondary windows (the settings window). Call in a right-to-left layout.
+pub fn close_button(ui: &mut Ui, height: f32) {
+    if window_button(ui, icon::X, true, height).clicked() {
+        ui.ctx().send_viewport_cmd(ViewportCommand::Close);
+    }
+}
+
+fn window_button(ui: &mut Ui, glyph: &str, close: bool, height: f32) -> egui::Response {
+    let size = Vec2::new(theme::WINDOW_BUTTON_W, height);
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
     let t = anim::animate_bool(ui.ctx(), resp.id.with("hover"), resp.hovered(), anim::FAST);
     if t > 0.0 {
