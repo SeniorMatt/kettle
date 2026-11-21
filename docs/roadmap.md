@@ -25,7 +25,7 @@ Nothing here is a promise. The owner decides what comes next. Bugs found on real
 - [x] Library: finds games the native Steam installed
 - [x] Library: installed games show even without the network or the owned list
 - [ ] Library: finds games Flatpak Steam installed (re-test on the T14s)
-- [ ] Library: owned games load on a real account (SteamClient token over CM)
+- [x] Library: owned games load on a real account (SteamClient token over CM)
 - [ ] Library: collections (user-made and dynamic)
 - [ ] Library: filters (installed, ready to play, genre, players, features)
 - [ ] Library: favourites and hidden games
