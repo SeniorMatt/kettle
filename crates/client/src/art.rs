@@ -110,9 +110,18 @@ fn worker(shared: &(Mutex<Shared>, Condvar), source: &ArtSource, wake: &Waker) {
 
 fn load(source: &ArtSource, app: AppId, kind: ArtKind, icon_hash: &str) -> ArtImage {
     let none = ArtImage { app, kind, size: [0, 0], rgba: None };
-    let Ok(Some(bytes)) = source.fetch(app, kind, icon_hash) else { return none };
-    // Steam sometimes stores PNGs as .jpg: detect the format from the bytes.
-    let Ok(img) = image::load_from_memory(&bytes) else { return none };
+    let Ok(fetched) = source.fetch(app, kind, icon_hash) else { return none };
+    let img = match fetched {
+        // Steam sometimes stores PNGs as .jpg: detect the format from the bytes.
+        Some(bytes) => image::load_from_memory(&bytes).ok(),
+        // No cover art at all: like Steam, show the header image centered on a dark card.
+        None if kind == ArtKind::Capsule => match source.fetch(app, ArtKind::Header, "") {
+            Ok(Some(bytes)) => image::load_from_memory(&bytes).ok().map(header_card),
+            _ => None,
+        },
+        None => None,
+    };
+    let Some(img) = img else { return none };
     let (mw, mh) = max_size(kind);
     let img = if img.width() > mw || img.height() > mh {
         img.resize(mw, mh, image::imageops::FilterType::Triangle)
@@ -121,4 +130,15 @@ fn load(source: &ArtSource, app: AppId, kind: ArtKind, icon_hash: &str) -> ArtIm
     };
     let rgba = img.into_rgba8();
     ArtImage { app, kind, size: [rgba.width() as usize, rgba.height() as usize], rgba: Some(rgba.into_raw()) }
+}
+
+/// A 600x900 card with the header image centered on it.
+fn header_card(header: image::DynamicImage) -> image::DynamicImage {
+    const W: u32 = 600;
+    const H: u32 = 900;
+    let header = if header.width() > W { header.resize(W, H, image::imageops::FilterType::Triangle) } else { header };
+    let mut card = image::RgbaImage::from_pixel(W, H, image::Rgba([27, 40, 56, 255]));
+    let (x, y) = (i64::from((W - header.width()) / 2), i64::from((H - header.height()) / 2));
+    image::imageops::overlay(&mut card, &header.into_rgba8(), x, y);
+    image::DynamicImage::ImageRgba8(card)
 }

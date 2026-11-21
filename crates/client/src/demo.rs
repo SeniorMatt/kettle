@@ -17,6 +17,10 @@ pub fn games(target: usize) -> Vec<Game> {
         }
     }
     ids.extend(installed.keys().copied());
+    // `KETTLE_DEMO_APPS=1,2`: extra app ids (e.g. ones with hashed store art) to try.
+    if let Ok(extra) = std::env::var("KETTLE_DEMO_APPS") {
+        ids.extend(extra.split(',').filter_map(|s| s.trim().parse::<u32>().ok()));
+    }
     ids.retain(|id| !installed.get(id).is_some_and(|a| local::is_tool_app(a.appid, &a.name)));
     // A small app that anonymous logins may download, so the install flow can be tried without an account.
     ids.push(DEMO_DOWNLOAD_APP);

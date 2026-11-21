@@ -37,7 +37,7 @@ We **never write** to the official Steam client's files. We only read its `steam
 
 | Host | Why |
 |---|---|
-| `api.steampowered.com` | QR sign-in and the CM server list |
+| `api.steampowered.com` | QR sign-in and the CM server list. Also the public store lookup `IStoreBrowseService/GetItems` (no login; only the app ID) to find cover art and icons that live at hashed paths |
 | Steam CM servers (`*.steamserver.net`) | The client connection (encrypted): your owned games, downloads and short-lived access tokens. After sign-in it also carries Friends & Chat: your friends list, their names and presence, your own online state (Online by default; you can pick Away, Busy, Invisible or Offline in the panel) and chat messages |
 | `shared.steamstatic.com` | Cover art (only the app ID is sent) |
 | `media.steampowered.com` | Small game icons |
