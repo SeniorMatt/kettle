@@ -26,9 +26,11 @@ Nothing here is a promise. The owner decides what comes next. Bugs found on real
 - [x] Library: installed games show even without the network or the owned list
 - [ ] Library: finds games Flatpak Steam installed (re-test on the T14s)
 - [x] Library: owned games load on a real account (SteamClient token over CM)
-- [ ] Library: collections (user-made and dynamic)
-- [ ] Library: filters (installed, ready to play, genre, players, features)
-- [ ] Library: favourites and hidden games
+- [x] Library: collections (yours and the official client's, read-only)
+- [ ] Library: dynamic collections
+- [x] Library: filters (installed, ready to play)
+- [ ] Library: filters (genre, players, features)
+- [x] Library: favourites and hidden games
 - [ ] Library: home shelves (recent games, what's new)
 - [ ] Library: list view with columns
 - [ ] Library: custom artwork per game
@@ -39,7 +41,8 @@ Nothing here is a promise. The owner decides what comes next. Bugs found on real
 - [ ] Library: game page achievements summary
 - [ ] Library: game page friends who play
 - [ ] Library: game page DLC list
-- [ ] Library: game properties (launch options, language, betas)
+- [x] Library: game properties window (launch options, compatibility, installed files)
+- [ ] Library: game properties: language and betas
 
 ## Store
 
@@ -82,7 +85,7 @@ Nothing here is a promise. The owner decides what comes next. Bugs found on real
 - [x] Play: running state, stop, play-time tracking
 - [x] Play: start the official client in the background for Steamworks games
 - [ ] Play: tested on a real game on a real machine
-- [ ] Play: launch options and command-line arguments per game
+- [x] Play: launch options and command-line arguments per game
 - [ ] Play: pre-launch checks (first-time setup, redistributables)
 - [ ] Play: play time synced with Steam's servers
 - [ ] Play: games run without the official client (own Steamworks service)

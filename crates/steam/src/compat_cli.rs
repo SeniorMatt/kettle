@@ -11,7 +11,7 @@
 use crate::compat::{self, ToolOrigin};
 use crate::proton_releases::{self as rel, Phase, Source};
 use crate::run::{self, PrepareOpts};
-use crate::{appinfo, local};
+use crate::{appinfo, launch_opts, local};
 use anyhow::{Context, Result, bail};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -148,6 +148,11 @@ fn cmd_launch(args: &[String]) -> Result<()> {
         force_windows: args[..split].iter().any(|a| a == "--windows"),
         tool: flag_value(&args[..split], "--tool"),
         extra_args: args.get(split + 1..).unwrap_or(&[]).to_vec(),
+        // `--options "..."` tries a text; otherwise what a launch would use (ours, else the official client's).
+        launch_options: flag_value(&args[..split], "--options").or_else(|| {
+            let ours = launch_opts::LaunchOptions::load();
+            launch_opts::effective(appid, ours.get(appid), None)
+        }),
     };
     let p = run::prepare(appid, &opts)?;
     println!("{} ({appid}){}", p.name, if p.installed { "" } else { "  [not installed: path is where it would go]" });
@@ -159,9 +164,14 @@ fn cmd_launch(args: &[String]) -> Result<()> {
     println!("program: {}", p.plan.program.display());
     println!("args:    {:?}", p.plan.args);
     println!("cwd:     {}", p.plan.cwd.display());
+    if let Some(text) = &opts.launch_options {
+        println!("launch options: {text}");
+    }
     for (k, v) in &p.plan.env {
         println!("env:     {k}={v}");
     }
+    let shown: Vec<_> = p.plan.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+    println!("command: {}", launch_opts::command_line(&p.plan, &shown));
     // Only looks; the client is never started from here.
     let needs = crate::steam_client::uses_steamworks(&p.install_dir);
     let yn = |b: bool| if b { "yes" } else { "no" };

@@ -39,8 +39,15 @@ pub fn context(target: &Response, client: &mut Client, app: AppId, ov: &mut Over
         let c = can(client, &game);
         primary(ui, client, &game, &c, ov);
         widgets::menu_separator(ui);
+        crate::collections_ui::menu_items(ui, client, &game);
+        widgets::menu_separator(ui);
         // Inside a menu this is a submenu button (arrow on the right) that inherits the menu style.
         ui.menu_button("Manage", |ui| manage_items(ui, client, &game, &c, ov));
+        // Last, as in the official client's menu.
+        widgets::menu_separator(ui);
+        if item(ui, "Properties...", true) {
+            ov.open_properties(app);
+        }
     });
 }
 
@@ -52,6 +59,10 @@ pub fn manage(anchor: &Response, client: &mut Client, game: &Game, ov: &mut Over
         widgets::menu_separator(ui);
         if item(ui, "Launch via Steam client", true) {
             client.send(Command::LaunchViaSteam(game.app_id));
+        }
+        widgets::menu_separator(ui);
+        if item(ui, "Properties...", true) {
+            ov.open_properties(game.app_id);
         }
     });
 }
@@ -95,7 +106,7 @@ fn manage_items(ui: &mut Ui, client: &mut Client, game: &Game, c: &Can, ov: &mut
         ov.goto = Some(Nav::Downloads);
     }
     if item(ui, "Compatibility...", true) {
-        ov.open_compat(client, app);
+        ov.open_compat(app);
     }
     widgets::menu_separator(ui);
     let uninstall = egui::Button::new(RichText::new("Uninstall...").color(theme::ERROR_TEXT));

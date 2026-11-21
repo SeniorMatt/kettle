@@ -79,7 +79,9 @@ impl Client {
         let installed = self.installed.get(&app.0).cloned();
         let (tx, wake) = (self.tx.clone(), self.wake.clone());
         let start_steam = self.state.settings.start_steam;
-        self.rt.spawn_blocking(move || launch(app, name, installed, start_steam, tx, wake));
+        let (ours, account) = self.launch_options_for(app);
+        let options = LaunchText { ours, account };
+        self.rt.spawn_blocking(move || launch(app, name, installed, start_steam, options, tx, wake));
     }
 
     /// Stop a running game: end its whole process group (the game, Proton and the helpers).
@@ -129,12 +131,19 @@ impl Client {
     }
 }
 
+/// Where a launch finds the game's launch options: our saved text, else the official client's for `account`.
+struct LaunchText {
+    ours: Option<String>,
+    account: Option<u32>,
+}
+
 /// Worker: prepare the plan from Steam's app data and start it.
 fn launch(
     app: AppId,
     name: String,
     installed: Option<InstalledApp>,
     start_steam: bool,
+    options: LaunchText,
     tx: mpsc::Sender<Event>,
     wake: Waker,
 ) {
@@ -144,7 +153,12 @@ fn launch(
                 "Steam's app data has no launch information for this game yet. Try \"Launch via Steam client\"."
             )
         })?;
-        run::prepare_with(&info, installed.as_ref(), &run::PrepareOpts::default())
+        // Without an account (demo, signed out) the official client's value is not looked up.
+        let launch_options = match options.account {
+            Some(_) => sr_steam::launch_opts::effective(app.0, options.ours.as_deref(), options.account),
+            None => options.ours.clone(),
+        };
+        run::prepare_with(&info, installed.as_ref(), &run::PrepareOpts { launch_options, ..Default::default() })
     });
     let send = move |ev: Event| {
         let _ = tx.blocking_send(ev);

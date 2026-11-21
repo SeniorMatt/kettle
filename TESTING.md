@@ -63,6 +63,27 @@ Pick a small game you own (under 2 GB).
 - [ ] Windows: same checks with a fullscreen-windowed game. If the overlay shows behind an exclusive-fullscreen game, note it.
 - [ ] While the overlay is hidden the app uses no CPU (`top`).
 
+## 5b. Collections, favourites and filters
+
+- [ ] With collections made in the official Steam client, the sidebar shows FAVORITES, one section per collection and ALL; the same games are in each.
+- [ ] Right-click a game: Add to Favorites. It appears under FAVORITES at once; Remove from Favorites takes it out (also when Steam had it as a favourite). Steam's own files are not changed.
+- [ ] Hide this game: it leaves every list and shows only under HIDDEN (folded at first). Unhide brings it back.
+- [ ] Add to, New collection...: type a name, Create. The game is in the new section. Restart the app: it is still there. Right-click the section header, Delete collection.
+- [ ] Click a section header to fold it; click the squares icon to show that collection in the library grid. Home goes back to all games.
+- [ ] GAMES drop-down: Installed only and Ready to play narrow every section. Search narrows all sections and hides empty ones.
+- [ ] Library page: SHOW (All, Installed, Not installed) next to SORT BY. With 2000+ games scrolling stays smooth and idle CPU is about zero.
+- [ ] A dynamic Steam collection is listed with a note and only its hand-added games.
+
+### Game properties
+
+- [ ] Right-click a game, or open its gear menu, and choose "Properties...": a window titled with the game's name opens with General, Compatibility and Installed Files (the last one only for installed games). Esc and the close button close it; the main window keeps working.
+- [ ] General: the launch options field shows what the official client has for this game, if anything. Type `-novid`, press Enter, close and reopen: it is still there. Clearing the text and pressing Enter stays empty after a restart (the official client's value no longer applies).
+- [ ] Set `FOO=1 gamemoderun %command% -novid`, then run `sr-cli launch <appid> --dry-run`: the "command:" line starts with `FOO=1 gamemoderun`, then the game, and ends with `-novid`. The same text without `%command%` only appends arguments.
+- [ ] Play the game with `MANGOHUD=1 %command%` (or another harmless variable) and check the log in `~/.local/share/kettle/logs/` or the game's behaviour. Windows game through Proton: wrappers run before Proton.
+- [ ] Compatibility: turn on "Force the use of a specific compatibility tool", pick one, close and reopen: it is kept. Turn it off: the official client's choice is used again. "Compatibility..." in the game's menu opens this tab.
+- [ ] Installed Files: Browse... opens the folder, Verify queues a verify and shows Downloads, Uninstall... asks "Keep / Uninstall" in place. Buttons are dimmed while the game runs or downloads.
+- [ ] The window uses no CPU while idle.
+
 ## 6. Proton manager
 
 - [ ] Settings → Compatibility lists Steam's Protons and any custom ones.

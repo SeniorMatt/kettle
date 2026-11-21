@@ -1,10 +1,11 @@
 //! Modal dialogs opened from the game page: install options, uninstall confirmation, per-game compatibility
 //! tool, and the "could not start" message. View state only; every action is a `Command`.
 
+use crate::properties::PropsTab;
 use crate::widgets::{self, ButtonStyle};
 use crate::{Nav, SettingsTab, fmt, theme};
 use egui::{Context, Id, RichText, Ui};
-use sr_client::{Client, Command, DownloadRequest, Load, OsChoice, ToolKind, ToolOrigin};
+use sr_client::{Client, Command, DownloadRequest, OsChoice, ToolKind, ToolOrigin};
 use sr_model::AppId;
 use std::path::PathBuf;
 
@@ -24,7 +25,8 @@ struct InstallDialog {
 pub struct Overlays {
     install: Option<InstallDialog>,
     uninstall: Option<AppId>,
-    compat: Option<AppId>,
+    /// A Properties window the dialogs or menus asked for; the page loop takes it.
+    pub properties: Option<(AppId, PropsTab)>,
     /// Navigation a dialog asked for ("Open Proton manager"); the page loop takes it.
     pub goto: Option<Nav>,
 }
@@ -38,15 +40,18 @@ impl Overlays {
         self.uninstall = Some(app);
     }
 
-    pub fn open_compat(&mut self, client: &mut Client, app: AppId) {
-        client.send(Command::CompatLoad);
-        self.compat = Some(app);
+    /// The old per-game compatibility dialog now lives in the Properties window.
+    pub fn open_compat(&mut self, app: AppId) {
+        self.properties = Some((app, PropsTab::Compatibility));
+    }
+
+    pub fn open_properties(&mut self, app: AppId) {
+        self.properties = Some((app, PropsTab::General));
     }
 
     pub fn show(&mut self, ctx: &Context, client: &mut Client) {
         self.install_dialog(ctx, client);
         self.uninstall_dialog(ctx, client);
-        self.compat_dialog(ctx, client);
         self.play_problem(ctx, client);
     }
 
@@ -167,72 +172,6 @@ impl Overlays {
             self.uninstall = None;
         } else if modal.should_close() {
             self.uninstall = None;
-        }
-    }
-
-    fn compat_dialog(&mut self, ctx: &Context, client: &mut Client) {
-        let Some(app) = self.compat else { return };
-        let name = client.state().game(app).map(|g| g.name.clone()).unwrap_or_default();
-        let info = client.state().compat.info.clone();
-        let mut goto = false;
-        let modal = modal(Id::new("compat-dialog")).show(ctx, |ui| {
-            ui.set_width(DIALOG_W);
-            title(ui, &format!("Compatibility: {name}"));
-            if cfg!(windows) {
-                ui.label(
-                    RichText::new("Games run directly on Windows; no compatibility tool is needed.")
-                        .color(theme::TEXT_DIM),
-                );
-                return;
-            }
-            match &info {
-                Load::Ready(info) => {
-                    let steam = info.steam_choice(app.0).map(str::to_string);
-                    let mine = info.override_for(app.0).map(str::to_string);
-                    let default_label = match &steam {
-                        Some(s) => format!("Use Steam's choice ({s})"),
-                        None => "Use Steam's choice (none set, the newest Proton is used)".to_string(),
-                    };
-                    if ui.radio(mine.is_none(), default_label).clicked() && mine.is_some() {
-                        client.send(Command::SetCompatTool { app, tool: None });
-                    }
-                    ui.add_space(4.0);
-                    egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
-                        for t in info.tools.iter().filter(|t| t.kind != ToolKind::Runtime) {
-                            let on = mine.as_deref() == Some(t.internal_name.as_str());
-                            let steams = steam.as_deref() == Some(t.internal_name.as_str());
-                            let tag = if steams { "  (Steam's choice)" } else { "" };
-                            let label = format!("{}  {}{tag}", t.display_name, origin_label(t.origin));
-                            if ui.radio(on, label).clicked() && !on {
-                                client.send(Command::SetCompatTool { app, tool: Some(t.internal_name.clone()) });
-                            }
-                        }
-                    });
-                    if info.tools.iter().all(|t| t.kind == ToolKind::Runtime) {
-                        ui.label(RichText::new("No compatibility tool is installed.").color(theme::ERROR_TEXT));
-                    }
-                }
-                Load::Failed(e) => {
-                    ui.label(RichText::new(e).color(theme::ERROR_TEXT));
-                }
-                _ => {
-                    ui.add(egui::Spinner::new());
-                }
-            }
-            ui.add_space(12.0);
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                if widgets::button(ui, "Close", ButtonStyle::Secondary, true).clicked() {
-                    ui.close();
-                }
-                goto = widgets::link(ui, "Open Proton manager").clicked();
-            });
-        });
-        if goto {
-            self.compat = None;
-            self.goto = Some(Nav::Settings(SettingsTab::Compatibility));
-        } else if modal.should_close() {
-            self.compat = None;
         }
     }
 

@@ -22,7 +22,9 @@ All files are readable only by you: folders are mode `0700` and files `0600`.
 | `~/.cache/kettle/library-<steamid>.json` | Your owned-games list, for instant startup |
 | `~/.local/share/kettle/settings.json` | Your default download folder and the number of parallel downloads |
 | `~/.local/share/kettle/playtime.json` | Play time we measured ourselves, per game (never sent anywhere) |
+| `~/.local/share/kettle/collections.json` | Your favourites, hidden games and collections made in Kettle |
 | `~/.local/share/kettle/compat_choices.json` | Which compatibility tool you picked per game |
+| `~/.local/share/kettle/launch_options.json` | The launch options you typed per game (never sent anywhere) |
 | `~/.local/share/kettle/logs/` | Output of the last run of each game we started |
 | `~/.local/share/kettle/compatibilitytools.d/` | Compatibility tools (Proton, ...) you installed from the app |
 | `~/.local/share/kettle/library/` | Games installed by the app, unless you pick another folder |
@@ -31,7 +33,7 @@ All files are readable only by you: folders are mode `0700` and files `0600`.
 
 If a game needs the Steam client (Settings, Games tab, on by default), we start the official client minimized with `-silent` before it. We only start the program and read its pid file; nothing is sent to it or to Valve by us for this.
 
-We **never write** to the official Steam client's files. We only read its `steamapps/*.acf`, `libraryfolders.vdf` and `appcache/librarycache`.
+We **never write** to the official Steam client's files. We only read its `steamapps/*.acf`, `libraryfolders.vdf`, `appcache/librarycache` and, for your collections, favourites and hidden games, `userdata/<account>/config/cloudstorage/cloud-storage-namespace-1.json` (read only; ours are kept separately in `collections.json`).
 
 ## Network connections
 
@@ -50,6 +52,10 @@ All HTTPS uses rustls with certificate verification.
 ## Friends and chat
 
 Chat messages and your friends list are held in memory only (at most 2000 friends and 500 messages per chat) and are never written to disk. Messages go to Steam over the CM connection, the same way the official client sends them. Only avatar pictures are cached on disk (see above).
+
+## Launch options
+
+When you have not set launch options for a game, we show and use the ones the official Steam client saved for it. They are read, never written, from `userdata/<account id>/config/localconfig.vdf` in your Steam folder, and only for the signed-in account.
 
 ## In-game overlay
 

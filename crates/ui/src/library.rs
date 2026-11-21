@@ -27,12 +27,44 @@ impl Sort {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum Show {
+    #[default]
+    All,
+    Installed,
+    NotInstalled,
+}
+
+impl Show {
+    const ALL: [Show; 3] = [Show::All, Show::Installed, Show::NotInstalled];
+
+    fn label(self) -> &'static str {
+        match self {
+            Show::All => "All",
+            Show::Installed => "Installed",
+            Show::NotInstalled => "Not installed",
+        }
+    }
+
+    fn pass(self, g: &Game) -> bool {
+        match self {
+            Show::All => true,
+            Show::Installed => g.install.is_installed(),
+            Show::NotInstalled => !g.install.is_installed(),
+        }
+    }
+}
+
+/// What `order` was computed from: library revision, collections revision, shown list, sort, filter.
+type OrderKey = (u64, u64, Option<String>, Sort, Show);
+
 #[derive(Default)]
 pub struct LibraryView {
     sort: Sort,
+    show: Show,
     /// Indices into `state.games` in display order.
     order: Vec<usize>,
-    order_key: Option<(u64, Sort)>,
+    order_key: Option<OrderKey>,
 }
 
 impl LibraryView {
@@ -43,7 +75,13 @@ impl LibraryView {
         ui.horizontal(|ui| {
             ui.add_space(pad);
             let n = self.order.len();
-            ui.label(RichText::new(format!("ALL GAMES ({n})")).font(theme::bold(14.0)).color(theme::TEXT_HEADING));
+            let colls = &client.state().collections;
+            let title = colls
+                .selected
+                .as_deref()
+                .and_then(|id| colls.title(id))
+                .map_or("ALL GAMES".to_string(), str::to_uppercase);
+            ui.label(RichText::new(format!("{title} ({n})")).font(theme::bold(14.0)).color(theme::TEXT_HEADING));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(pad);
                 widgets::combo(ui, "sort", 140.0, self.sort.label(), |ui| {
@@ -52,6 +90,13 @@ impl LibraryView {
                     }
                 });
                 ui.label(RichText::new("SORT BY").font(theme::bold(12.0)).color(theme::TEXT_DIM));
+                ui.add_space(16.0);
+                widgets::combo(ui, "show", 120.0, self.show.label(), |ui| {
+                    for f in Show::ALL {
+                        ui.selectable_value(&mut self.show, f, f.label());
+                    }
+                });
+                ui.label(RichText::new("SHOW").font(theme::bold(12.0)).color(theme::TEXT_DIM));
             });
         });
         ui.add_space(12.0);
@@ -59,7 +104,13 @@ impl LibraryView {
         if self.order.is_empty() {
             ui.add_space(40.0);
             ui.vertical_centered(|ui| {
-                let msg = if client.state().refreshing { "Loading your library..." } else { "No games yet." };
+                let msg = if client.state().refreshing {
+                    "Loading your library..."
+                } else if client.state().games.is_empty() {
+                    "No games yet."
+                } else {
+                    "No games here."
+                };
                 ui.label(RichText::new(msg).color(theme::TEXT_DIM));
             });
             return;
@@ -98,14 +149,26 @@ impl LibraryView {
     }
 
     fn refresh_order(&mut self, client: &Client) {
-        let key = (client.state().library_rev, self.sort);
-        if self.order_key == Some(key) {
+        let colls = &client.state().collections;
+        let key: OrderKey = (client.state().library_rev, colls.rev, colls.selected.clone(), self.sort, self.show);
+        if self.order_key.as_ref() == Some(&key) {
             return;
         }
         let games = &client.state().games;
-        let mut order: Vec<usize> = (0..games.len()).collect();
+        // A collection shows its members; all games leaves out the hidden ones.
+        let members = colls.selected.as_deref().and_then(|id| colls.members(id));
+        let mut order: Vec<usize> = (0..games.len())
+            .filter(|&i| {
+                let app = games[i].app_id.0;
+                self.show.pass(&games[i])
+                    && match members {
+                        Some(m) => m.contains(&app),
+                        None => !colls.hidden.contains(&app),
+                    }
+            })
+            .collect();
         match self.sort {
-            Sort::Alphabetical => {} // `games` is already sorted by name.
+            Sort::Alphabetical => {} // `games` is already sorted by name, and filtering keeps that order.
             Sort::LastPlayed => order.sort_by_key(|&i| std::cmp::Reverse(games[i].last_played)),
             Sort::HoursPlayed => order.sort_by_key(|&i| std::cmp::Reverse(games[i].playtime_minutes)),
         }

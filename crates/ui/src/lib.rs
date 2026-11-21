@@ -5,6 +5,7 @@
 
 mod anim;
 mod chrome;
+mod collections_ui;
 mod dialogs;
 mod downloads_page;
 mod fmt;
@@ -15,6 +16,7 @@ mod game_page;
 mod library;
 mod login;
 mod overlay;
+mod properties;
 mod settings_page;
 mod sidebar;
 mod store;
@@ -58,6 +60,7 @@ pub struct AppUi {
     sidebar: sidebar::SidebarView,
     store: store::StoreView,
     settings: settings_page::SettingsView,
+    properties: properties::PropertiesView,
     overlays: dialogs::Overlays,
     friends: friends::FriendsView,
     overlay: overlay::OverlayView,
@@ -135,6 +138,11 @@ impl AppUi {
             }
         });
         self.overlays.show(ui.ctx(), client);
+        collections_ui::show_prompt(ui.ctx(), client);
+        if let Some((app, tab)) = self.overlays.properties.take() {
+            self.properties.open(app, tab, client, ui.ctx());
+        }
+        self.properties.show(ui.ctx(), client, &mut self.overlays);
         self.settings.show(ui.ctx(), client);
         self.overlay.show(ui.ctx(), client, &mut self.textures, &mut self.friends);
         if let Some(n) = nav.or_else(|| self.overlays.goto.take()) {

@@ -10,10 +10,12 @@
 
 mod art;
 mod cm_hub;
+mod collections;
 mod demo;
 mod downloads;
 mod friends;
 mod launch;
+mod launch_options;
 mod manage;
 mod notes;
 mod open;
@@ -23,6 +25,7 @@ mod tools;
 mod web_image;
 
 pub use art::ArtImage;
+pub use collections::{CollCmd, Collections, FAVORITE, HIDDEN};
 pub use downloads::{
     ActiveDownload, DownloadItem, DownloadKind, DownloadPhase, DownloadRequest, DownloadStatus, DownloadsState,
     FinishedDownload, OsChoice, Outcome, PausedDownload, StopKind,
@@ -31,6 +34,7 @@ pub use friends::{
     Chat, Delivery, Friend, FriendsState, FriendsStatus, GamePlayed, HistoryState, MAX_TEXT, Me, Message, PersonaState,
     Toast, local_utc_offset,
 };
+pub use launch_options::LaunchOptionsState;
 pub use notes::MAX_NOTE_CHARS;
 pub use play::{PlayProblem, RunningGame};
 pub use settings::{LibraryChoice, MAX_WORKERS, MIN_WORKERS, Settings};
@@ -108,6 +112,7 @@ pub struct State {
     /// Games waiting for the Steam client to start before they launch.
     pub starting_steam: Vec<AppId>,
     pub compat: CompatState,
+    pub launch_options: LaunchOptionsState,
     pub settings: Settings,
     /// Places a game can be installed into.
     pub libraries: Vec<LibraryChoice>,
@@ -116,6 +121,8 @@ pub struct State {
     pub friends: FriendsState,
     /// The overlay's per-game notes, by app id.
     pub notes: std::collections::BTreeMap<String, String>,
+    /// Favourites, hidden games and collections (ours merged with the official client's).
+    pub collections: Collections,
 }
 
 /// How many disk-space answers are kept.
@@ -219,6 +226,13 @@ pub enum Command {
     /// Ask how much space is free where `PathBuf` is (answer in `State::free_space`).
     CheckFree(PathBuf),
     CompatLoad,
+    /// Look up the official client's launch options for a game (answer in `State::launch_options`).
+    LoadLaunchOptions(AppId),
+    /// Save our launch options text for a game.
+    SetLaunchOptions {
+        app: AppId,
+        text: String,
+    },
     /// Our tool override for a game (`None` = use Steam's choice).
     SetCompatTool {
         app: AppId,
@@ -241,6 +255,8 @@ pub enum Command {
     SetOverlay(bool),
     /// Save a game's overlay note (an empty text deletes it).
     SetNote(AppId, String),
+    /// Favourites, hidden games and collections.
+    Collections(CollCmd),
     /// Load the featured rows (no-op while loading or fresh).
     StoreLoad,
     /// Search the store; an empty query clears the results.
@@ -324,6 +340,10 @@ enum Event {
     Uninstalled {
         app: AppId,
         result: Result<(), String>,
+    },
+    SteamLaunchOptions {
+        app: AppId,
+        text: Option<String>,
     },
     CompatInfo {
         generation: u64,
@@ -438,11 +458,16 @@ impl Client {
                 play_problem: None,
                 starting_steam: Vec::new(),
                 compat: CompatState::default(),
+                launch_options: LaunchOptionsState {
+                    ours: sr_steam::launch_opts::LaunchOptions::load().apps,
+                    ..Default::default()
+                },
                 libraries: settings::library_choices(&settings),
                 settings,
                 free_space: Vec::new(),
                 friends: FriendsState::default(),
                 notes: notes::Notes::load().apps,
+                collections: Collections::load(),
             },
             session: None,
             friends: friends::FriendsInner::default(),
@@ -512,6 +537,8 @@ impl Client {
             Command::BrowseFiles(app) => self.browse_files(app),
             Command::CheckFree(path) => self.check_free(path),
             Command::CompatLoad => self.compat_load(),
+            Command::LoadLaunchOptions(app) => self.load_launch_options(app),
+            Command::SetLaunchOptions { app, text } => self.set_launch_options(app, text),
             Command::SetCompatTool { app, tool } => self.set_compat_tool(app.0, tool),
             Command::ProtonReleases(refresh) => self.proton_releases(refresh),
             Command::ProtonInstall { source, tag, target } => self.proton_install(source, tag, target),
@@ -522,6 +549,7 @@ impl Client {
             | Command::SetStartSteam(_)
             | Command::SetOverlay(_)) => settings::handle(self, c),
             Command::SetNote(app, text) => self.set_note(app, text),
+            Command::Collections(c) => self.collections_cmd(c),
             Command::StoreLoad => self.store_load(),
             Command::StoreSearch(q) => self.store_search(q),
             Command::StoreDetails(app) => self.store_details(app),
@@ -644,6 +672,7 @@ impl Client {
                 });
                 self.spawn_local_scan();
             }
+            Event::SteamLaunchOptions { app, text } => self.steam_launch_options(app, text),
             Event::CompatInfo { generation, result, last } => self.apply_compat_info(generation, result, last),
             Event::Releases { source, result } => self.apply_releases(source, result),
             Event::ToolProgress { job, progress } => self.tool_progress(job, progress),
@@ -699,6 +728,7 @@ impl Client {
     /// Recompute install state and notify views that `games` changed.
     fn merge_installed(&mut self) {
         self.state.library_rev += 1;
+        self.reload_steam_collections();
         self.add_local_games();
         self.art.set_icon_hashes(self.state.games.iter().map(|g| (g.app_id, g.icon_hash.clone())).collect());
         for g in &mut self.state.games {
@@ -876,6 +906,8 @@ impl Client {
         self.state.account = Some(Account { account_name: "demo".into(), steam_id: SteamId(0) });
         self.state.screen = Screen::Library;
         self.merge_installed();
+        let ids: Vec<u32> = self.state.games.iter().map(|g| g.app_id.0).collect();
+        self.state.collections.set_demo(&ids);
         if std::env::var_os("KETTLE_HUB_STALL").is_some() {
             // Test aid: a signed-in look-alike whose Steam connection never completes (see `cm_hub`).
             self.session =

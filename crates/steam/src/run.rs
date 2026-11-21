@@ -11,6 +11,7 @@
 
 use crate::appinfo::{AppInfo, AppInfoFile, LaunchEntry};
 use crate::compat::{self, ChoiceSource, Choices, CompatTool, ToolKind};
+use crate::launch_opts;
 use crate::local::{self, InstalledApp};
 use crate::store;
 use anyhow::{Context, Result, bail, ensure};
@@ -273,6 +274,8 @@ pub struct PrepareOpts {
     /// Tool to use instead of the saved choices (an internal name).
     pub tool: Option<String>,
     pub extra_args: Vec<String>,
+    /// The game's launch options text (see [`crate::launch_opts`]); `None` = none.
+    pub launch_options: Option<String>,
 }
 
 pub struct Prepared {
@@ -344,11 +347,13 @@ pub fn prepare_with(info: &AppInfo, installed: Option<&InstalledApp>, opts: &Pre
     let runtime = tool.and_then(|t| runtime_for(t, &tools));
     // Luxtorpeda replaces the engine even for Linux entries; everything else only matters when compat is needed.
     let uses_tool = needs_compat(entry, host) || tool.is_some_and(|t| t.kind == ToolKind::Luxtorpeda && prefer_compat);
-    let plan = plan(&PlanInput {
+    let parsed = opts.launch_options.as_deref().map(launch_opts::parse).unwrap_or_default();
+    let extra_args: Vec<String> = parsed.args.iter().chain(&opts.extra_args).cloned().collect();
+    let mut plan = plan(&PlanInput {
         appid,
         install_dir: &install_dir,
         entry,
-        extra_args: &opts.extra_args,
+        extra_args: &extra_args,
         host,
         steam_root: steam_root.as_deref(),
         tool: tool.filter(|_| uses_tool),
@@ -356,6 +361,7 @@ pub fn prepare_with(info: &AppInfo, installed: Option<&InstalledApp>, opts: &Pre
         umu: umu.as_deref(),
         compatdata: &compatdata,
     })?;
+    launch_opts::apply(&mut plan, &parsed);
     let tool = tool.filter(|_| uses_tool).map(|t| (t.internal_name.clone(), source.unwrap_or(ChoiceSource::Newest)));
     Ok(Prepared {
         plan,
@@ -536,6 +542,64 @@ mod tests {
         assert_eq!(p.program, Path::new("/lib/steamapps/common/SteamLinuxRuntime_sniper/_v2-entry-point"));
         assert_eq!(p.args[..3], ["--verb=waitforexitandrun", "--", "/tools/GE-Proton9-20/proton"]);
         assert!(p.env["STEAM_COMPAT_TOOL_PATHS"].contains("SteamLinuxRuntime_sniper"));
+    }
+
+    /// Plan with launch options the way `prepare_with` composes them.
+    fn with_options(i: &PlanInput, text: &str) -> LaunchPlan {
+        let parsed = launch_opts::parse(text);
+        let mut p = plan(&PlanInput {
+            extra_args: &parsed.args,
+            appid: i.appid,
+            install_dir: i.install_dir,
+            entry: i.entry,
+            host: i.host,
+            steam_root: i.steam_root,
+            tool: i.tool,
+            runtime: i.runtime,
+            umu: i.umu,
+            compatdata: i.compatdata,
+        })
+        .unwrap();
+        launch_opts::apply(&mut p, &parsed);
+        p
+    }
+
+    #[test]
+    fn launch_options_native() {
+        let e = entry("game.sh", &["linux"]);
+        let i = input(&e, None, HostOs::Linux);
+        let p = with_options(&i, "FOO=1 gamemoderun %command% -novid");
+        assert_eq!(p.program, Path::new("gamemoderun"));
+        assert_eq!(p.args, ["/lib/steamapps/common/G/game.sh", "-a", "b c", "-novid"]);
+        assert_eq!(p.env["FOO"], "1");
+        // Without %command% the text is plain extra arguments.
+        let p = with_options(&i, "-novid 'two words'");
+        assert_eq!(p.program, Path::new("/lib/steamapps/common/G/game.sh"));
+        assert_eq!(p.args, ["-a", "b c", "-novid", "two words"]);
+        // Empty text changes nothing.
+        let p = with_options(&i, "");
+        assert_eq!(p.args, ["-a", "b c"]);
+    }
+
+    #[test]
+    fn launch_options_proton_and_umu() {
+        let e = entry("game.exe", &["windows"]);
+        let t = tool(ToolKind::Proton, Some("/proton %verb%"));
+        let i = input(&e, Some(&t), HostOs::Linux);
+        let p = with_options(&i, "PROTON_LOG=1 mangohud %command% -x");
+        assert_eq!(p.program, Path::new("mangohud"));
+        assert_eq!(
+            p.args,
+            ["/tools/GE-Proton9-20/proton", "waitforexitandrun", "/lib/steamapps/common/G/game.exe", "-a", "b c", "-x"]
+        );
+        assert_eq!(p.env["PROTON_LOG"], "1");
+        assert_eq!(p.env["STEAM_COMPAT_APP_ID"], "730");
+        let mut i = input(&e, Some(&t), HostOs::Linux);
+        i.umu = Some(Path::new("/usr/bin/umu-run"));
+        let p = with_options(&i, "DXVK_HUD=fps %command% -x");
+        assert_eq!(p.program, Path::new("/usr/bin/umu-run"));
+        assert_eq!(p.args, ["/lib/steamapps/common/G/game.exe", "-a", "b c", "-x"]);
+        assert_eq!(p.env["DXVK_HUD"], "fps");
     }
 
     #[test]
