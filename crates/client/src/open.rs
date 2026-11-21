@@ -6,8 +6,12 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 /// Only Valve's store is opened from the UI; anything else is refused.
-const ALLOWED_PREFIXES: [&str; 3] =
-    ["https://store.steampowered.com/", "https://help.steampowered.com/", "https://github.com/SeniorMatt/kettle"];
+const ALLOWED_PREFIXES: [&str; 4] = [
+    "https://store.steampowered.com/",
+    "https://help.steampowered.com/",
+    "https://github.com/SeniorMatt/kettle",
+    "https://www.protondb.com/app/",
+];
 
 /// Start the browser and return at once. A thread reaps the child so no
 /// zombie is left behind; the UI thread never waits.

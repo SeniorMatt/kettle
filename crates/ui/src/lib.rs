@@ -3,6 +3,7 @@
 //! Architecture invariant: no I/O here. Views read `client.state()`, keep only
 //! view-local state (search text, scroll), and act through `client.send(..)`.
 
+pub mod add_game_ui;
 mod anim;
 mod chrome;
 mod collections_ui;
@@ -11,8 +12,10 @@ mod downloads_page;
 mod fmt;
 mod fonts;
 mod friends;
+pub mod game_env_ui;
 mod game_menu;
 mod game_page;
+pub mod kettle_update_ui;
 mod library;
 mod login;
 mod menubar;
@@ -21,7 +24,9 @@ mod overlay;
 mod overlay_panel;
 mod profile;
 mod properties;
+pub mod protondb_badge;
 mod settings_downloads;
+pub mod settings_extra;
 mod settings_gamescope;
 mod settings_ingame;
 mod settings_interface;

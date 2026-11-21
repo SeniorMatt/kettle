@@ -34,7 +34,7 @@ Nothing here is a promise. The owner decides what comes next. Bugs found on real
 - [ ] Library: home shelves (recent games, what's new)
 - [ ] Library: list view with columns
 - [ ] Library: custom artwork per game
-- [ ] Library: non-Steam games (Add a Game)
+- [x] Library: non-Steam games (Add a Game, import of Steam's shortcuts) (unit-tested; not tried on the desktop yet)
 - [ ] Library: Family Sharing libraries
 - [x] Library: game page with hero art, play time, last played
 - [ ] Library: game page activity feed and news
@@ -110,8 +110,8 @@ Nothing here is a promise. The owner decides what comes next. Bugs found on real
 - [x] Compatibility: per-game choice, using Steam's choice by default
 - [x] Compatibility: SteamLinuxRuntime container
 - [ ] Compatibility: update notifications for installed tools
-- [ ] Compatibility: per-game environment variables (DXVK, MangoHud, gamemode)
-- [ ] Compatibility: ProtonDB rating on game pages
+- [x] Compatibility: per-game environment variables (DXVK, MangoHud, gamemode) (unit-tested; not tried on the desktop yet)
+- [x] Compatibility: ProtonDB rating on game pages (unit-tested; not tried on the desktop yet)
 
 ## Cloud
 
@@ -130,7 +130,7 @@ Nothing here is a promise. The owner decides what comes next. Bugs found on real
 - [ ] Friends: friend profiles pop-up (a full profile page is coded; the small pop-up is not)
 - [ ] Friends: invite to game and join game
 - [ ] Friends: nicknames and favourites
-- [ ] Friends: notifications for friends coming online
+- [x] Friends: notifications for friends coming online (and for starting a game) (unit-tested; not tried on the desktop yet)
 
 ## Chat
 
@@ -191,7 +191,7 @@ Nothing here is a promise. The owner decides what comes next. Bugs found on real
 - [ ] Settings: in-game (screenshot key, overlay key; performance overlay is built, not yet tested)
 - [ ] Settings: controller
 - [ ] Settings: minimize to tray, start minimized (built, not tested yet)
-- [ ] Settings: start with the computer
+- [x] Settings: start with the computer (unit-tested; not tried on the desktop yet)
 
 ## Interface
 
@@ -215,5 +215,5 @@ Nothing here is a promise. The owner decides what comes next. Bugs found on real
 - [ ] Platform: tested on real Windows
 - [ ] Platform: Flatpak package
 - [ ] Platform: .deb / AUR packages
-- [ ] Platform: auto-update of Kettle itself
+- [x] Platform: auto-update of Kettle itself (AppImage) (unit-tested; not tried on the desktop yet)
 - [ ] Platform: macOS

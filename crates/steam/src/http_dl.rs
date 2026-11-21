@@ -34,3 +34,16 @@ pub fn get_text(url: &str, limit: u64) -> Result<String> {
     anyhow::ensure!(text.len() as u64 <= limit, "{url} is larger than expected");
     Ok(text)
 }
+
+/// Like [`get_text`], but a 404 answer is `Ok(None)` (the site has nothing for this address).
+pub fn get_text_or_404(url: &str, limit: u64) -> Result<Option<String>> {
+    let mut resp = match agent().get(url).call() {
+        Ok(r) => r,
+        Err(ureq::Error::StatusCode(404)) => return Ok(None),
+        Err(e) => return Err(anyhow::Error::new(e).context(format!("fetching {url}"))),
+    };
+    let mut text = String::new();
+    resp.body_mut().as_reader().take(limit + 1).read_to_string(&mut text)?;
+    anyhow::ensure!(text.len() as u64 <= limit, "{url} is larger than expected");
+    Ok(Some(text))
+}

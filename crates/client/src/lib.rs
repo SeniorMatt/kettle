@@ -9,25 +9,31 @@
 //! in the keyring, never in `State`.
 
 mod art;
+mod autostart;
 mod cm_hub;
 mod collections;
 mod demo;
 mod download_settings;
 mod downloads;
 mod extras;
+mod friend_notify;
 mod friends;
+mod game_env;
 mod gamescope_settings;
 mod hud_settings;
 mod interface_settings;
+mod kettle_update;
 mod launch;
 mod launch_options;
 mod manage;
+mod non_steam;
 mod notes;
 mod notify;
 mod open;
 mod overlay_proto;
 mod play;
 mod profile;
+mod protondb;
 mod settings;
 mod shortcuts;
 #[cfg(target_os = "linux")]
@@ -67,6 +73,20 @@ pub use hud_settings::{
 };
 pub use interface_settings::{AnimationMode, InterfaceSettings, MAX_SCALE_PERCENT, MIN_SCALE_PERCENT, StartPage};
 pub use launch_options::LaunchOptionsState;
+pub use autostart::{MINIMIZED_ARG, file_path as autostart_file};
+pub use game_env::{
+    EnvVar, GameEnv, GameEnvState, MAX_VALUE as ENV_MAX_VALUE, MAX_VARS as ENV_MAX_VARS, parse_line as parse_env_line,
+    parse_text as parse_env_text, to_text as env_to_text, valid_key as valid_env_key, valid_value as valid_env_value,
+};
+pub use kettle_update::{
+    CHECK_EVERY as KETTLE_UPDATE_EVERY, KettleUpdateCmd, KettleUpdateState, UpdateInfo as KettleUpdateInfo,
+    UpdateStatus as KettleUpdateStatus,
+};
+pub use non_steam::{
+    DesktopEntry, ID_BIT as NON_STEAM_ID_BIT, NonSteamCmd, NonSteamGame, NonSteamState, find_icon as find_desktop_icon,
+    installed_desktop_apps, read_desktop_file,
+};
+pub use protondb::{ProtonDbRating, Tier as ProtonTier, page_url as protondb_page_url};
 pub use notes::MAX_NOTE_CHARS;
 pub use overlay_proto::{
     ChatRow, FriendRow, FromHelper, MAX_LINE as OVERLAY_MAX_LINE, MsgRow, Snapshot as OverlaySnapshot, ToHelper,
@@ -169,6 +189,16 @@ pub struct State {
     pub collections: Collections,
     /// Updates found, install dialog data, storage moves (see `extras`).
     pub extra: ExtraState,
+    /// Kettle's own update (AppImage only).
+    pub kettle_update: KettleUpdateState,
+    /// "Start with the computer": the autostart file exists.
+    pub autostart: bool,
+    /// ProtonDB ratings by app id (`Ready(None)` = no reports). Filled by `Command::ProtonDb`.
+    pub protondb: HashMap<u32, Load<Option<ProtonDbRating>>>,
+    /// Per-game environment variables and switches.
+    pub game_env: GameEnvState,
+    /// Games added by hand or imported from Steam's shortcuts (they are also in `games`).
+    pub non_steam: NonSteamState,
 }
 
 /// How many disk-space answers are kept.
@@ -353,6 +383,16 @@ pub enum Command {
     ProfileEditCancel,
     /// The window gained or lost focus (desktop notifications only show while it is unfocused).
     WindowFocus(bool),
+    /// Check for, download and install a new Kettle (see `kettle_update`).
+    KettleUpdate(KettleUpdateCmd),
+    /// "Start with the computer": write or remove the XDG autostart entry.
+    SetAutostart(bool),
+    /// Fetch the ProtonDB rating of a game; nothing is requested when `native_linux` is true.
+    ProtonDb { app: AppId, native_linux: bool },
+    /// Save a game's environment variables and switches (an empty value removes them).
+    SetGameEnv { app: AppId, env: GameEnv },
+    /// Add, remove or import non-Steam games.
+    NonSteam(NonSteamCmd),
 }
 
 /// Results of background work. `generation` ties a result to the session that
@@ -470,6 +510,13 @@ enum Event {
         generation: u64,
         ev: profile::ProfileEvent,
     },
+    KettleUpdate(kettle_update::Ev),
+    ProtonDb {
+        app: AppId,
+        result: Result<Option<ProtonDbRating>, String>,
+    },
+    /// Shortcuts read from the official client's files.
+    SteamShortcuts(Vec<NonSteamGame>),
 }
 
 struct Session {
@@ -557,6 +604,11 @@ impl Client {
                 notes: notes::Notes::load().apps,
                 collections: Collections::load(),
                 extra: ExtraState::default(),
+                kettle_update: KettleUpdateState::default(),
+                autostart: autostart::is_enabled(),
+                protondb: HashMap::new(),
+                game_env: GameEnvState::load(),
+                non_steam: NonSteamState::load(),
             },
             session: None,
             friends: friends::FriendsInner::default(),
@@ -585,6 +637,7 @@ impl Client {
             generation: Arc::new(AtomicU64::new(0)),
         };
         c.spawn_local_scan();
+        c.start_kettle_update_ticker();
         match std::env::var("KETTLE_DEMO").ok().and_then(|v| v.parse::<usize>().ok()) {
             Some(n) => {
                 c.start_demo(n);
@@ -667,6 +720,11 @@ impl Client {
             Command::ProfileEditSave(p) => self.profile_edit_save(p),
             Command::ProfileEditCancel => self.profile_edit_cancel(),
             Command::WindowFocus(on) => self.state.friends.window_unfocused = !on,
+            Command::KettleUpdate(c) => self.kettle_update_cmd(c),
+            Command::SetAutostart(on) => self.set_autostart(on),
+            Command::ProtonDb { app, native_linux } => self.protondb_load(app, native_linux),
+            c @ Command::SetGameEnv { .. } => game_env::handle(self, c),
+            Command::NonSteam(c) => self.non_steam_cmd(c),
             Command::OpenStorePage(app) => {
                 self.notice_on_err(open::url(&format!("https://store.steampowered.com/app/{app}")));
             }
@@ -810,6 +868,9 @@ impl Client {
             Event::StoreDetails { app, result } => self.apply_details(app, result),
             Event::Friends { generation, ev } if generation == current => self.apply_friends(ev),
             Event::Profile { generation, ev } if generation == current => self.apply_profile(ev),
+            Event::KettleUpdate(ev) => self.apply_kettle_update(ev),
+            Event::ProtonDb { app, result } => self.apply_protondb(app, result),
+            Event::SteamShortcuts(found) => self.steam_shortcuts_read(found),
             // Stale result from an older generation.
             _ => {}
         }
@@ -842,6 +903,7 @@ impl Client {
         self.state.library_rev += 1;
         self.reload_steam_collections();
         self.add_local_games();
+        self.add_non_steam_games();
         self.art.set_icon_hashes(self.state.games.iter().map(|g| (g.app_id, g.icon_hash.clone())).collect());
         for g in &mut self.state.games {
             // Steam's numbers plus the time we measured ourselves.
@@ -862,6 +924,7 @@ impl Client {
                 _ => InstallState::NotInstalled,
             };
         }
+        self.mark_non_steam_installed();
     }
 
     /// Show games installed on this machine even when the owned list is empty or can't be loaded (no network,

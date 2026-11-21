@@ -576,6 +576,62 @@ pub fn prepare_with(info: &AppInfo, installed: Option<&InstalledApp>, opts: &Pre
     })
 }
 
+/// Plan for a program that is not a Steam game (Kettle's "Add a Game"): a Linux program runs as it is, a
+/// Windows one (`.exe` and friends) goes through the default compatibility tool with its own prefix in our data
+/// dir. `appid` is only an identifier for the prefix folder and the launch log. `args` is one text, split like
+/// launch options. Does no writes.
+pub fn prepare_exe(appid: u32, exe: &Path, args: &str, proton_log: bool, tool: Option<&str>) -> Result<LaunchPlan> {
+    ensure!(exe.is_absolute(), "the program's path must be absolute");
+    ensure!(exe.is_file(), "The program is missing: {}", exe.display());
+    let dir = exe.parent().context("the program has no folder")?;
+    let name = exe.file_name().and_then(|n| n.to_str()).context("the program's file name is not text")?;
+    let host = HostOs::current();
+    let windows = looks_windows(name);
+    if !windows && host == HostOs::Linux {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(exe)?.permissions().mode();
+            ensure!(mode & 0o111 != 0, "{} is not marked as executable (chmod +x it).", exe.display());
+        }
+    }
+    let entry = LaunchEntry {
+        id: "0".into(),
+        executable: name.to_string(),
+        arguments: args.to_string(),
+        oslist: vec![if windows { "windows" } else { "linux" }.to_string()],
+        ..Default::default()
+    };
+    let tools = compat::discover();
+    let valve = SteamPlay::load();
+    let steam_map = compat::steam_mapping_all();
+    let ours = Choices::load();
+    let opts = PrepareOpts { tool: tool.map(str::to_string), ..Default::default() };
+    let (tool, _) = if windows { pick(&tools, appid, &opts, &ours, &steam_map, &valve)? } else { (None, None) };
+    let runtime = tool.and_then(|t| runtime_for(t, &tools));
+    let compatdata = store::data_dir().join("compatdata").join(appid.to_string());
+    let steam_root = local::steam_roots().first().cloned();
+    let umu = find_umu();
+    let libraries = all_libraries();
+    plan(&PlanInput {
+        appid,
+        install_dir: dir,
+        entry: &entry,
+        extra_args: &[],
+        host,
+        steam_root: steam_root.as_deref(),
+        tool,
+        runtime,
+        umu: umu.as_deref(),
+        compatdata: &compatdata,
+        libraries: &libraries,
+        compat: None,
+        proton_log,
+        native_runtime: None,
+        legacy_runtime: None,
+    })
+}
+
 /// Every library folder of every Steam root, plus our own.
 fn all_libraries() -> Vec<PathBuf> {
     let mut libs: Vec<PathBuf> = Vec::new();
