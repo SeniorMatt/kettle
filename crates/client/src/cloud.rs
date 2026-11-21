@@ -111,6 +111,8 @@ impl State {
 pub(crate) struct Ctx {
     maps: Vec<Mapping>,
     remote: Option<PathBuf>,
+    /// `remote/` was left out because it sits in the official Steam client's folder.
+    remote_skipped: bool,
     target: Target,
 }
 
@@ -195,15 +197,19 @@ fn locate(p: &Prepared, ufs: &Kv, steam_id: u64, appid: u32, log: &mut Vec<Strin
     let env = Env::for_launch(&p.install_dir, prefix.as_deref(), steam_id);
     let (maps, notes) = cloud::mappings(&Ufs::from_kv(ufs), &env);
     log.extend(notes.into_iter().map(|n| format!("cloud: {n}")));
-    let root = run::steam_root_for(&p.install_dir).unwrap_or_else(store::data_dir);
-    let remote = root.join("userdata").join(env.account_id().to_string()).join(appid.to_string()).join("remote");
+    let official = run::steam_root_for(&p.install_dir);
+    let remote = cloud::remote_dir(official.as_deref(), &store::data_dir(), env.account_id(), appid);
+    if remote.is_none() {
+        log.push(cloud::REMOTE_SKIPPED.to_string());
+    }
     log.push(format!(
-        "cloud: looking for saves as a {} game in {} place(s) and {}",
+        "cloud: looking for saves as a {} game in {} place(s){}",
         env.target.name(),
         maps.len(),
-        remote.display()
+        remote.as_ref().map_or(String::new(), |r| format!(" and {}", r.display()))
     ));
-    Ok(Ctx { maps, remote: Some(remote), target: env.target })
+    let remote_skipped = remote.is_none();
+    Ok(Ctx { maps, remote, remote_skipped, target: env.target })
 }
 
 fn job_for<'a>(appid: u32, ctx: &'a Ctx, dry: bool) -> Job<'a> {
@@ -261,6 +267,7 @@ pub(crate) fn pre_launch(
                 (0, u) => format!("Steam Cloud: uploaded {}", plural(u, "save file")),
                 (d, u) => format!("Steam Cloud: downloaded {}, uploaded {}", plural(d, "save file"), u),
             };
+            let text = if ctx.remote_skipped { format!("{text}. {}", cloud::REMOTE_SKIPPED) } else { text };
             ev(CloudEvent::Note { app, text, problem: false });
             done(Some(ctx));
             Gate::Go(lines(&log))
@@ -413,6 +420,7 @@ impl Client {
                     (format!("Steam Cloud could not upload your saves: {e:#}. They stay on this computer and are sent after the next session."), true)
                 }
             };
+            let text = if ctx.remote_skipped { format!("{text}. {}", cloud::REMOTE_SKIPPED) } else { text };
             run::append_log(app.0, &lines(&log));
             send(CloudEvent::Note { app, text, problem });
             send(CloudEvent::Phase { app, phase: None });

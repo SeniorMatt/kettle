@@ -204,3 +204,4 @@ Use a small game that has Steam Cloud and starts under Kettle. Open the launch l
 - [ ] Per-game off and the global switch: with either off the log has no `cloud:` lines and nothing is sent. Settings survive a restart.
 - [ ] Failure: disconnect the network just before Play (or sign out of the hub): the game still starts, a notice says Cloud could not sync, and nothing is uploaded after the session.
 - [ ] No save file is ever deleted by Kettle; a file deleted in the cloud stays on disk.
+- [ ] With the official Steam client installed: a game that keeps its saves in `userdata/<account>/<app>/remote` is not synced for that folder; the launch log says `Cloud: remote/ belongs to the Steam client, skipped` and the game page shows it. Nothing under the Steam folder changes (check modification times). Saves in the game folder, home or the Proton prefix still sync.

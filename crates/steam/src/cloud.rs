@@ -836,3 +836,31 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+/// Where `ISteamRemoteStorage` files live and whether we may touch them. Steam's own folders are read-only for
+/// us, so with an official Steam root (`official_root` is `Some`) the answer is `None` (skip `remote/`); only a
+/// root Kettle made itself (`kettle_dir`, used when there is no official one) is synced.
+pub fn remote_dir(official_root: Option<&Path>, kettle_dir: &Path, account_id: u32, appid: u32) -> Option<PathBuf> {
+    if official_root.is_some() {
+        return None;
+    }
+    Some(kettle_dir.join("userdata").join(account_id.to_string()).join(appid.to_string()).join("remote"))
+}
+
+/// The log line when `remote/` is skipped.
+pub const REMOTE_SKIPPED: &str = "Cloud: remote/ belongs to the Steam client, skipped";
+
+#[cfg(test)]
+mod remote_tests {
+    use super::*;
+
+    #[test]
+    fn remote_is_skipped_in_official_roots_only() {
+        let kettle = Path::new("/home/u/.local/share/kettle");
+        assert_eq!(remote_dir(Some(Path::new("/home/u/.steam/steam")), kettle, 1234, 5), None);
+        assert_eq!(
+            remote_dir(None, kettle, 1234, 5),
+            Some(PathBuf::from("/home/u/.local/share/kettle/userdata/1234/5/remote"))
+        );
+    }
+}
