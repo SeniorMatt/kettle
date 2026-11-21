@@ -96,6 +96,7 @@ const ICON_CDN_NEW: &str = "https://shared.steamstatic.com/community_assets/imag
 
 /// Max size we accept from the CDN for one image (a hero is ~1-3 MB).
 const MAX_DOWNLOAD_BYTES: u64 = 16 * 1024 * 1024;
+const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct ArtSource {
     steam_roots: Vec<PathBuf>,
@@ -114,6 +115,13 @@ impl ArtSource {
     pub fn fetch(&self, app: AppId, kind: ArtKind, icon_hash: &str) -> Result<Option<Vec<u8>>> {
         let mut hash = icon_hash.to_string();
         if kind == ArtKind::Icon && hash.is_empty() {
+            // The official client keeps the icon as `<hash>.jpg` next to the covers: use it before asking the
+            // store, so a big library doesn't turn into one store request per sidebar row.
+            for root in &self.steam_roots {
+                if let Some(p) = local::cached_icon(root, app.0) {
+                    return Ok(Some(std::fs::read(p)?));
+                }
+            }
             hash = self.lookup(app)?.map(|a| a.icon_hash.clone()).unwrap_or_default();
             if hash.is_empty() {
                 return Ok(None);
@@ -162,10 +170,18 @@ impl ArtSource {
 
     /// The store's real asset paths for an app (one request per app and session).
     fn lookup(&self, app: AppId) -> Result<Option<Arc<StoreAssets>>> {
-        let mut map = self.lookups.lock().expect("lookup lock");
-        if let Some(hit) = map.get(&app) {
+        if let Some(hit) = self.lookups.lock().expect("lookup lock").get(&app) {
             return Ok(hit.clone());
         }
+        // The lock is not held during the request: the other art workers keep loading meanwhile.
+        let found = self.request_assets(app);
+        // A failed lookup counts as "nothing found" for this session, so it isn't repeated every frame.
+        let found = found.unwrap_or(None);
+        self.lookups.lock().expect("lookup lock").insert(app, found.clone());
+        Ok(found)
+    }
+
+    fn request_assets(&self, app: AppId) -> Result<Option<Arc<StoreAssets>>> {
         let resp = ureq::get(&get_items_url(&[app]))
             .config()
             .timeout_global(Some(LOOKUP_TIMEOUT))
@@ -176,9 +192,7 @@ impl ArtSource {
             bail!("HTTP {} from the store asset lookup", resp.status().as_u16());
         }
         let body = resp.into_body().with_config().limit(1024 * 1024).read_to_string()?;
-        let found = parse_get_items(&body).into_iter().find(|(a, _)| *a == app).map(|(_, v)| Arc::new(v));
-        map.insert(app, found.clone());
-        Ok(found)
+        Ok(parse_get_items(&body).into_iter().find(|(a, _)| *a == app).map(|(_, v)| Arc::new(v)))
     }
 }
 
@@ -189,7 +203,9 @@ fn is_fresh(marker: &Path) -> bool {
 }
 
 fn download(url: &str) -> Result<Option<Vec<u8>>> {
-    let resp = ureq::get(url).config().http_status_as_error(false).build().call()?;
+    // A stalled download must not hold an art worker forever.
+    let resp =
+        ureq::get(url).config().timeout_global(Some(DOWNLOAD_TIMEOUT)).http_status_as_error(false).build().call()?;
     match resp.status().as_u16() {
         200 => Ok(Some(resp.into_body().with_config().limit(MAX_DOWNLOAD_BYTES).read_to_vec()?)),
         403 | 404 => Ok(None),

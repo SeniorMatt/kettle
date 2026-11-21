@@ -146,6 +146,17 @@ fn parse_manifest(doc: &Node, steamapps: &Path) -> Option<InstalledApp> {
 /// Cached library art for an app from the official client's cache, if any.
 /// Layouts: `librarycache/<appid>/<file>`, `librarycache/<appid>/<hash>/<file>`
 /// (2024+ client) and the older flat `librarycache/<appid>_<file>`.
+/// The official client's cached icon of an app: a `<40 hex digits>.jpg` file in its art folder.
+pub fn cached_icon(root: &Path, appid: u32) -> Option<PathBuf> {
+    let dir = root.join("appcache/librarycache").join(appid.to_string());
+    std::fs::read_dir(dir).ok()?.flatten().map(|e| e.path()).find(|p| {
+        p.extension().is_some_and(|e| e == "jpg")
+            && p.file_stem()
+                .and_then(|s| s.to_str())
+                .is_some_and(|s| s.len() == 40 && s.bytes().all(|b| b.is_ascii_hexdigit()))
+    })
+}
+
 pub fn cached_art(root: &Path, appid: u32, file: &str) -> Option<PathBuf> {
     let cache = root.join("appcache/librarycache");
     let dir = cache.join(appid.to_string());
