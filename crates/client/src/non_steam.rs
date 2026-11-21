@@ -286,7 +286,7 @@ pub fn installed_desktop_apps() -> Vec<(String, PathBuf)> {
             }
         }
     }
-    out.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+    out.sort_by_key(|a| a.0.to_lowercase());
     out.truncate(500);
     out
 }
@@ -612,7 +612,7 @@ mod tests {
             b.push(0);
         };
         b.extend(b"\0shortcuts\0");
-        b.extend(b"\00\0");
+        b.extend(b"\x000\0");
         b.push(2);
         b.extend(b"appid\0");
         b.extend(0x8123_4567u32.to_le_bytes());
@@ -624,7 +624,7 @@ mod tests {
         s(&mut b, "0", "favorite");
         b.push(8); // end of tags
         b.push(8); // end of entry 0
-        b.extend(b"\01\0");
+        b.extend(b"\x001\0");
         s(&mut b, "appname", "No Path");
         s(&mut b, "exe", "relative");
         b.push(8);

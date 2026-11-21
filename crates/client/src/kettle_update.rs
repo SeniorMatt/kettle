@@ -114,6 +114,7 @@ impl PartialOrd for Version {
 }
 
 /// Is `candidate` newer than `current`? Unparsable versions are never newer.
+#[cfg(test)]
 pub fn is_newer(current: &str, candidate: &str) -> bool {
     match (Version::parse(current), Version::parse(candidate)) {
         (Some(c), Some(n)) => n > c,

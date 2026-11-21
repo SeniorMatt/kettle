@@ -63,6 +63,7 @@ pub fn settings_rows(ui: &mut Ui, client: &mut Client) {
 
 /// A one-line bar: "Kettle X is available [Update now] [Later]", the download progress, or "Restart now".
 /// Draws nothing (and returns false) in every other state. Call it where a bar fits, e.g. above the page.
+#[allow(clippy::collapsible_match)]
 pub fn banner(ui: &mut Ui, client: &mut Client) -> bool {
     let ku = client.state().kettle_update.clone();
     let show = matches!(

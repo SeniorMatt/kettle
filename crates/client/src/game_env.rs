@@ -113,7 +113,7 @@ impl GameEnv {
         if self.wined3d {
             env.insert("PROTON_USE_WINED3D".to_string(), "1".to_string());
         }
-        for v in self.cleaned().vars {
+        for v in self.clone().cleaned().vars {
             env.insert(v.key, v.value);
         }
         env
