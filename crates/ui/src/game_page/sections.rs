@@ -243,12 +243,18 @@ fn friends_box(ui: &mut Ui, client: &Client, tex: &mut Textures, friends: &[Frie
             avatar(ui, client, tex, Rect::from_min_size(rect.min, Vec2::splat(32.0)), f);
             let x = rect.left() + 40.0;
             let p = ui.painter();
-            let name = p.layout(f.display_name(), theme::regular(14.0), theme::GP_FRIEND_NAME, iw - 40.0);
+            let one_row = |s: String, size: f32, color: Color32| {
+                let mut job = LayoutJob::simple(s, theme::regular(size), color, iw - 40.0);
+                job.wrap.max_rows = 1;
+                job.wrap.overflow_character = Some('\u{2026}');
+                p.layout_job(job)
+            };
+            let name = one_row(f.display_name(), 14.0, theme::GP_FRIEND_NAME);
             let rich = f
                 .rich
                 .as_deref()
                 .filter(|r| !r.is_empty())
-                .map(|r| p.layout(r.to_string(), theme::regular(13.0), theme::GP_FRIEND_RICH, iw - 40.0));
+                .map(|r| one_row(r.to_string(), 13.0, theme::GP_FRIEND_RICH));
             let total = name.size().y.min(18.0) + rich.as_ref().map_or(0.0, |r| r.size().y.min(16.0));
             let y = rect.center().y - total / 2.0;
             let ny = y + name.size().y.min(18.0);
@@ -412,7 +418,7 @@ mod tests {
         assert_eq!(day_label(99, 100), "YESTERDAY");
         // 2024-03-05 seen from 2024-03-20, and from 2025.
         assert_eq!(day_label(19_787, 19_802), "MAR 5");
-        assert_eq!(day_label(19_787, 20_000), "MAR 5, 2024");
+        assert_eq!(day_label(19_787, 20_200), "MAR 5, 2024");
     }
 
     #[test]
