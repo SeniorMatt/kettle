@@ -58,4 +58,3 @@ The Shift+Tab shortcut is registered only while a game started here is running (
 ## Known limits
 
 - On a machine where the keyring has an empty password, the keyring is unlocked at login and its contents aren't encrypted at rest. That's the keyring's setting, not ours, but it means anyone with access to your user account can read the token.
-- `GetOwnedGames` takes the access token in the URL query (it's a GET API). That only travels over TLS to Valve, and it's scrubbed from any error text.
