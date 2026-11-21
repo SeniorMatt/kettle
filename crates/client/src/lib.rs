@@ -1144,6 +1144,8 @@ impl Client {
         self.local_only.clear();
         self.state.games = demo::games(n);
         self.state.gamepage.demo = true;
+        // Demo screenshots show US prices, not the region of whoever takes them.
+        storefront::set_country("US");
         self.capture_base_play();
         self.state.timings.cached_library = Some(t.elapsed());
         self.state.account = Some(Account { account_name: "demo".into(), steam_id: SteamId(0) });

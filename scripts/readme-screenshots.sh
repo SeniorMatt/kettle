@@ -12,7 +12,7 @@ fi
 out=${2:-$root/docs/images}; mkdir -p "$out"
 raw=$(mktemp -d)
 D=:59
-export DISPLAY=$D WGPU_BACKEND=vulkan KETTLE_DEMO=60 KETTLE_DEMO_INSTALLED=1 KETTLE_SHOT_SIZE=1600x900 KETTLE_FONT=builtin
+export DISPLAY=$D WGPU_BACKEND=vulkan KETTLE_DEMO=18 KETTLE_DEMO_INSTALLED=1 KETTLE_SHOT_SIZE=1600x900 KETTLE_FONT=builtin
 export KETTLE_DEMO_APPS=440,570,730,105600,252490,292030,367520,413150,504230,620,1091500,1145360,1245620,374320,1086940,1174180,271590,489830
 export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json
 [ -f "$VK_ICD_FILENAMES" ] || { icd=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json 2>/dev/null | head -1); [ -n "$icd" ] && VK_ICD_FILENAMES=$icd; }
@@ -29,6 +29,13 @@ shot() {
         KETTLE_SHOT_OPEN=$open "$bin" >"$raw/$name.log" 2>&1 &
     pid=$!
     sleep "${SHOT_WAIT:-30}"   # lets covers download and the first animations finish
+    # No window manager here: bring a Settings window to the front, centred, and park the mouse in a corner
+    # so no hover tooltip shows.
+    for w in $(xdotool search --name '^Settings$' 2>/dev/null); do
+        xdotool windowmove "$w" 300 100 windowraise "$w" 2>/dev/null
+    done
+    xdotool mousemove 1599 899 2>/dev/null
+    sleep 2
     ffmpeg -loglevel error -y -f x11grab -video_size 1600x900 -i $D -frames:v 1 "$raw/$name.png" || true
     kill "$pid" 2>/dev/null; sleep 1; kill -9 "$pid" 2>/dev/null; rm -rf "$home"
     [ -s "$raw/$name.png" ] || { echo "no screenshot for $name" >&2; return; }

@@ -61,7 +61,12 @@ pub fn show(ui: &mut Ui, client: &mut Client) {
         "Small icons next to the names in the library list.",
         &mut i.sidebar_icons,
     );
-    toggle_row(ui, "Show Kettle in the tray", "A tray icon with shortcuts and your recent games.", &mut i.tray);
+    toggle_row(
+        ui,
+        "Show Kettle in the tray",
+        "A tray icon with shortcuts to the Store, Library, Friends, Downloads and Settings.",
+        &mut i.tray,
+    );
     if i.tray {
         toggle_row(
             ui,

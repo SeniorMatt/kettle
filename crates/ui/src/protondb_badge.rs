@@ -36,6 +36,7 @@ pub fn badge(ui: &mut Ui, client: &mut Client, app: AppId, native_linux: bool) -
             let (tier, label) = (r.tier, r.tier.label());
             let resp = ui
                 .horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 5.0;
                     ui.label(RichText::new("ProtonDB").font(theme::regular(13.0)).color(theme::TEXT_DIM));
                     ui.label(RichText::new(label).font(theme::bold(13.0)).color(tier_color(tier)));
                 })
