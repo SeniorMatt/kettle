@@ -639,7 +639,7 @@ mod tests {
             xdg_config: PathBuf::from("/home/u/.config"),
             win_user: proton.then(|| PathBuf::from("/lib/steamapps/compatdata/5/pfx/drive_c/users/steamuser")),
             drive_c: proton.then(|| PathBuf::from("/lib/steamapps/compatdata/5/pfx/drive_c")),
-            steam_id: 76_561_198_000_000_000 + 1234,
+            steam_id: 0x0110_0001_0000_0000 + 1234,
         }
     }
 
