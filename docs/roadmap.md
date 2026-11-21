@@ -49,13 +49,13 @@ Nothing here is a promise. The owner decides what comes next. Bugs found on real
 - [x] Store: featured carousel, specials, new and trending, coming soon
 - [x] Store: search
 - [x] Store: game pages with screenshots and price
-- [ ] Store: videos and trailers
-- [ ] Store: reviews
-- [ ] Store: wishlist
+- [x] Store: videos and trailers (unit-tested parsing and link allowlist; opens in the system player, not yet tried by hand)
+- [x] Store: reviews (unit-tested parsing, not yet tried by hand)
+- [x] Store: wishlist (read-only, unit-tested parsing, not yet tried by hand; adding and removing stays on the store page)
 - [ ] Store: cart and checkout inside the app
-- [ ] Store: browse by tag, genre and category
+- [x] Store: browse by tag, genre and category (unit-tested parsing, not yet tried by hand)
 - [ ] Store: discovery queue
-- [ ] Store: your region's currency and language
+- [x] Store: your region's currency and language (country from the login, language from Settings; unit-tested, not yet tried by hand)
 - [ ] Store: sales events and points shop
 
 ## Downloads

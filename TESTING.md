@@ -157,6 +157,11 @@ Needs `gamescope` installed (`sudo apt install gamescope`). Never tried in a rea
 
 - [ ] Store tab: the carousel, specials and search all work.
 - [ ] Open a game, then step through its screenshots. Add to cart opens your browser.
+- [ ] A store page shows "Very Positive (12,345)"-style review summary and the ten most helpful reviews below the buy box.
+- [ ] A store page with trailers shows thumbnails under the screenshots; a click opens the video in your video player or browser.
+- [ ] Store > Wishlist (signed in, profile game details public): your games in your own order with price and discount; Refresh works; the browser button opens your wishlist. With a private profile it says so instead of failing.
+- [ ] Store > Browse: Top Sellers, New Releases, Specials and Coming Soon switch the list; genre chips and "More tags" narrow it; scrolling to the bottom loads more cards; a click opens the page.
+- [ ] Prices show your currency (check against the store in a browser); with a different language in Settings > Downloads the store texts follow (cached answers are per language).
 
 ## 8. Sign out
 

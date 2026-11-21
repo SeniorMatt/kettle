@@ -41,12 +41,12 @@ We **never write** to the official Steam client's files. We only read its `steam
 
 | Host | Why |
 |---|---|
-| `api.steampowered.com` | QR sign-in and the CM server list. Also the public store lookup `IStoreBrowseService/GetItems` (no login; only the app ID) to find cover art and icons that live at hashed paths |
+| `api.steampowered.com` | QR sign-in and the CM server list. Also the public store lookup `IStoreBrowseService/GetItems` (no login; only the app IDs, the country and language) to find cover art and icons that live at hashed paths, and names and prices for the wishlist and Browse lists. `IWishlistService/GetWishlist` (your own public SteamID; no login, so it only works when your profile's game details are public) and `IStoreService/GetTagList` (the genre and tag names) |
 | Steam CM servers (`*.steamserver.net`) | The client connection (encrypted): your owned games, downloads and short-lived access tokens. After sign-in it also carries Friends & Chat: your friends list, their names and presence, your own online state (Online by default; you can pick Away, Busy, Invisible or Offline in the panel) and chat messages |
 | `shared.steamstatic.com` | Cover art (only the app ID is sent) |
 | `media.steampowered.com` | Small game icons |
-| `store.steampowered.com` | Public store data for the Store tab: featured lists, search and app details. No login or cookies; only the country (`us`) and language (`english`) are sent, plus the search text or app ID you look at |
-| `*.steamstatic.com` | Store screenshots and capsules (only the image URL is requested) |
+| `store.steampowered.com` | Public store data for the Store tab: featured lists, search and app details. No login or cookies; only the country and language are sent (`cc=` and `l=`), plus the search text, app ID, tag ID and list offset you look at. The country is the one Steam reported when you signed in (from your IP address); before that, or if it is missing, no country is sent and Steam picks one from your IP address. The language is the one in Settings > Downloads (English by default). Store pages also request the app's user reviews (`/appreviews/<app id>`) and Browse uses `/search/results/?json=1`. Kettle never adds or removes wishlist entries, buys anything or sends cookies |
+| `*.steamstatic.com` | Store screenshots and capsules (only the image URL is requested). Trailers are not played in the app: a click hands the video address (on `video.*.steamstatic.com`) to your system's video player or browser |
 | `avatars.steamstatic.com` | Friends' profile pictures for the Friends & Chat panel (only the picture's hash is in the URL; kept in the same image cache) |
 
 All HTTPS uses rustls with certificate verification.
