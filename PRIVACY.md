@@ -35,7 +35,7 @@ All files are readable only by you: folders are mode `0700` and files `0600`.
 
 If a game needs the Steam client (Settings, Games tab, on by default), we start the official client minimized with `-silent` before it. We only start the program and read its pid file; nothing is sent to it or to Valve by us for this.
 
-We **never write** to the official Steam client's files. We only read its `steamapps/*.acf`, `libraryfolders.vdf`, `appcache/librarycache` and, for your collections, favourites and hidden games, `userdata/<account>/config/cloudstorage/cloud-storage-namespace-1.json` (read only; ours are kept separately in `collections.json`).
+We **never write** to the official Steam client's files. We only read its `steamapps/*.acf`, `appcache/stats/UserGameStats*_<app>.bin` (achievements on the game page), `libraryfolders.vdf`, `appcache/librarycache` and, for your collections, favourites and hidden games, `userdata/<account>/config/cloudstorage/cloud-storage-namespace-1.json` (read only; ours are kept separately in `collections.json`).
 
 ## Network connections
 
@@ -45,6 +45,8 @@ We **never write** to the official Steam client's files. We only read its `steam
 | Steam CM servers (`*.steamserver.net`) | The client connection (encrypted): your owned games, downloads and short-lived access tokens. After sign-in it also carries Friends & Chat: your friends list, their names and presence, your own online state (Online by default; you can pick Away, Busy, Invisible or Offline in the panel) and chat messages |
 | `shared.steamstatic.com` | Cover art (only the app ID is sent) |
 | `media.steampowered.com` | Small game icons |
+| `api.steampowered.com` (news) | `ISteamNews/GetNewsForApp` for the game page's news list: no key, no login, only the app ID is sent. The answer is cached for one hour in our cache folder |
+| `cdn.fastly.steamstatic.com` | Achievement icons on the game page (only the app ID and the icon name are in the URL) |
 | `store.steampowered.com` | Public store data for the Store tab: featured lists, search and app details. No login or cookies; only the country (`us`) and language (`english`) are sent, plus the search text or app ID you look at |
 | `*.steamstatic.com` | Store screenshots and capsules (only the image URL is requested) |
 | `avatars.steamstatic.com` | Friends' profile pictures for the Friends & Chat panel (only the picture's hash is in the URL; kept in the same image cache) |

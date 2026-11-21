@@ -37,10 +37,10 @@ Nothing here is a promise. The owner decides what comes next. Bugs found on real
 - [ ] Library: non-Steam games (Add a Game)
 - [ ] Library: Family Sharing libraries
 - [x] Library: game page with hero art, play time, last played
-- [ ] Library: game page activity feed and news
-- [ ] Library: game page achievements summary
-- [ ] Library: game page friends who play
-- [ ] Library: game page DLC list
+- [x] Library: game page activity feed and news (parser and layout tested, demo shots; not tried on a real account)
+- [x] Library: game page achievements summary (KeyValues reader tested with own fixtures; not tried on a real account)
+- [x] Library: game page friends who play (in-game friends only; "friends who own it" is not known to Kettle; not tried on a real account)
+- [x] Library: game page DLC list (names from PICS over the signed-in connection; installed mark only, no owned mark; not tried on a real account)
 - [x] Library: game properties window (launch options, compatibility, installed files)
 - [ ] Library: game properties: language and betas
 

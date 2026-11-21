@@ -16,6 +16,7 @@ mod download_settings;
 mod downloads;
 mod extras;
 mod friends;
+mod gamepage;
 mod gamescope_settings;
 mod hud_settings;
 mod interface_settings;
@@ -54,6 +55,7 @@ pub use friends::{
     GroupsState, HistoryState, LOADING as NAME_LOADING, MAX_GROUP_MESSAGES, MAX_TEXT, Me, Message, PersonaState,
     RoomInfo, Toast, local_utc_offset, sort_key as friend_sort_key,
 };
+pub use gamepage::{DlcEntry, GamePageState};
 pub use gamescope_settings::{
     Detection as GamescopeDetection, GamescopeGames, GamescopeSettings, INSTALL_HINTS as GAMESCOPE_INSTALL_HINTS,
     INSTALL_URL as GAMESCOPE_INSTALL_URL, MAX_SHARPNESS as GAMESCOPE_MAX_SHARPNESS, Override as GamescopeOverride,
@@ -76,6 +78,7 @@ pub use play::{PlayProblem, RunningGame};
 pub use profile::{EditPhase, ProfileEntry, ProfileLoad, ProfileState};
 pub use settings::{LibraryChoice, MAX_WORKERS, MIN_WORKERS, Settings};
 pub use sr_steam::community::{EditableProfile, MostPlayed, Privacy, ProfileXml, avatar_full_url};
+pub use sr_steam::gamepage::{Achievement, Achievements, NewsItem, news_page};
 pub use sr_steam::storefront::{AppDetails, Platforms, Price, Screenshot, Section, StoreItem};
 pub use storage::MoveState;
 pub use sysinfo::system_info;
@@ -169,6 +172,8 @@ pub struct State {
     pub collections: Collections,
     /// Updates found, install dialog data, storage moves (see `extras`).
     pub extra: ExtraState,
+    /// News, achievements and DLC shown on game pages.
+    pub gamepage: gamepage::GamePageState,
 }
 
 /// How many disk-space answers are kept.
@@ -323,6 +328,8 @@ pub enum Command {
     /// Search the store; an empty query clears the results.
     StoreSearch(String),
     StoreDetails(AppId),
+    /// Load what a game's page shows below the tabs: news, achievements, DLC (cached; cheap to repeat).
+    LoadGamePage(AppId),
     /// Open the app's store page in the system browser.
     OpenStorePage(AppId),
     /// Show the friends panel.
@@ -452,6 +459,7 @@ enum Event {
     },
     Notice(String),
     Extra(extras::Extra),
+    GamePage(gamepage::GamePageEv),
     StoreSections(Result<Vec<Section>, String>),
     StoreSearched {
         generation: u64,
@@ -521,6 +529,8 @@ pub struct Client {
     sections_at: Option<Instant>,
     /// `KETTLE_DEMO_INSTALLED` is set (screenshots only).
     demo_installed: bool,
+    /// When each game page's data was last requested.
+    gamepage_at: HashMap<u32, Instant>,
 }
 
 impl Client {
@@ -559,6 +569,7 @@ impl Client {
                 notes: notes::Notes::load().apps,
                 collections: Collections::load(),
                 extra: ExtraState::default(),
+                gamepage: gamepage::GamePageState::default(),
             },
             session: None,
             friends: friends::FriendsInner::default(),
@@ -579,6 +590,7 @@ impl Client {
             search_gen: 0,
             sections_at: None,
             demo_installed: std::env::var_os("KETTLE_DEMO_INSTALLED").is_some(),
+            gamepage_at: HashMap::new(),
             rt: std::mem::ManuallyDrop::new(rt),
             hub: None,
             local_only: HashSet::new(),
@@ -653,6 +665,7 @@ impl Client {
             Command::StoreLoad => self.store_load(),
             Command::StoreSearch(q) => self.store_search(q),
             Command::StoreDetails(app) => self.store_details(app),
+            Command::LoadGamePage(app) => self.load_game_page(app),
             Command::OpenFriends => self.friends_open(true),
             Command::CloseFriends => self.friends_open(false),
             Command::OpenChat(id) => self.open_chat(id),
@@ -774,6 +787,7 @@ impl Client {
             Event::DlProgress { job, progress } => self.dl_progress(job, progress),
             Event::DlDone { job, result } => self.dl_done(job, result),
             Event::Extra(e) => self.apply_extra(e),
+            Event::GamePage(e) => self.apply_game_page(e),
             Event::GameStarted { app, pid, gamescope } => self.game_started(app, pid, gamescope),
             Event::GameExited { app, seconds, success } => self.game_exited(app, seconds, success),
             Event::PlayFailed(problem) => self.play_failed(problem),
@@ -1021,6 +1035,7 @@ impl Client {
         let t = Instant::now();
         self.local_only.clear();
         self.state.games = demo::games(n);
+        self.state.gamepage.demo = true;
         self.capture_base_play();
         self.state.timings.cached_library = Some(t.elapsed());
         self.state.account = Some(Account { account_name: "demo".into(), steam_id: SteamId(0) });

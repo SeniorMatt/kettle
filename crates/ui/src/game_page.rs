@@ -1,6 +1,8 @@
 //! A game's page: hero banner with logo, the action bar (Play / Install and
 //! stats), and details below.
 
+mod sections;
+
 use crate::dialogs::Overlays;
 use crate::textures::{Art, Textures};
 use crate::{anim, fmt, steam_icons, theme, widgets};
@@ -18,7 +20,7 @@ pub fn show(ui: &mut Ui, client: &mut Client, tex: &mut Textures, app: AppId, ov
         ui.spacing_mut().item_spacing = Vec2::ZERO;
         hero(ui, client, tex, &game);
         action_bar(ui, client, &game, ov);
-        details(ui, client, &game);
+        details(ui, client, tex, &game);
     });
 }
 
@@ -344,63 +346,9 @@ fn tab_strip(ui: &mut Ui, client: &mut Client, game: &sr_model::Game) {
     }
 }
 
-/// An upper-case section heading like the official page's ("POST-GAME SUMMARY").
-fn section_heading(ui: &mut Ui, text: &str) {
-    ui.label(RichText::new(text).font(theme::regular(14.0)).color(theme::TEXT_HEADING));
-    ui.add_space(8.0);
-}
-
-fn details(ui: &mut Ui, client: &mut Client, game: &sr_model::Game) {
+fn details(ui: &mut Ui, client: &mut Client, tex: &mut Textures, game: &sr_model::Game) {
     tab_strip(ui, client, game);
-    let playing: Vec<String> = client
-        .state()
-        .friends
-        .friends
-        .iter()
-        .filter(|f| f.game.as_ref().is_some_and(|g| g.app_id == game.app_id.0))
-        .map(|f| f.display_name())
-        .collect();
-    egui::Frame::new().inner_margin(egui::Margin { left: 20, right: 23, top: 20, bottom: 24 }).show(ui, |ui| {
-        ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing.x = 0.0;
-            let right_w = if playing.is_empty() { 0.0 } else { 187.0 };
-            let gap = if playing.is_empty() { 0.0 } else { 30.0 };
-            ui.vertical(|ui| {
-                ui.set_width((ui.available_width() - right_w - gap).max(200.0));
-                section_heading(ui, "GAME INFO");
-                egui::Frame::new()
-                    .fill(theme::BG_PANEL_DARK)
-                    .corner_radius(theme::RADIUS)
-                    .inner_margin(egui::Margin::same(12))
-                    .show(ui, |ui| {
-                        ui.set_width(ui.available_width());
-                        let text = match game.install {
-                            InstallState::Installed { ref path, .. }
-                            | InstallState::UpdateRequired { ref path, .. } => {
-                                format!("Installed in {path}")
-                            }
-                            _ => "Not installed.".to_string(),
-                        };
-                        ui.label(RichText::new(text).color(theme::TEXT_DIM));
-                    });
-            });
-            if !playing.is_empty() {
-                ui.add_space(gap);
-                ui.vertical(|ui| {
-                    ui.set_width(right_w);
-                    section_heading(ui, "FRIENDS WHO PLAY");
-                    egui::Frame::new()
-                        .fill(theme::BG_PANEL_DARK)
-                        .corner_radius(theme::RADIUS)
-                        .inner_margin(egui::Margin::same(12))
-                        .show(ui, |ui| {
-                            ui.set_width(ui.available_width());
-                            for name in playing.iter().take(12) {
-                                ui.label(RichText::new(name).color(theme::FRIEND_INGAME));
-                            }
-                        });
-                });
-            }
-        });
+    egui::Frame::new().inner_margin(egui::Margin { left: 20, right: 23, top: 24, bottom: 24 }).show(ui, |ui| {
+        sections::show(ui, client, tex, game);
     });
 }

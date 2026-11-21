@@ -31,6 +31,7 @@ Things the automated checks can't cover: a real desktop, a real account and real
 - [ ] Sidebar search filters as you type.
 - [ ] Sorting (Alphabetical / Last Played / Hours Played) works.
 - [ ] With the window idle, CPU is about 0% in `top`.
+- [ ] Game page (written, not yet tried on a real account): below the tab box, news shows a FEATURED card, ACTIVITY grouped by day and "View Latest News"; a click opens the item on store.steampowered.com. A game you have run in the official client shows ACHIEVEMENTS ("You've unlocked X/Y"), matching Steam's own page; a game with DLC shows ADDITIONAL CONTENT; a friend playing the game shows under FRIENDS WHO PLAY. A game with none of these shows no empty boxes.
 
 ## 4. Downloads
 
