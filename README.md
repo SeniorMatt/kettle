@@ -39,16 +39,21 @@ The library above is a demo library, filled with well-known games.
 ## What you get
 
 - **Sign in with a QR code.** Use the Steam mobile app. No password is typed or stored.
-- **Your whole library**, with covers, search, collections, filters and game pages.
+- **Your whole library**, with covers, search, collections, filters and game pages with news, achievements, DLC and friends who play.
+- **Add any program** as a non-Steam game, or import the shortcuts you made in Steam.
 - **Works with your existing Steam games.** Games installed by the official client are found automatically (Flatpak, Snap, `~/.local/share/Steam` and the Debian/Ubuntu package).
 - **Downloads straight from Steam's servers.** Queue, pause, resume, verify, uninstall. Games go into Steam-format libraries, so the official client can use them too.
 - **Play natively or with Proton.** Steam's Protons plus GE-Proton, Proton-CachyOS and more, chosen per game. Prefixes are shared with Steam, so saves are too.
+- **Steam Cloud saves**: downloaded before a game starts, uploaded after it ends, and you choose when both sides changed.
+- **The Store**, with your wishlist, reviews, trailers, browsing by tag and prices in your currency.
+- **ProtonDB ratings** and per-game environment variables for Windows games.
 - **Friends and chat**, and a Shift+Tab overlay with a performance HUD while a game started by Kettle is running.
-- **No telemetry.** Kettle only talks to Valve's servers.
+- **Updates itself** (AppImage) when a new release is out, if you want it to.
+- **No telemetry.** Kettle talks to Valve's servers, plus GitHub for its own updates and ProtonDB for ratings; nothing else. See [PRIVACY.md](PRIVACY.md).
 
 ## FAQ
 
-**Is it safe?** Kettle never sees your password: you sign in by scanning a QR code with the official Steam mobile app. The login token is kept in your system keyring (GNOME Keyring, KWallet, KeePassXC). The code is open and nothing is sent anywhere but Valve. See [PRIVACY.md](PRIVACY.md). To end a session, remove the device in the Steam mobile app.
+**Is it safe?** Kettle never sees your password: you sign in by scanning a QR code with the official Steam mobile app. The login token is kept in your system keyring (GNOME Keyring, KWallet, KeePassXC). The code is open and nothing is sent anywhere but Valve, GitHub (update check) and ProtonDB (ratings). See [PRIVACY.md](PRIVACY.md). To end a session, remove the device in the Steam mobile app.
 
 **Do I need Steam installed?** Not to sign in, browse, download or manage games. But some games use Steamworks features that Kettle does not fully replace yet, so for those Kettle starts an installed Steam client quietly in the background (`-silent`). Kettle also ships its own early Steamworks core, which is still in progress. If a game will not start, install Steam (the Flatpak works) and try again.
 
@@ -59,27 +64,27 @@ The library above is a demo library, filled with well-known games.
 ## Progress
 
 <!-- status:start -->
-**Kettle does 35.5% of what Steam does** (60 of 169 features; see the [roadmap](docs/roadmap.md)).
+**Kettle does 46.2% of what Steam does** (78 of 169 features; see the [roadmap](docs/roadmap.md)).
 
 ![Status](docs/images/status.svg)
 
 | Area | Built |
 |---|---|
 | Account | 4/10 (40%) |
-| Library | 11/24 (46%) |
-| Store | 3/11 (27%) |
+| Library | 16/24 (67%) |
+| Store | 8/11 (73%) |
 | Downloads | 10/18 (56%) |
 | Play | 8/21 (38%) |
-| Compatibility | 4/7 (57%) |
-| Cloud | 0/4 (0%) |
-| Friends | 2/9 (22%) |
+| Compatibility | 6/7 (86%) |
+| Cloud | 3/4 (75%) |
+| Friends | 3/9 (33%) |
 | Chat | 1/8 (12%) |
 | Overlay | 3/8 (38%) |
 | Community | 0/15 (0%) |
 | Notifications | 1/3 (33%) |
-| Settings | 5/12 (42%) |
+| Settings | 6/12 (50%) |
 | Interface | 5/11 (45%) |
-| Platform | 3/8 (38%) |
+| Platform | 4/8 (50%) |
 <!-- status:end -->
 
 Kettle follows a public checklist of everything Steam does: the [roadmap](docs/roadmap.md).

@@ -1,9 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="900" height="520" viewBox="0 0 900 520" font-family="Inter, Segoe UI, sans-serif">
 <rect width="900" height="520" rx="10" fill="#171a21"/>
-<text x="16" y="34" font-size="20" font-weight="700" fill="#dcdedf">Kettle vs. Steam: 35.5%</text>
-<text x="16" y="56" font-size="13" fill="#8f98a0">60 of 169 features built. Green = built and tested, grey = still to do.</text>
+<text x="16" y="34" font-size="20" font-weight="700" fill="#dcdedf">Kettle vs. Steam: 46.2%</text>
+<text x="16" y="56" font-size="13" fill="#8f98a0">78 of 169 features built. Green = built and tested, grey = still to do.</text>
 <rect x="588" y="22" width="300" height="14" rx="7" fill="#3d4450"/>
-<rect x="588" y="22" width="106.5" height="14" rx="7" fill="#59bf40"/>
+<rect x="588" y="22" width="138.5" height="14" rx="7" fill="#59bf40"/>
 <rect x="16.0" y="78.0" width="43.5" height="43.1" rx="2" fill="#59bf40"/>
 <rect x="61.5" y="78.0" width="43.5" height="43.1" rx="2" fill="#59bf40"/>
 <rect x="106.9" y="78.0" width="43.5" height="43.1" rx="2" fill="#59bf40"/>
@@ -15,11 +15,11 @@
 <rect x="152.4" y="123.1" width="43.5" height="43.1" rx="2" fill="#59bf40"/>
 <rect x="197.8" y="123.1" width="43.5" height="43.1" rx="2" fill="#59bf40"/>
 <rect x="16.0" y="168.2" width="43.5" height="43.1" rx="2" fill="#59bf40"/>
-<rect x="61.5" y="168.2" width="43.5" height="43.1" rx="2" fill="#3d4450"/>
-<rect x="106.9" y="168.2" width="43.5" height="43.1" rx="2" fill="#3d4450"/>
-<rect x="152.4" y="168.2" width="43.5" height="43.1" rx="2" fill="#3d4450"/>
-<rect x="197.8" y="168.2" width="43.5" height="43.1" rx="2" fill="#3d4450"/>
-<rect x="16.0" y="213.3" width="43.5" height="43.1" rx="2" fill="#3d4450"/>
+<rect x="61.5" y="168.2" width="43.5" height="43.1" rx="2" fill="#59bf40"/>
+<rect x="106.9" y="168.2" width="43.5" height="43.1" rx="2" fill="#59bf40"/>
+<rect x="152.4" y="168.2" width="43.5" height="43.1" rx="2" fill="#59bf40"/>
+<rect x="197.8" y="168.2" width="43.5" height="43.1" rx="2" fill="#59bf40"/>
+<rect x="16.0" y="213.3" width="43.5" height="43.1" rx="2" fill="#59bf40"/>
 <rect x="61.5" y="213.3" width="43.5" height="43.1" rx="2" fill="#3d4450"/>
 <rect x="106.9" y="213.3" width="43.5" height="43.1" rx="2" fill="#3d4450"/>
 <rect x="152.4" y="213.3" width="43.5" height="43.1" rx="2" fill="#3d4450"/>
@@ -29,7 +29,7 @@
 <rect x="106.9" y="258.4" width="43.5" height="43.1" rx="2" fill="#3d4450"/>
 <rect x="152.4" y="258.4" width="43.5" height="43.1" rx="2" fill="#3d4450"/>
 <rect x="17.0" y="79.0" width="87" height="18" rx="3" fill="#000" fill-opacity="0.55"/>
-<text x="22.0" y="92.0" font-size="12" font-weight="600" fill="#dcdedf">Library 46%</text>
+<text x="22.0" y="92.0" font-size="12" font-weight="600" fill="#dcdedf">Library 67%</text>
 <rect x="16.0" y="309.5" width="30.5" height="63.5" rx="2" fill="#59bf40"/>
 <rect x="48.5" y="309.5" width="30.5" height="63.5" rx="2" fill="#59bf40"/>
 <rect x="80.9" y="309.5" width="30.5" height="63.5" rx="2" fill="#59bf40"/>
@@ -95,7 +95,7 @@
 <rect x="505.4" y="78.0" width="40.6" height="47.1" rx="2" fill="#59bf40"/>
 <rect x="548.0" y="78.0" width="40.6" height="47.1" rx="2" fill="#59bf40"/>
 <rect x="420.3" y="127.1" width="40.6" height="47.1" rx="2" fill="#59bf40"/>
-<rect x="462.9" y="127.1" width="40.6" height="47.1" rx="2" fill="#3d4450"/>
+<rect x="462.9" y="127.1" width="40.6" height="47.1" rx="2" fill="#59bf40"/>
 <rect x="505.4" y="127.1" width="40.6" height="47.1" rx="2" fill="#3d4450"/>
 <rect x="548.0" y="127.1" width="40.6" height="47.1" rx="2" fill="#3d4450"/>
 <rect x="420.3" y="176.1" width="40.6" height="47.1" rx="2" fill="#3d4450"/>
@@ -103,7 +103,7 @@
 <rect x="505.4" y="176.1" width="40.6" height="47.1" rx="2" fill="#3d4450"/>
 <rect x="548.0" y="176.1" width="40.6" height="47.1" rx="2" fill="#3d4450"/>
 <rect x="421.3" y="79.0" width="94" height="18" rx="3" fill="#000" fill-opacity="0.55"/>
-<text x="426.3" y="92.0" font-size="12" font-weight="600" fill="#dcdedf">Settings 42%</text>
+<text x="426.3" y="92.0" font-size="12" font-weight="600" fill="#dcdedf">Settings 50%</text>
 <rect x="420.3" y="231.2" width="40.6" height="42.8" rx="2" fill="#59bf40"/>
 <rect x="462.9" y="231.2" width="40.6" height="42.8" rx="2" fill="#59bf40"/>
 <rect x="505.4" y="231.2" width="40.6" height="42.8" rx="2" fill="#59bf40"/>
@@ -120,16 +120,16 @@
 <rect x="420.3" y="371.6" width="40.6" height="42.8" rx="2" fill="#59bf40"/>
 <rect x="462.9" y="371.6" width="40.6" height="42.8" rx="2" fill="#59bf40"/>
 <rect x="505.4" y="371.6" width="40.6" height="42.8" rx="2" fill="#59bf40"/>
-<rect x="548.0" y="371.6" width="40.6" height="42.8" rx="2" fill="#3d4450"/>
-<rect x="420.3" y="416.4" width="40.6" height="42.8" rx="2" fill="#3d4450"/>
-<rect x="462.9" y="416.4" width="40.6" height="42.8" rx="2" fill="#3d4450"/>
-<rect x="505.4" y="416.4" width="40.6" height="42.8" rx="2" fill="#3d4450"/>
-<rect x="548.0" y="416.4" width="40.6" height="42.8" rx="2" fill="#3d4450"/>
+<rect x="548.0" y="371.6" width="40.6" height="42.8" rx="2" fill="#59bf40"/>
+<rect x="420.3" y="416.4" width="40.6" height="42.8" rx="2" fill="#59bf40"/>
+<rect x="462.9" y="416.4" width="40.6" height="42.8" rx="2" fill="#59bf40"/>
+<rect x="505.4" y="416.4" width="40.6" height="42.8" rx="2" fill="#59bf40"/>
+<rect x="548.0" y="416.4" width="40.6" height="42.8" rx="2" fill="#59bf40"/>
 <rect x="420.3" y="461.2" width="40.6" height="42.8" rx="2" fill="#3d4450"/>
 <rect x="462.9" y="461.2" width="40.6" height="42.8" rx="2" fill="#3d4450"/>
 <rect x="505.4" y="461.2" width="40.6" height="42.8" rx="2" fill="#3d4450"/>
 <rect x="421.3" y="372.6" width="73" height="18" rx="3" fill="#000" fill-opacity="0.55"/>
-<text x="426.3" y="385.6" font-size="12" font-weight="600" fill="#dcdedf">Store 27%</text>
+<text x="426.3" y="385.6" font-size="12" font-weight="600" fill="#dcdedf">Store 73%</text>
 <rect x="596.5" y="78.0" width="35.4" height="44.2" rx="2" fill="#59bf40"/>
 <rect x="633.9" y="78.0" width="35.4" height="44.2" rx="2" fill="#59bf40"/>
 <rect x="671.3" y="78.0" width="35.4" height="44.2" rx="2" fill="#59bf40"/>
@@ -144,7 +144,7 @@
 <text x="602.5" y="92.0" font-size="12" font-weight="600" fill="#dcdedf">Account 40%</text>
 <rect x="752.0" y="78.0" width="42.7" height="44.2" rx="2" fill="#59bf40"/>
 <rect x="796.7" y="78.0" width="42.7" height="44.2" rx="2" fill="#59bf40"/>
-<rect x="841.3" y="78.0" width="42.7" height="44.2" rx="2" fill="#3d4450"/>
+<rect x="841.3" y="78.0" width="42.7" height="44.2" rx="2" fill="#59bf40"/>
 <rect x="752.0" y="124.2" width="42.7" height="44.2" rx="2" fill="#3d4450"/>
 <rect x="796.7" y="124.2" width="42.7" height="44.2" rx="2" fill="#3d4450"/>
 <rect x="841.3" y="124.2" width="42.7" height="44.2" rx="2" fill="#3d4450"/>
@@ -152,7 +152,7 @@
 <rect x="796.7" y="170.4" width="42.7" height="44.2" rx="2" fill="#3d4450"/>
 <rect x="841.3" y="170.4" width="42.7" height="44.2" rx="2" fill="#3d4450"/>
 <rect x="753.0" y="79.0" width="87" height="18" rx="3" fill="#000" fill-opacity="0.55"/>
-<text x="758.0" y="92.0" font-size="12" font-weight="600" fill="#dcdedf">Friends 22%</text>
+<text x="758.0" y="92.0" font-size="12" font-weight="600" fill="#dcdedf">Friends 33%</text>
 <rect x="596.5" y="222.7" width="37.5" height="44.2" rx="2" fill="#59bf40"/>
 <rect x="636.0" y="222.7" width="37.5" height="44.2" rx="2" fill="#3d4450"/>
 <rect x="675.5" y="222.7" width="37.5" height="44.2" rx="2" fill="#3d4450"/>
@@ -176,28 +176,28 @@
 <rect x="720.9" y="222.7" width="39.3" height="47.6" rx="2" fill="#59bf40"/>
 <rect x="762.2" y="222.7" width="39.3" height="47.6" rx="2" fill="#59bf40"/>
 <rect x="803.5" y="222.7" width="39.3" height="47.6" rx="2" fill="#59bf40"/>
-<rect x="844.7" y="222.7" width="39.3" height="47.6" rx="2" fill="#3d4450"/>
+<rect x="844.7" y="222.7" width="39.3" height="47.6" rx="2" fill="#59bf40"/>
 <rect x="720.9" y="272.3" width="39.3" height="47.6" rx="2" fill="#3d4450"/>
 <rect x="762.2" y="272.3" width="39.3" height="47.6" rx="2" fill="#3d4450"/>
 <rect x="803.5" y="272.3" width="39.3" height="47.6" rx="2" fill="#3d4450"/>
 <rect x="844.7" y="272.3" width="39.3" height="47.6" rx="2" fill="#3d4450"/>
 <rect x="721.9" y="223.7" width="94" height="18" rx="3" fill="#000" fill-opacity="0.55"/>
-<text x="726.9" y="236.7" font-size="12" font-weight="600" fill="#dcdedf">Platform 38%</text>
+<text x="726.9" y="236.7" font-size="12" font-weight="600" fill="#dcdedf">Platform 50%</text>
 <rect x="720.9" y="327.9" width="39.3" height="41.0" rx="2" fill="#59bf40"/>
 <rect x="762.2" y="327.9" width="39.3" height="41.0" rx="2" fill="#59bf40"/>
 <rect x="803.5" y="327.9" width="39.3" height="41.0" rx="2" fill="#59bf40"/>
 <rect x="844.7" y="327.9" width="39.3" height="41.0" rx="2" fill="#59bf40"/>
-<rect x="720.9" y="370.9" width="39.3" height="41.0" rx="2" fill="#3d4450"/>
-<rect x="762.2" y="370.9" width="39.3" height="41.0" rx="2" fill="#3d4450"/>
+<rect x="720.9" y="370.9" width="39.3" height="41.0" rx="2" fill="#59bf40"/>
+<rect x="762.2" y="370.9" width="39.3" height="41.0" rx="2" fill="#59bf40"/>
 <rect x="803.5" y="370.9" width="39.3" height="41.0" rx="2" fill="#3d4450"/>
 <rect x="721.9" y="328.9" width="129" height="18" rx="3" fill="#000" fill-opacity="0.55"/>
-<text x="726.9" y="341.9" font-size="12" font-weight="600" fill="#dcdedf">Compatibility 57%</text>
-<rect x="720.9" y="419.9" width="43.9" height="41.0" rx="2" fill="#3d4450"/>
-<rect x="766.8" y="419.9" width="43.9" height="41.0" rx="2" fill="#3d4450"/>
-<rect x="720.9" y="463.0" width="43.9" height="41.0" rx="2" fill="#3d4450"/>
+<text x="726.9" y="341.9" font-size="12" font-weight="600" fill="#dcdedf">Compatibility 86%</text>
+<rect x="720.9" y="419.9" width="43.9" height="41.0" rx="2" fill="#59bf40"/>
+<rect x="766.8" y="419.9" width="43.9" height="41.0" rx="2" fill="#59bf40"/>
+<rect x="720.9" y="463.0" width="43.9" height="41.0" rx="2" fill="#59bf40"/>
 <rect x="766.8" y="463.0" width="43.9" height="41.0" rx="2" fill="#3d4450"/>
-<rect x="721.9" y="420.9" width="66" height="18" rx="3" fill="#000" fill-opacity="0.55"/>
-<text x="726.9" y="433.9" font-size="12" font-weight="600" fill="#dcdedf">Cloud 0%</text>
+<rect x="721.9" y="420.9" width="73" height="18" rx="3" fill="#000" fill-opacity="0.55"/>
+<text x="726.9" y="433.9" font-size="12" font-weight="600" fill="#dcdedf">Cloud 75%</text>
 <rect x="818.7" y="419.9" width="31.7" height="41.0" rx="2" fill="#59bf40"/>
 <rect x="852.3" y="419.9" width="31.7" height="41.0" rx="2" fill="#3d4450"/>
 <rect x="818.7" y="463.0" width="31.7" height="41.0" rx="2" fill="#3d4450"/>
