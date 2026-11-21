@@ -460,7 +460,15 @@ pub async fn anonymous_connection() -> Result<Connection> {
 #[derive(Clone)]
 pub enum Auth {
     Anonymous,
-    Account { name: String, refresh_token: String },
+    Account {
+        name: String,
+        refresh_token: String,
+    },
+    /// An already logged-in connection (the app's shared session); `owner` is the account's SteamID64.
+    Connection {
+        conn: Connection,
+        owner: u64,
+    },
 }
 
 /// A download running on its own thread (with its own async runtime).
@@ -475,8 +483,12 @@ impl Download {
         let (tx, progress): (Sender<Progress>, _) = channel();
         let cancel = CancelToken::new();
         let token = cancel.clone();
-        if let Auth::Account { refresh_token, .. } = &auth {
-            opts.owner = crate::auth::jwt_steamid(refresh_token).unwrap_or(0);
+        match &auth {
+            Auth::Account { refresh_token, .. } => {
+                opts.owner = crate::auth::jwt_steamid(refresh_token).unwrap_or(0);
+            }
+            Auth::Connection { owner, .. } => opts.owner = *owner,
+            Auth::Anonymous => {}
         }
         let thread = std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build()?;
@@ -490,6 +502,7 @@ impl Download {
                         let conn = anonymous_connection().await?;
                         download(&conn, &opts, &token, send).await
                     }
+                    Auth::Connection { conn, .. } => download(&conn, &opts, &token, send).await,
                     Auth::Account { name, refresh_token } => {
                         let cm = crate::cm::connect(&name, &refresh_token).await?;
                         download(&cm.conn, &opts, &token, send).await

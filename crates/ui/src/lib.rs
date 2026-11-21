@@ -23,7 +23,7 @@ mod widgets;
 
 use egui::{Align, Id, Layout, Pos2, RichText, Ui};
 use egui_phosphor::regular as icon;
-use sr_client::{Client, Command, Screen};
+use sr_client::{Client, Command, ConnectionStatus, Screen};
 use sr_model::AppId;
 
 pub(crate) use settings_page::SettingsTab;
@@ -244,10 +244,28 @@ impl AppUi {
                     chrome::window_buttons(ui);
                     ui.add_space(10.0);
                     if let Some(a) = &client.state().account {
-                        ui.label(RichText::new(format!("{} {}", icon::USER_CIRCLE, a.account_name)).color(theme::TEXT));
+                        let chip = ui.label(
+                            RichText::new(format!("{} {}", icon::USER_CIRCLE, a.account_name)).color(theme::TEXT),
+                        );
+                        match &client.state().connection {
+                            ConnectionStatus::Connecting => {
+                                ui.add(egui::Spinner::new().size(12.0)).on_hover_text("Connecting to Steam...");
+                            }
+                            ConnectionStatus::Failed(why) => {
+                                let short = "Can't reach Steam. Retrying...";
+                                ui.label(RichText::new(short).color(theme::ERROR_TEXT).small()).on_hover_text(why);
+                            }
+                            _ => {}
+                        }
+                        chip.on_hover_text(match &client.state().connection {
+                            ConnectionStatus::Online => "Connected to Steam",
+                            ConnectionStatus::Connecting => "Connecting to Steam...",
+                            ConnectionStatus::Failed(_) => "Not connected to Steam",
+                            ConnectionStatus::Offline => "Offline",
+                        });
                     }
-                    if client.state().refreshing {
-                        ui.add(egui::Spinner::new().size(12.0));
+                    if client.state().refreshing && client.state().connection == ConnectionStatus::Online {
+                        ui.add(egui::Spinner::new().size(12.0)).on_hover_text("Loading your games...");
                     }
                 });
             });

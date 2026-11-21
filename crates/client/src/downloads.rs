@@ -196,7 +196,7 @@ pub enum DlResult {
 /// The running job, kept by the client. `ctl` is 0 = go on, 1 = pause, 2 = cancel.
 pub(crate) struct RunningDl {
     pub job: u64,
-    ctl: Arc<AtomicU8>,
+    pub(crate) ctl: Arc<AtomicU8>,
 }
 
 impl Client {
@@ -298,15 +298,21 @@ impl Client {
         opts.os = r.os.os();
         opts.verify = r.verify;
         opts.workers = self.state.settings.workers;
-        let auth = match &self.session {
-            Some(s) => Auth::Account { name: s.account.account_name.clone(), refresh_token: s.refresh_token.clone() },
-            None => Auth::Anonymous,
-        };
+        // Signed in: use the shared connection (a second logon of the same account would replace it).
+        let hub = self.session.as_ref().and_then(|_| self.hub.clone());
+        let owner = self.session.as_ref().map_or(0, |s| s.account.steam_id.0);
         let ctl = Arc::new(AtomicU8::new(0));
         let (tx, wake, ctl2, library) = (self.tx.clone(), self.wake.clone(), ctl.clone(), r.library.clone());
-        let spawned = std::thread::Builder::new()
-            .name(format!("download-{}", r.app))
-            .spawn(move || pump(Download::start(opts, auth), job, ctl2, &library, tx, wake));
+        let spawned =
+            std::thread::Builder::new().name(format!("download-{}", r.app)).spawn(move || {
+                match wait_for_auth(hub, owner, &ctl2) {
+                    Ok(auth) => pump(Download::start(opts, auth), job, ctl2, &library, tx, wake),
+                    Err(result) => {
+                        let _ = tx.blocking_send(Event::DlDone { job, result });
+                        wake();
+                    }
+                }
+            });
         if let Err(e) = spawned {
             self.state.notice = Some(format!("Couldn't start the download: {e}"));
             self.finish(item, Outcome::Failed(e.to_string()));
@@ -387,6 +393,28 @@ pub(crate) fn now_unix() -> u64 {
 }
 
 /// Forward progress of one download until its thread ends, then report how it ended.
+/// How long a download waits for the shared Steam connection before it fails.
+const HUB_WAIT: Duration = Duration::from_secs(90);
+
+/// The way a download logs in: anonymous without an account, otherwise the shared connection (waiting for
+/// it while it connects). Stops early when the download is paused or cancelled meanwhile.
+fn wait_for_auth(hub: Option<crate::cm_hub::HubHandle>, owner: u64, ctl: &AtomicU8) -> Result<Auth, DlResult> {
+    let Some(hub) = hub else { return Ok(Auth::Anonymous) };
+    let start = Instant::now();
+    loop {
+        if ctl.load(Ordering::SeqCst) != 0 {
+            return Err(DlResult::Cancelled);
+        }
+        if let Some(cm) = hub.online_now() {
+            return Ok(Auth::Connection { conn: cm.conn.clone(), owner });
+        }
+        if start.elapsed() > HUB_WAIT {
+            return Err(DlResult::Failed("Not connected to Steam yet. Try again in a moment.".into()));
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}
+
 fn pump(dl: Download, job: u64, ctl: Arc<AtomicU8>, library: &Path, tx: mpsc::Sender<Event>, wake: Waker) {
     let mut latest: Option<Progress> = None;
     let mut last_sent = Instant::now().checked_sub(FORWARD_EVERY).unwrap_or_else(Instant::now);

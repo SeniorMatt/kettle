@@ -24,11 +24,18 @@ struct App {
 
 impl eframe::App for App {
     /// Transparent, so the in-game overlay window can show the game through its dimmed background.
+    fn on_exit(&mut self) {
+        exit_watchdog();
+    }
+
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
         egui::Rgba::TRANSPARENT.to_array()
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        if ui.ctx().input(|i| i.viewport().close_requested()) {
+            exit_watchdog();
+        }
         let want = {
             let s = self.client.state();
             s.settings.overlay && !s.running.is_empty()
@@ -50,6 +57,22 @@ impl eframe::App for App {
             eprintln!("[timing] first frame after {:.0} ms", self.started.elapsed().as_secs_f64() * 1e3);
         }
     }
+}
+
+/// How long closing may take before the process ends anyway.
+const EXIT_LIMIT: std::time::Duration = std::time::Duration::from_millis(1200);
+
+/// Closing must never hang (a background task stuck in a network call, a driver teardown). Once the window
+/// is asked to close, this ends the process after [`EXIT_LIMIT`] if the normal shutdown has not finished.
+/// Everything the app keeps is written when it changes, so nothing is lost.
+fn exit_watchdog() {
+    static ARMED: std::sync::Once = std::sync::Once::new();
+    ARMED.call_once(|| {
+        let _ = std::thread::Builder::new().name("exit-watchdog".into()).spawn(|| {
+            std::thread::sleep(EXIT_LIMIT);
+            std::process::exit(0);
+        });
+    });
 }
 
 /// The window and task-switcher icon, decoded once from the bundled PNG.

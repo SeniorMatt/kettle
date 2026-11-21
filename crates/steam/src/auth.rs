@@ -72,20 +72,6 @@ struct PollResp {
     account_name: String,
 }
 
-#[derive(Clone, PartialEq, Message)]
-struct RenewReq {
-    #[prost(string, tag = "1")]
-    refresh_token: String,
-    #[prost(fixed64, tag = "2")]
-    steamid: u64,
-}
-
-#[derive(Clone, PartialEq, Message)]
-struct RenewResp {
-    #[prost(string, tag = "1")]
-    access_token: String,
-}
-
 /// Call an IAuthenticationService method with a protobuf body.
 fn call<Q: Message, R: Message + Default>(method: &str, req: &Q) -> Result<R> {
     let body = STANDARD.encode(req.encode_to_vec());
@@ -192,50 +178,6 @@ impl QrSession {
         }
         Ok(if r.had_remote_interaction { Poll::Scanned } else { Poll::Waiting })
     }
-}
-
-/// Get a fresh access token from a stored refresh token.
-pub fn renew_access_token(refresh_token: &str) -> Result<String> {
-    let steamid = jwt_steamid(refresh_token).context("bad refresh token")?;
-    let r: RenewResp = call("GenerateAccessTokenForApp", &RenewReq { refresh_token: refresh_token.into(), steamid })
-        .map_err(|e| crate::redact::safe_error(&e, &[refresh_token]))?;
-    if r.access_token.is_empty() {
-        bail!("no access token returned");
-    }
-    Ok(r.access_token)
-}
-
-#[derive(Clone, PartialEq, Message)]
-struct RevokeReq {
-    #[prost(string, tag = "1")]
-    refresh_token: String,
-    #[prost(fixed64, tag = "2")]
-    steamid: u64,
-    /// EAuthTokenRevokeAction: 1 = permanent.
-    #[prost(int32, tag = "3")]
-    revoke_action: i32,
-}
-
-/// Invalidate a refresh token on Steam's side (used on sign-out), so a copy
-/// that leaked anywhere stops working.
-pub fn revoke_refresh_token(refresh_token: &str) -> Result<()> {
-    let steamid = jwt_steamid(refresh_token).context("bad refresh token")?;
-    let access = renew_access_token(refresh_token)?;
-    let req = RevokeReq { refresh_token: refresh_token.into(), steamid, revoke_action: 1 };
-    let body = STANDARD.encode(req.encode_to_vec());
-    // Token in the POST body, not the URL, so it can't end up in error text.
-    let url = format!("{API}/IAuthenticationService/RevokeRefreshToken/v1");
-    let r = crate::http::agent()
-        .post(&url)
-        .send_form([("access_token", access.as_str()), ("input_protobuf_encoded", body.as_str())]);
-    let res: Result<()> = match r {
-        Ok(resp) => match resp.headers().get("x-eresult").and_then(|v| v.to_str().ok()) {
-            Some("1") | None => Ok(()),
-            Some(code) => Err(anyhow::anyhow!("RevokeRefreshToken: EResult {code}")),
-        },
-        Err(e) => Err(e.into()),
-    };
-    res.map_err(|e| crate::redact::safe_error(&e, &[refresh_token, &access]))
 }
 
 fn jwt_claims(token: &str) -> Option<serde_json::Value> {

@@ -1,10 +1,10 @@
 //! Friends list and chat: the state the UI reads, the reducer for session events, and the connection
-//! supervisor that keeps one friends session alive (with backoff) for the signed-in account.
+//! supervisor that keeps one friends session running on the shared Steam connection (`cm_hub`).
 //!
 //! Everything is bounded: at most [`MAX_FRIENDS`] friends, [`MAX_MESSAGES`] messages per chat, [`MAX_CHATS`]
-//! chats in memory and [`MAX_TABS`] open chat tabs. Tokens never enter the state; the supervisor task holds
-//! its own copy of the refresh token and wipes it when it ends.
+//! chats in memory and [`MAX_TABS`] open chat tabs. Tokens never enter the state.
 
+use crate::cm_hub::HubState;
 use crate::{Client, Event};
 use sr_model::SteamId;
 use sr_steam::friends::{ChatLine, FriendsEvent, FriendsHandle, FriendsSession, PersonaUpdate};
@@ -20,10 +20,8 @@ pub const MAX_CHATS: usize = 64;
 pub const MAX_TABS: usize = 8;
 /// Longest message we send (characters).
 pub const MAX_TEXT: usize = 2000;
-/// First retry after a lost connection; doubles up to [`RETRY_MAX`].
+/// Pause before the friends session is restarted on a connection that is still up.
 const RETRY_MIN: Duration = Duration::from_secs(5);
-/// Reconnect attempts are never closer together than this once backed off.
-const RETRY_MAX: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub enum FriendsStatus {
@@ -268,14 +266,15 @@ impl Client {
 
     /// Keep a friends session running for the current account until the generation changes.
     pub(crate) fn start_friends(&mut self) {
-        let Some(s) = &self.session else { return };
+        if self.session.is_none() {
+            return;
+        }
         let generation = self.generation.load(Ordering::Relaxed);
         self.friends.ids = None;
         self.friends.early.clear();
         self.friends.wanted.store(self.state.friends.my_state.to_wire(), Ordering::Relaxed);
         self.state.friends.status = FriendsStatus::Connecting;
-        let name = s.account.account_name.clone();
-        let token = TokenCopy(s.refresh_token.clone());
+        let Some(mut hub) = self.hub.clone() else { return };
         let (tx, wake, current) = (self.tx.clone(), self.wake.clone(), self.generation.clone());
         let (slot, wanted) = (self.friends.handle.clone(), self.friends.wanted.clone());
         self.rt.spawn(async move {
@@ -286,42 +285,36 @@ impl Client {
                     wake();
                 }
             };
-            let mut delay = RETRY_MIN;
-            while current.load(Ordering::Relaxed) == generation {
-                match sr_steam::cm::connect(&name, &token.0).await {
-                    Ok(cm) => {
-                        let initial = PersonaState::from_wire(wanted.load(Ordering::Relaxed));
-                        let (handle, mut rx) = FriendsSession::start(cm.conn, cm.early, initial);
-                        *slot.lock().expect("friends handle") = Some(handle);
-                        let mut watch = tokio::time::interval(Duration::from_secs(2));
-                        loop {
-                            tokio::select! {
-                                ev = rx.recv() => match ev {
-                                    Some(ev) => {
-                                        if matches!(ev, FriendsEvent::Connected { .. }) {
-                                            delay = RETRY_MIN;
-                                        }
-                                        send(ev).await;
-                                    }
-                                    None => break,
-                                },
-                                _ = watch.tick() => {
-                                    if current.load(Ordering::Relaxed) != generation {
-                                        break;
-                                    }
-                                }
+            let mut last = 0;
+            while let Some((id, cm)) = hub.wait_online(last).await {
+                last = id;
+                let initial = PersonaState::from_wire(wanted.load(Ordering::Relaxed));
+                let (handle, mut rx) = FriendsSession::start(cm.conn.clone(), cm.early.clone(), initial);
+                *slot.lock().expect("friends handle") = Some(handle);
+                let mut ended_alone = false;
+                loop {
+                    tokio::select! {
+                        ev = rx.recv() => match ev {
+                            Some(ev) => send(ev).await,
+                            None => {
+                                ended_alone = true;
+                                break;
+                            }
+                        },
+                        changed = hub.rx.changed() => {
+                            let same = matches!(&*hub.rx.borrow(), HubState::Online { id: now, .. } if *now == id);
+                            if changed.is_err() || !same || current.load(Ordering::Relaxed) != generation {
+                                break;
                             }
                         }
-                        *slot.lock().expect("friends handle") = None;
                     }
-                    Err(e) => send(FriendsEvent::Disconnected(format!("{e:#}"))).await,
                 }
-                // Wait before the next attempt, but stop soon after a sign-out.
-                let until = tokio::time::Instant::now() + delay;
-                while tokio::time::Instant::now() < until && current.load(Ordering::Relaxed) == generation {
-                    tokio::time::sleep(Duration::from_secs(1)).await;
+                *slot.lock().expect("friends handle") = None;
+                if ended_alone && current.load(Ordering::Relaxed) == generation {
+                    // The friends session ended on a connection the hub still considers alive: try it again.
+                    tokio::time::sleep(RETRY_MIN).await;
+                    last = id - 1;
                 }
-                delay = (delay * 2).min(RETRY_MAX);
             }
         });
     }
@@ -716,16 +709,6 @@ pub fn local_utc_offset(unix: u64) -> i64 {
 
 fn now_secs() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
-}
-
-/// The supervisor's own copy of the refresh token, wiped when the task ends.
-struct TokenCopy(String);
-
-impl Drop for TokenCopy {
-    fn drop(&mut self) {
-        // SAFETY: zero bytes are valid UTF-8.
-        unsafe { self.0.as_bytes_mut() }.fill(0);
-    }
 }
 
 #[cfg(test)]

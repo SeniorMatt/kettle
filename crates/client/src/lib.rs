@@ -9,6 +9,7 @@
 //! in the keyring, never in `State`.
 
 mod art;
+mod cm_hub;
 mod demo;
 mod downloads;
 mod friends;
@@ -41,7 +42,7 @@ pub use web_image::WebImage;
 
 use sr_model::{Account, AppId, Game, InstallState, SteamId};
 use sr_steam::{auth, local, secrets, store, storefront, webapi};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -53,6 +54,18 @@ pub type Waker = Arc<dyn Fn() + Send + Sync>;
 
 /// Events buffered between background tasks and the UI.
 const EVENT_QUEUE: usize = 256;
+
+/// The shared connection to Steam's servers (see `cm_hub`).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum ConnectionStatus {
+    /// Not signed in, or demo mode.
+    #[default]
+    Offline,
+    Connecting,
+    Online,
+    /// The last attempt failed or the connection dropped; a retry is scheduled. Holds the reason.
+    Failed(String),
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Screen {
@@ -81,6 +94,8 @@ pub struct State {
     pub selected: Option<AppId>,
     /// A refresh of the owned list is running.
     pub refreshing: bool,
+    /// State of the shared Steam connection.
+    pub connection: ConnectionStatus,
     /// Last non-fatal problem, shown in the status bar.
     pub notice: Option<String>,
     pub timings: Timings,
@@ -266,6 +281,15 @@ enum Event {
         games: Vec<webapi::OwnedGame>,
         took: Duration,
     },
+    /// The owned-games request failed (the cached list stays).
+    OwnedFailed {
+        generation: u64,
+        error: String,
+    },
+    Hub {
+        generation: u64,
+        status: ConnectionStatus,
+    },
     Installed {
         apps: HashMap<u32, local::InstalledApp>,
         took: Duration,
@@ -374,7 +398,12 @@ pub struct Client {
     compat_scanning: bool,
     /// Full release records behind `CompatState::available` (needed to install).
     releases: HashMap<&'static str, Vec<sr_steam::proton_releases::Release>>,
-    rt: tokio::runtime::Runtime,
+    /// Taken in `Drop`, which shuts it down with a time limit.
+    rt: std::mem::ManuallyDrop<tokio::runtime::Runtime>,
+    /// The shared Steam connection of the signed-in account.
+    hub: Option<cm_hub::HubHandle>,
+    /// Installed games the account doesn't own (or that the owned list doesn't have yet).
+    local_only: HashSet<u32>,
     tx: mpsc::Sender<Event>,
     rx: mpsc::Receiver<Event>,
     wake: Waker,
@@ -400,6 +429,7 @@ impl Client {
                 library_rev: 0,
                 selected: None,
                 refreshing: false,
+                connection: ConnectionStatus::Offline,
                 notice: None,
                 timings: Timings::default(),
                 store: StoreState::default(),
@@ -431,7 +461,9 @@ impl Client {
             web_images: web_image::WebImageLoader::new(wake.clone()),
             search_gen: 0,
             sections_at: None,
-            rt,
+            rt: std::mem::ManuallyDrop::new(rt),
+            hub: None,
+            local_only: HashSet::new(),
             tx,
             rx,
             wake,
@@ -583,10 +615,16 @@ impl Client {
                 if let Some(acct) = &self.state.account {
                     let _ = store::save_json(&library_cache_path(acct.steam_id), &list);
                 }
+                self.local_only.clear();
                 self.state.games = list;
                 self.capture_base_play();
                 self.merge_installed();
             }
+            Event::OwnedFailed { generation, error } if generation == current => {
+                self.state.refreshing = false;
+                self.state.notice = Some(format!("Couldn't load your games from Steam: {error}"));
+            }
+            Event::Hub { generation, status } if generation == current => self.apply_hub(status),
             Event::Installed { apps, took } => {
                 self.state.timings.local_scan = Some(took);
                 self.installed = apps;
@@ -661,6 +699,7 @@ impl Client {
     /// Recompute install state and notify views that `games` changed.
     fn merge_installed(&mut self) {
         self.state.library_rev += 1;
+        self.add_local_games();
         self.art.set_icon_hashes(self.state.games.iter().map(|g| (g.app_id, g.icon_hash.clone())).collect());
         for g in &mut self.state.games {
             // Steam's numbers plus the time we measured ourselves.
@@ -681,6 +720,30 @@ impl Client {
                 _ => InstallState::NotInstalled,
             };
         }
+    }
+
+    /// Show games installed on this machine even when the owned list is empty or can't be loaded (no network,
+    /// not signed in to Steam yet, or a game from a family share). They sit in the list until the owned
+    /// list has them.
+    fn add_local_games(&mut self) {
+        let old = std::mem::take(&mut self.local_only);
+        self.state.games.retain(|g| !old.contains(&g.app_id.0));
+        let extra = local_games(&self.installed, &self.state.games);
+        self.local_only = extra.iter().map(|g| g.app_id.0).collect();
+        let changed = !extra.is_empty() || !old.is_empty();
+        self.state.games.extend(extra);
+        if changed {
+            self.state.games.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
+        }
+    }
+
+    fn apply_hub(&mut self, status: ConnectionStatus) {
+        match &status {
+            ConnectionStatus::Connecting => self.state.friends.status = FriendsStatus::Connecting,
+            ConnectionStatus::Failed(why) => self.state.friends.status = FriendsStatus::Disconnected(why.clone()),
+            _ => {}
+        }
+        self.state.connection = status;
     }
 
     /// Remember the play time and last-played Steam reported, so [`Self::merge_installed`] can add ours on top
@@ -790,6 +853,7 @@ impl Client {
         self.bump_generation();
         let t = Instant::now();
         if let Some(cached) = store::load_json::<Vec<Game>>(&library_cache_path(account.steam_id)) {
+            self.local_only.clear();
             self.state.games = cached;
             self.capture_base_play();
             self.state.timings.cached_library = Some(t.elapsed());
@@ -798,19 +862,30 @@ impl Client {
         self.state.account = Some(account.clone());
         self.state.screen = Screen::Library;
         self.session = Some(Session { account, refresh_token });
+        self.start_hub();
         self.spawn_refresh();
         self.start_friends();
     }
 
     fn start_demo(&mut self, n: usize) {
         let t = Instant::now();
+        self.local_only.clear();
         self.state.games = demo::games(n);
         self.capture_base_play();
         self.state.timings.cached_library = Some(t.elapsed());
         self.state.account = Some(Account { account_name: "demo".into(), steam_id: SteamId(0) });
         self.state.screen = Screen::Library;
         self.merge_installed();
-        self.start_friends_demo();
+        if std::env::var_os("KETTLE_HUB_STALL").is_some() {
+            // Test aid: a signed-in look-alike whose Steam connection never completes (see `cm_hub`).
+            self.session =
+                Some(Session { account: self.state.account.clone().expect("set above"), refresh_token: String::new() });
+            self.start_hub();
+            self.spawn_refresh();
+            self.start_friends();
+        } else {
+            self.start_friends_demo();
+        }
     }
 
     /// `KETTLE_DEMO_RUNNING=<appid>`: show a demo game as running, without starting any process.
@@ -829,19 +904,14 @@ impl Client {
             self.notice_on_err(secrets::delete_refresh_token(&s.account.account_name));
             forget_account(&s.account);
             let _ = std::fs::remove_file(library_cache_path(s.account.steam_id));
-            // Invalidate the token on Steam's side too (best effort, off-thread).
-            let token = s.refresh_token.clone();
-            self.rt.spawn_blocking(move || {
-                let mut token = token;
-                let _ = auth::revoke_refresh_token(&token);
-                // SAFETY: zero bytes are valid UTF-8.
-                unsafe { token.as_bytes_mut() }.fill(0);
-            });
         }
         self.bump_generation();
+        self.hub = None;
+        self.state.connection = ConnectionStatus::Offline;
         self.reset_friends();
         self.state.account = None;
         self.state.games.clear();
+        self.local_only.clear();
         self.state.library_rev += 1;
         self.state.selected = None;
         self.start_qr_login();
@@ -880,20 +950,46 @@ impl Client {
         });
     }
 
-    fn spawn_refresh(&mut self) {
+    /// Open the shared Steam connection for the current session.
+    pub(crate) fn start_hub(&mut self) {
         let Some(s) = &self.session else { return };
+        let generation = self.generation.load(Ordering::Relaxed);
+        self.state.connection = ConnectionStatus::Connecting;
+        self.hub = Some(cm_hub::spawn(
+            self.rt.handle(),
+            s.account.account_name.clone(),
+            cm_hub::TokenCopy(s.refresh_token.clone()),
+            generation,
+            self.generation.clone(),
+            self.tx.clone(),
+            self.wake.clone(),
+        ));
+    }
+
+    /// Load the owned games over the shared connection. If a request fails, it is tried again on the next
+    /// connection (a reconnect), and the cached list stays until then.
+    fn spawn_refresh(&mut self) {
+        let (Some(s), Some(hub)) = (&self.session, &self.hub) else { return };
         self.state.refreshing = true;
         let generation = self.generation.load(Ordering::Relaxed);
-        let (tx, wake) = (self.tx.clone(), self.wake.clone());
-        let (token, steamid) = (s.refresh_token.clone(), s.account.steam_id.0);
-        self.rt.spawn_blocking(move || {
-            let t = Instant::now();
-            let ev = match auth::renew_access_token(&token).and_then(|access| webapi::owned_games(&access, steamid)) {
-                Ok(games) => Event::Owned { generation, games, took: t.elapsed() },
-                Err(e) => Event::Notice(format!("Couldn't refresh the library: {e:#}")),
-            };
-            let _ = tx.blocking_send(ev);
-            wake();
+        let (tx, wake, mut hub) = (self.tx.clone(), self.wake.clone(), hub.clone());
+        let steamid = s.account.steam_id.0;
+        self.rt.spawn(async move {
+            let mut last = 0;
+            while let Some((id, cm)) = hub.wait_online(last).await {
+                last = id;
+                let t = Instant::now();
+                let ev = match sr_steam::cm::owned_games(&cm.conn, steamid).await {
+                    Ok(games) => Event::Owned { generation, games, took: t.elapsed() },
+                    Err(e) => Event::OwnedFailed { generation, error: format!("{e:#}") },
+                };
+                let done = matches!(ev, Event::Owned { .. });
+                let _ = tx.send(ev).await;
+                wake();
+                if done {
+                    break;
+                }
+            }
         });
     }
 
@@ -907,6 +1003,24 @@ impl Client {
             wake();
         });
     }
+}
+
+/// Installed games (not tools) that `have` does not list.
+fn local_games(installed: &HashMap<u32, local::InstalledApp>, have: &[Game]) -> Vec<Game> {
+    let have: HashSet<u32> = have.iter().map(|g| g.app_id.0).collect();
+    let mut out: Vec<Game> = installed
+        .values()
+        .filter(|a| (a.fully_installed() || a.state_flags & 2 != 0) && !have.contains(&a.appid))
+        .filter(|a| !local::is_tool_app(a.appid, &a.name))
+        .map(|a| {
+            let name = if a.name.is_empty() { format!("App {}", a.appid) } else { a.name.clone() };
+            let mut g = Game::new(AppId(a.appid), name);
+            g.last_played = a.last_updated;
+            g
+        })
+        .collect();
+    out.sort_by_key(|g| g.app_id.0);
+    out
 }
 
 /// Refresh tokens are JWTs; treat one that expires within a day as expired.
@@ -939,4 +1053,56 @@ fn forget_account(a: &Account) {
     let mut list = remembered_accounts();
     list.retain(|x| x.steam_id != a.steam_id);
     let _ = store::save_json(&accounts_path(), &list);
+}
+
+impl Drop for Client {
+    /// Closing the window must be quick: stop the downloads (they resume next time), end the sessions and
+    /// give the background tasks a moment instead of waiting for them.
+    fn drop(&mut self) {
+        self.bump_generation();
+        if let Some(run) = &self.dl_running {
+            run.ctl.store(1, Ordering::SeqCst);
+        }
+        // SAFETY: `rt` is not used after this.
+        let rt = unsafe { std::mem::ManuallyDrop::take(&mut self.rt) };
+        rt.shutdown_timeout(SHUTDOWN_WAIT);
+    }
+}
+
+/// How long closing waits for background tasks that are in the middle of a blocking call.
+const SHUTDOWN_WAIT: Duration = Duration::from_millis(700);
+
+#[cfg(test)]
+mod local_games_tests {
+    use super::*;
+
+    fn app(id: u32, name: &str, flags: u32) -> (u32, local::InstalledApp) {
+        let a = local::InstalledApp {
+            appid: id,
+            name: name.into(),
+            install_dir: PathBuf::from("/x"),
+            size_on_disk: 1,
+            state_flags: flags,
+            build_id: 1,
+            last_updated: 5,
+        };
+        (id, a)
+    }
+
+    #[test]
+    fn installed_games_show_without_an_owned_list() {
+        let installed: HashMap<u32, local::InstalledApp> = [
+            app(10, "Alpha", 4),
+            app(20, "Beta", 4),
+            app(30, "Half downloaded", 1026 & !2 & !4),
+            app(228980, "Steamworks Common Redistributables", 4),
+            app(40, "", 4),
+        ]
+        .into();
+        let owned = vec![Game::new(AppId(20), "Beta".into())];
+        let out = local_games(&installed, &owned);
+        let names: Vec<_> = out.iter().map(|g| (g.app_id.0, g.name.as_str())).collect();
+        assert_eq!(names, [(10, "Alpha"), (40, "App 40")]);
+        assert_eq!(local_games(&installed, &[]).len(), 3);
+    }
 }

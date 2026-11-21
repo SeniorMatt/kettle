@@ -76,9 +76,9 @@ Pick a small game you own (under 2 GB).
 
 ## 8. Sign out
 
-- [ ] Settings → Privacy → Sign out and revoke: you're back at the QR screen.
+- [ ] Settings → Privacy → Sign out: you're back at the QR screen.
 - [ ] The keyring entry is gone and the account's library cache is deleted.
-- [ ] In the Steam Mobile App, under authorized devices, the kettle session is gone.
+- [ ] Known limit: the session stays listed under authorized devices in the Steam Mobile App until you remove it there.
 
 ## Windows
 

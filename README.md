@@ -7,14 +7,14 @@ A fast, native Steam client written in Rust: egui + wgpu, with no Chromium and n
 ## Status
 
 <!-- status:start -->
-**Kettle does 29.4% of what Steam does** (42 of 143 features; see the [roadmap](docs/roadmap.md)).
+**Kettle does 30.3% of what Steam does** (44 of 145 features; see the [roadmap](docs/roadmap.md)).
 
 ![Status](docs/images/status.svg)
 
 | Area | Built |
 |---|---|
-| Account | 4/9 (44%) |
-| Library | 5/20 (25%) |
+| Account | 4/10 (40%) |
+| Library | 6/21 (29%) |
 | Store | 3/11 (27%) |
 | Downloads | 6/16 (38%) |
 | Play | 5/12 (42%) |
@@ -26,7 +26,7 @@ A fast, native Steam client written in Rust: egui + wgpu, with no Chromium and n
 | Community | 0/13 (0%) |
 | Notifications | 1/3 (33%) |
 | Settings | 4/10 (40%) |
-| Interface | 2/8 (25%) |
+| Interface | 3/8 (38%) |
 | Platform | 3/8 (38%) |
 <!-- status:end -->
 
@@ -71,7 +71,7 @@ Developer CLI:
 | `sr-cli login` | Starts a QR login. The QR is written to `~/.cache/kettle/qr.svg` |
 | `sr-cli owned <account>` | Counts the account's owned games |
 | `sr-cli cm <account>` | Logs on to Steam's CM servers and shows the license count |
-| `sr-cli logout <account>` | Removes the stored token and revokes it on Steam's servers |
+| `sr-cli logout <account>` | Removes the stored token (remove the device in the Steam Mobile App to end the session on Steam's side) |
 
 ## Design
 

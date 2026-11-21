@@ -8,7 +8,8 @@ Nothing here is a promise. The owner decides what comes next. Bugs found on real
 
 - [x] Account: QR sign-in with the Steam Mobile App
 - [x] Account: refresh token kept in the system keyring, never in a file
-- [x] Account: sign out revokes the token on Steam's side
+- [x] Account: sign out deletes the token and the cached library
+- [ ] Account: sign out revokes the token on Steam's side
 - [x] Account: remembered accounts and instant start from cache
 - [ ] Account: sign in with a password and Steam Guard code
 - [ ] Account: switch between several accounts
@@ -22,7 +23,8 @@ Nothing here is a promise. The owner decides what comes next. Bugs found on real
 - [x] Library: sidebar list with search
 - [x] Library: sort by name, last played, hours played
 - [x] Library: finds games the native Steam installed
-- [ ] Library: finds games Flatpak Steam installed (shows 0 on the T14s)
+- [x] Library: installed games show even without the network or the owned list
+- [ ] Library: finds games Flatpak Steam installed (re-test on the T14s)
 - [ ] Library: owned games load on a real account (SteamClient token over CM)
 - [ ] Library: collections (user-made and dynamic)
 - [ ] Library: filters (installed, ready to play, genre, players, features)
@@ -161,7 +163,7 @@ Nothing here is a promise. The owner decides what comes next. Bugs found on real
 
 - [x] Settings: downloads (default library, parallel downloads)
 - [x] Settings: compatibility page
-- [x] Settings: privacy page with sign-out and revoke
+- [x] Settings: privacy page with sign-out
 - [x] Settings: games page (overlay, Steam client helper)
 - [ ] Settings: looks like the official client's settings window
 - [ ] Settings: interface (language, start page, scale)
@@ -174,7 +176,7 @@ Nothing here is a promise. The owner decides what comes next. Bugs found on real
 
 - [x] Interface: custom title bar, resize edges, Alt+drag, Ctrl+Tab
 - [x] Interface: subtle animations, near-zero idle CPU
-- [ ] Interface: closing the window is immediate
+- [x] Interface: closing the window is immediate (0.1-0.4 s, X11)
 - [ ] Interface: menus and drop-downs look like Steam
 - [ ] Interface: system tray icon
 - [ ] Interface: Big Picture / gamepad UI

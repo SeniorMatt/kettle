@@ -29,12 +29,6 @@ fn main() -> Result<()> {
 }
 
 fn cmd_logout(account: &str) -> Result<()> {
-    if let Some(token) = secrets::load_refresh_token(account)? {
-        // Best effort: the local copy is removed even if Steam can't be reached.
-        if let Err(e) = auth::revoke_refresh_token(&token) {
-            eprintln!("Couldn't revoke the token on Steam's servers: {e:#}");
-        }
-    }
     secrets::delete_refresh_token(account)?;
     println!("Signed out {account}");
     Ok(())
@@ -92,8 +86,11 @@ fn cmd_owned(account: &str) -> Result<()> {
     let refresh = token(account)?;
     let steamid = auth::jwt_steamid(&refresh).context("bad token")?;
     let t = Instant::now();
-    let access = auth::renew_access_token(&refresh)?;
-    let games = sr_steam::webapi::owned_games(&access, steamid)?;
+    let rt = tokio::runtime::Runtime::new()?;
+    let games = rt.block_on(async {
+        let c = cm::connect(account, &refresh).await?;
+        cm::owned_games(&c.conn, steamid).await
+    })?;
     println!("{} owned games in {:.0} ms", games.len(), t.elapsed().as_secs_f64() * 1e3);
     Ok(())
 }

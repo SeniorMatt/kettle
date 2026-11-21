@@ -97,6 +97,7 @@ pub fn is_tool_app(appid: u32, name: &str) -> bool {
     TOOLS.contains(&appid)
         || name.starts_with("Proton")
         || name.starts_with("Steam Linux Runtime")
+        || name.starts_with("Legacy Steam Runtime")
         || name.starts_with("Steamworks Common Redistributables")
 }
 

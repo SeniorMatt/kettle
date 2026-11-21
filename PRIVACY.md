@@ -8,7 +8,7 @@ Kettle has no telemetry, no analytics, no crash reporting and no servers of its 
 - **The refresh token** (it keeps you signed in) is stored only in your system keyring: GNOME Keyring, KWallet or KeePassXC, through the Secret Service API. It's never written to a file, a log, the screen or `Debug` output.
 - **Access tokens** are short-lived. They're requested when needed and kept in memory only.
 - When a session ends, tokens are overwritten in memory.
-- **Sign out** does three things. It deletes the token from the keyring. It revokes the token on Steam's servers, so any copy anywhere stops working. And it deletes the cached library of that account.
+- **Sign out** deletes the token from the keyring and the cached library of that account. It does not yet revoke the token on Steam's servers. To end the session there too, remove "Kettle" under authorized devices in the Steam Mobile App (or "Deauthorize all other devices" on the Steam website).
 - **Error messages are scrubbed:** anything that looks like a token is replaced with `[redacted]` before it's shown.
 - The device name sent to Steam is just `Kettle (Linux)` (or `Kettle (Windows)`). It doesn't include your hostname or username.
 
@@ -37,8 +37,8 @@ We **never write** to the official Steam client's files. We only read its `steam
 
 | Host | Why |
 |---|---|
-| `api.steampowered.com` | QR sign-in, token refresh and revoke, owned games, and the CM server list |
-| Steam CM servers (`*.steamserver.net`) | The client connection (encrypted). After sign-in it also carries Friends & Chat: your friends list, their names and presence, your own online state (Online by default; you can pick Away, Busy, Invisible or Offline in the panel) and chat messages |
+| `api.steampowered.com` | QR sign-in and the CM server list |
+| Steam CM servers (`*.steamserver.net`) | The client connection (encrypted): your owned games, downloads and short-lived access tokens. After sign-in it also carries Friends & Chat: your friends list, their names and presence, your own online state (Online by default; you can pick Away, Busy, Invisible or Offline in the panel) and chat messages |
 | `shared.steamstatic.com` | Cover art (only the app ID is sent) |
 | `media.steampowered.com` | Small game icons |
 | `store.steampowered.com` | Public store data for the Store tab: featured lists, search and app details. No login or cookies; only the country (`us`) and language (`english`) are sent, plus the search text or app ID you look at |

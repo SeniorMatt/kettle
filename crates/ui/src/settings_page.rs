@@ -361,8 +361,8 @@ fn privacy(ui: &mut Ui, client: &mut Client) {
     }
     ui.add_space(14.0);
     widgets::section_title(ui, "SIGN OUT");
-    ui.label(RichText::new("Deletes the token from the keyring, revokes it on Steam's servers so no copy keeps working, and removes the cached library of this account.").color(theme::TEXT_DIM));
-    if widgets::button(ui, "Sign out and revoke", ButtonStyle::Danger, true).clicked() {
+    ui.label(RichText::new("Deletes the token from the keyring and removes the cached library of this account. To end the session on Steam's side too, remove Kettle under authorized devices in the Steam Mobile App.").color(theme::TEXT_DIM));
+    if widgets::button(ui, "Sign out", ButtonStyle::Danger, true).clicked() {
         client.send(Command::Logout);
     }
 }
