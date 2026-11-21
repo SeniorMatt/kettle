@@ -53,6 +53,15 @@ impl StoreView {
         }
     }
 
+    /// Show the page with this id (see [`StoreView::page_id`]); used by the navigation history.
+    pub fn set_page_id(&mut self, client: &mut Client, id: u64) {
+        match id {
+            0 => self.page = Page::Home,
+            n => self.open_app(client, (n - 1) as u32),
+        }
+    }
+
+    #[allow(dead_code)]
     pub fn back(&mut self) {
         self.page = Page::Home;
     }

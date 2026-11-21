@@ -35,7 +35,7 @@ pub fn action_button(ui: &mut Ui, icon: &str, label: &str, colors: (Color32, Col
     let font = theme::bold(16.0);
     let text = format!("{icon}  {label}");
     let galley = ui.painter().layout_no_wrap(text, font, Color32::WHITE);
-    let size = Vec2::new((galley.size().x + 56.0).max(150.0), 46.0);
+    let size = Vec2::new((galley.size().x + 56.0).max(150.0), theme::CONTROL_LARGE);
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
     // Brighten on hover, darken and shrink a little while pressed.
     let lift = anim::animate_bool(ui.ctx(), resp.id.with("hover"), resp.hovered(), anim::FAST);
@@ -266,6 +266,8 @@ pub fn combo<R>(
     selected: impl Into<egui::WidgetText>,
     list: impl FnOnce(&mut Ui) -> R,
 ) {
+    // Never wider than the space it is given (settings rows leave the control about a third of the row).
+    let width = width.min((ui.available_width() - 32.0).max(60.0));
     egui::ComboBox::from_id_salt(id)
         .width(width)
         .selected_text(selected)

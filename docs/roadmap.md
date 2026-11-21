@@ -67,13 +67,15 @@ Nothing here is a promise. The owner decides what comes next. Bugs found on real
 - [x] Downloads: Steam-format libraries the official client can read
 - [x] Downloads: Windows depots for Proton games
 - [ ] Downloads: download with a real account (owned paid games)
-- [ ] Downloads: automatic game updates
-- [ ] Downloads: delta patches (only changed chunks of updates)
-- [ ] Downloads: bandwidth limit and schedule
+- [x] Downloads: automatic game updates (check at start and every 45 min, per-game and schedule settings, a dialog before touching the official client's folders; unit-tested, not yet tried on a real update)
+- [x] Downloads: delta patches (only changed chunks of updates)
+- [x] Downloads: bandwidth limit and schedule (the schedule covers automatic updates only)
 - [ ] Downloads: beta branches and beta passwords
-- [ ] Downloads: choose DLC to install
-- [ ] Downloads: move a game to another library
-- [ ] Downloads: storage manager (sizes per library, clean up)
+- [ ] Downloads: choose DLC to install (install dialog built, not tested yet)
+- [ ] Downloads: language choice for new installs (built, not tested yet)
+- [x] Downloads: desktop and application menu shortcuts
+- [ ] Downloads: move a game to another library (built, not tested yet)
+- [ ] Downloads: storage manager (sizes per library, clean up) (built, not tested yet)
 - [ ] Downloads: shader pre-caching
 - [ ] Downloads: Workshop items
 
@@ -114,8 +116,9 @@ Nothing here is a promise. The owner decides what comes next. Bugs found on real
 - [x] Friends: friends list with states, groups and avatars (demo)
 - [x] Friends: set your own state (online, away, invisible, offline) (demo)
 - [ ] Friends: works on a real account
-- [ ] Friends: friend requests and blocking
-- [ ] Friends: friend profiles pop-up
+- [ ] Friends: friend requests (accept, ignore, cancel) and add a friend by code or link (built, not yet tried on a real account)
+- [ ] Friends: blocking, and a list of blocked accounts to unblock
+- [ ] Friends: friend profiles pop-up (a full profile page is coded; the small pop-up is not)
 - [ ] Friends: invite to game and join game
 - [ ] Friends: nicknames and favourites
 - [ ] Friends: notifications for friends coming online
@@ -124,7 +127,8 @@ Nothing here is a promise. The owner decides what comes next. Bugs found on real
 
 - [x] Chat: one-to-one chat with history and unread counts (demo)
 - [ ] Chat: works on a real account
-- [ ] Chat: group chats and channels
+- [ ] Chat: group chats: list, read and send in a channel (built, not yet tried on a real account)
+- [ ] Chat: group chats: create, join, invite, roles, voice
 - [ ] Chat: voice chat
 - [ ] Chat: images, links and embeds
 - [ ] Chat: emoticons and stickers
@@ -138,12 +142,14 @@ Nothing here is a promise. The owner decides what comes next. Bugs found on real
 - [ ] Overlay: draws on top of exclusive-fullscreen games (Vulkan layer)
 - [ ] Overlay: web browser
 - [ ] Overlay: achievements and guides
-- [ ] Overlay: FPS counter
+- [x] Overlay: FPS counter (MangoHud)
 
 ## Community
 
-- [ ] Community: your profile (view and edit)
-- [ ] Community: other people's profiles
+- [ ] Community: your profile: view and edit name, real name and summary (built, not yet tried on a real account)
+- [ ] Community: your profile: avatar upload, location, privacy settings, showcases
+- [ ] Community: other people's profiles: public page with summary, level and games (built, not yet tried)
+- [ ] Community: other people's profiles: badges, friends count, comments
 - [ ] Community: achievements per game
 - [ ] Community: screenshots (take with F12, manage, upload)
 - [ ] Community: game recording and clips
@@ -159,7 +165,7 @@ Nothing here is a promise. The owner decides what comes next. Bugs found on real
 ## Notifications
 
 - [x] Notifications: download finished, in-app message for new chat messages
-- [ ] Notifications: desktop notifications
+- [ ] Notifications: desktop notifications (settings and download-finished built, not tested yet; friend and chat events wait for the friends code to call it)
 - [ ] Notifications: gifts, comments, trade offers
 
 ## Settings
@@ -169,11 +175,13 @@ Nothing here is a promise. The owner decides what comes next. Bugs found on real
 - [x] Settings: privacy page with sign-out
 - [x] Settings: games page (overlay, Steam client helper)
 - [x] Settings: looks like the official client's settings window
-- [ ] Settings: interface (language, start page, scale)
-- [ ] Settings: library folders management
-- [ ] Settings: in-game (screenshot key, overlay key)
+- [ ] Settings: interface: start page, scale, animations (built, not tested yet)
+- [ ] Settings: interface: language
+- [ ] Settings: library folders management (add and remove our folders; built, not tested yet)
+- [ ] Settings: in-game (screenshot key, overlay key; performance overlay is built, not yet tested)
 - [ ] Settings: controller
-- [ ] Settings: start with the computer, minimize to tray
+- [ ] Settings: minimize to tray, start minimized (built, not tested yet)
+- [ ] Settings: start with the computer
 
 ## Interface
 
@@ -181,10 +189,13 @@ Nothing here is a promise. The owner decides what comes next. Bugs found on real
 - [x] Interface: subtle animations, near-zero idle CPU
 - [x] Interface: closing the window is immediate (0.1-0.4 s, X11)
 - [x] Interface: menus and drop-downs look like Steam
-- [ ] Interface: system tray icon
+- [ ] Interface: system tray icon (built, not tested yet; Linux only)
+- [x] Interface: menu bar like the official client's, mouse 4/5 history
 - [ ] Interface: Big Picture / gamepad UI
 - [ ] Interface: translations (Russian first)
-- [ ] Interface: keyboard navigation everywhere
+- [ ] Interface: keyboard navigation: Esc back, Enter/Space plays, Alt+Left/Right (built, not tested yet)
+- [ ] Interface: keyboard navigation: focus ring in the library grid and sidebar, Ctrl+F
+- [ ] Interface: keyboard navigation everywhere else
 
 ## Platform
 

@@ -43,6 +43,27 @@ Pick a small game you own (under 2 GB).
 - [ ] Gear → Verify files: it finishes with nothing re-downloaded.
 - [ ] Gear → Browse local files: the game's folder opens.
 
+### Install dialog, updates and the Downloads page (written, not yet tried)
+
+- [ ] INSTALL dialog: "Required" and "Available" space show, a game with several languages has a language box, DLC are listed with sizes. With a small disk or a huge game, Install is disabled with a red note.
+- [ ] Tick "Create desktop shortcut" and "Create application menu shortcut", install. After it finishes the icons exist (`~/.local/share/applications/kettle-game-<id>.desktop`, `~/Desktop/...`). Double-click one: Kettle starts and the game launches (`kettle --play <id>`). Uninstall removes both.
+- [ ] Downloads page: the running game shows big art, "DOWNLOADING n%", a graph of the last 60 s (blue network, green disk), speed, peak, downloaded, progress and time left. Queue two more games: UP NEXT shows arrows to move them, a pause and a remove button. Pause all, Resume all. COMPLETED has "Clear".
+- [ ] Update a game: install an older build or wait for a real update. Settings > Downloads > "Check now": the game shows "Update available" and the game page offers UPDATE. Updating downloads only a fraction of the game (see "DOWNLOADED" on the Downloads page).
+- [ ] Press PLAY on a game with an update waiting: "Update required" with Update now / Play anyway.
+- [ ] A game installed by the official Steam client with an update: UPDATE asks first ("Update this time / Always allow / Never"). With "Never" nothing is written to Steam's folder. Check with `ls -l` that its files are untouched.
+- [ ] Per game: Properties > General > Automatic updates: "Only update when I launch it" stops automatic downloads for that game.
+- [ ] Settings > Downloads > "Limit download speed" at 2048 KB/s: the Downloads page stays near 2 MB/s. Switch it off: speed returns. "Display download rates in bits per second" shows Mbps.
+- [ ] Schedule: set "Only update between set hours" to a window that does not include now and press "Check now": updates are listed but not downloaded. Set it to include now: they start.
+- [ ] "Allow downloads during gameplay" off: start a game from Kettle during a download; the page says it waits; close the game: it continues.
+
+### Storage, library folders, notifications (written, not yet tried)
+
+- [ ] Settings > Library: add a folder (an absolute path); it appears with free space and as an install target. Remove it again (works only when no game is in it).
+- [ ] Settings > Storage: each library shows used and free space and its games, biggest first. Move a game to another library: progress bar, the game still plays, the old folder is gone. Cancel a move halfway: the original is untouched and no `.kettle-move-*` folder is left behind.
+- [ ] Moving a Steam-library game needs the extra "Move (touches Steam's folder)" click.
+- [ ] Settings > Notifications: "Send a test" pops up a desktop notification; finishing a download shows one when enabled.
+- [ ] Settings > Account: "Keep me signed in" off, restart: the QR login shows. "Delete local data" clears the cache folder; covers load again.
+
 ## 5. Play
 
 - [ ] A native Linux game: PLAY → it starts and the button shows RUNNING. Quit the game: play time goes up.
@@ -58,10 +79,34 @@ Pick a small game you own (under 2 GB).
 - [ ] Shift+Tab, Esc or "Return to game" hides it and the game has focus again (keyboard and mouse work).
 - [ ] Type a note, close, press Shift+Tab again: the note is still there. Restart the app: it is still there.
 - [ ] With no game running, Shift+Tab does nothing here: other programs get it (e.g. Shift+Tab moves focus backwards in a browser). Quit the game: same.
-- [ ] Settings → Games → "Enable the in-game overlay" off: Shift+Tab is no longer taken and Games → "Show overlay" is gone.
+- [ ] Settings → In Game → "Enable the in-game overlay" off: Shift+Tab is no longer taken and Games → "Show overlay" is gone.
 - [ ] X11 session: the same checks (the shortcut is a key grab, no prompt).
 - [ ] Windows: same checks with a fullscreen-windowed game. If the overlay shows behind an exclusive-fullscreen game, note it.
 - [ ] While the overlay is hidden the app uses no CPU (`top`).
+
+#### Overlay helper window (no window behaviour)
+The overlay is a second process, `kettle --overlay <appid> --socket <path>`, an override-redirect X11 window (XWayland on Wayland). Check with a game that runs under Proton (an XWayland window):
+- [ ] KDE Wayland: `pgrep -a kettle` shows the helper while the game runs, and it is gone a moment after the game exits. Games > "Show overlay" and Shift+Tab both show it.
+- [ ] No open or close animation of the desktop (no zoom, fade or minimize effect), no taskbar or task switcher entry, no new window in the KDE window list (`qdbus org.kde.KWin /KWin org.kde.KWin.showDesktop` or Alt+Tab).
+- [ ] The game is not minimized and not un-fullscreened when the overlay opens or closes, also for a fullscreen game (borderless and, if it works, exclusive). Repeat 20 times in a row (Shift+Tab, Shift+Tab, ...): no flicker and no double show (the 300 ms debounce).
+- [ ] While shown: typing in a note and in a chat does not reach the game (no WASD movement). After hiding, the game gets keyboard input at once.
+- [ ] Mouse: clicks hit the overlay buttons. A game that captures the mouse (FPS) may keep the pointer; note which games do.
+- [ ] The overlay covers the monitor the game is on (it uses the primary monitor; note if the game is on another one).
+- [ ] While hidden, the helper uses no CPU (`top -p $(pgrep -f 'kettle --overlay')`), and the compositor still unredirects a fullscreen game (nothing is mapped).
+- [ ] X11 session: same checks; Shift+Tab comes through the helper's keyboard grab, one press toggles once.
+- [ ] No `XDG_RUNTIME_DIR` or no `DISPLAY` (run the app with it unset): the built-in overlay window is used and a line `[overlay] ...; using the built-in overlay window` is printed.
+- [ ] `ls -l $XDG_RUNTIME_DIR/kettle-overlay-*.sock` shows mode `srw-------` while a game runs and no file after it exits or the app is closed.
+- [ ] Top bar shows game, session time, clock, Friends, Settings, Return to game. Friends: online and in-game friends first, click opens a chat, a sent message appears. Notes, quick settings (overlay on/off, performance overlay on/off, preset) work. Controls are about 40 px high.
+- [ ] Settings > Interface > Animations = Off: the overlay appears without a fade.
+
+#### Performance overlay (MangoHud)
+- [ ] Without MangoHud installed: Settings > In Game > Performance overlay says so with apt, pacman and dnf commands; the overlay's Settings panel says so; games start normally.
+- [ ] With MangoHud (`sudo apt install mangohud`): `sr-cli launch <appid> --dry-run --hud fps` prints `env: MANGOHUD=1` and `env: MANGOHUD_CONFIGFILE=<data dir>/mangohud/<appid>.conf`, and for a native game the program is `mangohud` with the game as first argument. The file is mode 0600 and lists every option as `key=0|1`.
+- [ ] Launch a Proton game with each preset (FPS only, FPS + graph, Full, Custom): the HUD shows what the preset names, at the chosen position, size, colour and opacity. Shift_L+F12 hides and shows it in the game.
+- [ ] Frame rate limit 30 / 60 / 120 / 144 / custom is respected in the game.
+- [ ] Launch options with their own `mangohud %command%` or `MANGOHUD_CONFIG=...`: the app adds nothing (one HUD, theirs).
+- [ ] Native OpenGL game: HUD shows (wrapper). Native Vulkan game: HUD shows.
+- [ ] Changing the preset from the in-game overlay saves it (Settings > In Game shows it) and applies at the next launch.
 
 ## 5b. Collections, favourites and filters
 
@@ -101,9 +146,32 @@ Pick a small game you own (under 2 GB).
 - [ ] The keyring entry is gone and the account's library cache is deleted.
 - [ ] Known limit: the session stays listed under authorized devices in the Steam Mobile App until you remove it there.
 
+## Menu bar, history, tray and animations
+
+- [ ] Click "View": its menu opens. With it open, move over "Friends", "Games", "Help": each opens at once without a click. Click outside, or press Esc: it closes. With a menu open, Left/Right switch menus. F10 opens the first menu.
+- [ ] Kettle menu: Settings opens the settings window; Check for Kettle updates opens the GitHub releases page; Exit really quits (also with the tray on).
+- [ ] View > Zoom in / out / reset, and Ctrl + / Ctrl - / Ctrl 0, change the interface scale; it is kept after a restart (Settings > Interface).
+- [ ] Help > System information shows OS, kernel, desktop, session, graphics adapter, Steam folders, Proton count; Copy puts it on the clipboard. About shows version, license and "not affiliated with Valve".
+- [ ] Open the Store, a store page, Library, a game, Downloads. The title bar back and forward buttons, mouse button 4 and 5 (side buttons), and Alt+Left / Alt+Right walk through them in order. Esc goes back (not while a menu or dialog is open or you are typing).
+- [ ] On a game's page Enter or Space plays an installed game.
+- [ ] Settings > Interface > Animations: Off makes page changes, hovers and the tab underline instant. Reduced fades but nothing slides. Idle CPU stays near 0 in all three.
+- [ ] Tray (Settings > Interface): the icon shows in the KDE tray with Kettle, Store, Library, Friends, Downloads, recent games (Play), Settings, Exit. Left click shows and raises the window. With "Closing the window keeps Kettle in the tray" on, the close button hides the window (on Wayland it minimizes it) and the tray brings it back. Exit really quits. Without a tray host the close button quits as before.
+
 ## Windows
 
 - [ ] Unzip `dist/kettle-windows-x86_64.zip` and run `kettle.exe`. It should find Steam games installed in `C:\Program Files (x86)\Steam` and in other libraries.
 - [ ] Sign in, install a small game and play it.
 
 Write down anything that looks off, along with a screenshot.
+
+## Friends and profiles (real account)
+- [ ] Sign in. The Friends panel header shows your profile name (not the account name) and "Online". Picking another state sticks after a restart; the default for a new install is Online.
+- [ ] The list shows only your real friends with names and avatars (nobody shown as a number; a friend whose name hasn't arrived yet shows "Loading..." in grey). IN-GAME friends show "In-Game: <game>", offline ones "Last online 6 min ago". Sections show counts and collapse.
+- [ ] Compare with the official client's friends window: same friends, same sections and order (offline: most recently online first).
+- [ ] Someone sends you a friend request: FRIEND REQUESTS appears with Accept / Ignore; Accept moves them into the list. A request you sent shows under PENDING with Cancel.
+- [ ] "+" next to the search box: enter a friend code, a SteamID64 and a `steamcommunity.com/profiles/...` link in turn: each sends a request (a vanity `/id/name` link says it needs a code or profiles link).
+- [ ] Right-click a friend: Send message, View profile, Remove friend and Block each ask for confirmation where it matters; Remove friend removes them, Block hides them.
+- [ ] GROUP CHATS lists your chat groups. Click one: its default channel opens, history loads, a message you send appears for the others, theirs appear here. The channel picker under the group name switches channels.
+- [ ] Click your name or avatar in the panel header, or the profile tab: your profile page shows avatar, name, level, real name and location (if set), summary and recent games. Edit profile: change the summary, Save; the page shows the new text. Change the profile name: the panel header shows it a moment later.
+- [ ] View profile on a friend and on a private profile ("This profile is private."). No token or cookie appears in the terminal output or in any error message.
+

@@ -7,10 +7,7 @@ use crate::dialogs::{kind_label, origin_label};
 use crate::widgets::{self, ButtonStyle};
 use crate::{anim, chrome, fmt, theme};
 use egui::{Align, Color32, Context, Id, Layout, Pos2, RichText, Sense, Ui, Vec2, ViewportBuilder, ViewportId};
-use sr_client::{
-    Client, Command, CompatInfo, Load, MAX_WORKERS, MIN_WORKERS, ReleaseInfo, Source, ToolInstall, ToolKind, ToolPhase,
-    ToolTarget,
-};
+use sr_client::{Client, Command, CompatInfo, Load, ReleaseInfo, Source, ToolInstall, ToolKind, ToolPhase, ToolTarget};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -18,18 +15,24 @@ use std::sync::Arc;
 pub enum SettingsTab {
     #[default]
     Account,
+    Interface,
     Library,
+    Storage,
     Downloads,
+    Notifications,
     Compatibility,
     InGame,
     Privacy,
 }
 
 impl SettingsTab {
-    const ALL: [(SettingsTab, &'static str); 6] = [
+    const ALL: [(SettingsTab, &'static str); 9] = [
         (SettingsTab::Account, "Account"),
+        (SettingsTab::Interface, "Interface"),
         (SettingsTab::Library, "Library"),
+        (SettingsTab::Storage, "Storage"),
         (SettingsTab::Downloads, "Downloads"),
+        (SettingsTab::Notifications, "Notifications"),
         (SettingsTab::Compatibility, "Compatibility"),
         (SettingsTab::InGame, "In Game"),
         (SettingsTab::Privacy, "Privacy"),
@@ -43,9 +46,6 @@ pub struct SettingsView {
     target: ToolTarget,
     /// Chosen release (index into the shown list) per source.
     picks: HashMap<&'static str, usize>,
-    library_text: String,
-    library_synced: bool,
-    workers: usize,
     confirm_remove: Option<std::path::PathBuf>,
 }
 
@@ -56,9 +56,6 @@ impl Default for SettingsView {
             tab: SettingsTab::default(),
             target: ToolTarget::Ours,
             picks: HashMap::new(),
-            library_text: String::new(),
-            library_synced: false,
-            workers: 0,
             confirm_remove: None,
         }
     }
@@ -70,7 +67,7 @@ impl SettingsView {
         if self.open {
             ctx.send_viewport_cmd_to(Self::viewport_id(), egui::ViewportCommand::Focus);
         } else {
-            self.library_synced = false;
+            crate::settings_storage::reset(ctx);
             if cfg!(not(windows)) {
                 client.send(Command::CompatLoad);
                 client.send(Command::ProtonReleases(false));
@@ -144,11 +141,14 @@ impl SettingsView {
                 let label = SettingsTab::ALL.iter().find(|(t, _)| *t == self.tab).map_or("", |(_, l)| l);
                 widgets::page_title(ui, label);
                 match self.tab {
-                    SettingsTab::Account => account(ui, client),
-                    SettingsTab::Library => library(ui, client),
-                    SettingsTab::Downloads => self.downloads(ui, client),
+                    SettingsTab::Account => crate::settings_notify::account(ui, client),
+                    SettingsTab::Interface => crate::settings_interface::show(ui, client),
+                    SettingsTab::Library => crate::settings_storage::folders(ui, client),
+                    SettingsTab::Storage => crate::settings_storage::storage(ui, client),
+                    SettingsTab::Downloads => crate::settings_downloads::show(ui, client),
+                    SettingsTab::Notifications => crate::settings_notify::notifications(ui, client),
                     SettingsTab::Compatibility => self.compatibility(ui, client),
-                    SettingsTab::InGame => in_game(ui, client),
+                    SettingsTab::InGame => crate::settings_ingame::show(ui, client),
                     SettingsTab::Privacy => privacy(ui),
                 }
             });
@@ -310,42 +310,6 @@ impl SettingsView {
             );
         });
     }
-
-    // ---- downloads -------------------------------------------------------
-
-    fn downloads(&mut self, ui: &mut Ui, client: &mut Client) {
-        let settings = client.state().settings.clone();
-        if !self.library_synced {
-            self.library_text = settings.library.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
-            self.workers = settings.workers;
-            self.library_synced = true;
-        }
-        let default = settings.default_library().display().to_string();
-        let desc = format!("Games are installed into {default} unless you pick another folder in the install dialog.");
-        widgets::setting_block(ui, "Default library folder", &desc, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                ui.add(egui::TextEdit::singleline(&mut self.library_text).desired_width(300.0).hint_text(default));
-                if widgets::button(ui, "Apply", ButtonStyle::Primary, true).clicked() {
-                    let text = self.library_text.trim();
-                    let path = (!text.is_empty()).then(|| std::path::PathBuf::from(text));
-                    client.send(Command::SetLibrary(path));
-                }
-                if widgets::button(ui, "Use default", ButtonStyle::Secondary, true).clicked() {
-                    self.library_text.clear();
-                    client.send(Command::SetLibrary(None));
-                }
-            });
-        });
-        let desc = "How many file pieces are fetched at once. More is faster on a fast line; fewer is gentler.";
-        widgets::setting_row(ui, "Parallel downloads", desc, |ui| {
-            ui.spacing_mut().slider_width = 150.0;
-            let resp = ui.add(egui::Slider::new(&mut self.workers, MIN_WORKERS..=MAX_WORKERS).smallest_positive(1.0));
-            if resp.drag_stopped() || (resp.changed() && !resp.dragged()) {
-                client.send(Command::SetWorkers(self.workers));
-            }
-        });
-    }
 }
 
 /// A small heading above a group of rows.
@@ -399,51 +363,6 @@ fn install_status(ui: &mut Ui, client: &mut Client, i: &ToolInstall) {
 }
 
 // ---- the other pages ---------------------------------------------------------
-
-fn account(ui: &mut Ui, client: &mut Client) {
-    if let Some(a) = &client.state().account {
-        widgets::setting_row(ui, "Signed in as", "Your Steam account name.", |ui| {
-            ui.label(RichText::new(&a.account_name).font(theme::medium(14.0)).color(Color32::WHITE));
-        });
-    }
-    let desc = "Deletes the token from the keyring and removes the cached library of this account. To end the \
-                session on Steam's side too, remove Kettle under authorized devices in the Steam Mobile App.";
-    widgets::setting_row(ui, "Sign out", desc, |ui| {
-        if widgets::button(ui, "Sign out", ButtonStyle::Danger, true).clicked() {
-            client.send(Command::Logout);
-        }
-    });
-}
-
-fn library(ui: &mut Ui, client: &Client) {
-    let desc = "Folders games can be installed into. Folders of the official Steam client are listed too and are \
-                only written to when you pick them in the install dialog.";
-    ui.label(RichText::new(desc).font(theme::regular(12.5)).color(theme::TEXT_DIM));
-    ui.add_space(6.0);
-    for l in &client.state().libraries {
-        let kind = if l.ours { "Kettle library" } else { "Steam library folder" };
-        widgets::setting_row(ui, &l.path.display().to_string(), &format!("{kind}  |  {}", l.label), |_| {});
-    }
-}
-
-fn in_game(ui: &mut Ui, client: &mut Client) {
-    let mut overlay = client.state().settings.overlay;
-    let desc = "While a game started here runs, Shift+Tab shows friends, chat and notes over it. The shortcut is \
-                only registered while such a game runs.";
-    widgets::setting_row(ui, "Enable the in-game overlay (Shift+Tab)", desc, |ui| {
-        if widgets::toggle(ui, &mut overlay).changed() {
-            client.send(Command::SetOverlay(overlay));
-        }
-    });
-    let mut start = client.state().settings.start_steam;
-    let desc = "Most games use the Steamworks API, which only works while the official Steam client runs. We start \
-                it minimized before such a game. Nothing is sent to it; it is only started.";
-    widgets::setting_row(ui, "Start the Steam client for games that need it", desc, |ui| {
-        if widgets::toggle(ui, &mut start).changed() {
-            client.send(Command::SetStartSteam(start));
-        }
-    });
-}
 
 fn privacy(ui: &mut Ui) {
     let rows = [

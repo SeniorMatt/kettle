@@ -276,6 +276,8 @@ pub struct PrepareOpts {
     pub extra_args: Vec<String>,
     /// The game's launch options text (see [`crate::launch_opts`]); `None` = none.
     pub launch_options: Option<String>,
+    /// The performance overlay (MangoHud) to add; the user's own launch options win over it.
+    pub hud: Option<crate::mangohud::Hud>,
 }
 
 pub struct Prepared {
@@ -362,6 +364,9 @@ pub fn prepare_with(info: &AppInfo, installed: Option<&InstalledApp>, opts: &Pre
         compatdata: &compatdata,
     })?;
     launch_opts::apply(&mut plan, &parsed);
+    if let Some(hud) = &opts.hud {
+        crate::mangohud::apply(&mut plan, hud, &parsed);
+    }
     let tool = tool.filter(|_| uses_tool).map(|t| (t.internal_name.clone(), source.unwrap_or(ChoiceSource::Newest)));
     Ok(Prepared {
         plan,

@@ -6,12 +6,13 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 /// Only Valve's store is opened from the UI; anything else is refused.
-const ALLOWED_PREFIX: &str = "https://store.steampowered.com/";
+const ALLOWED_PREFIXES: [&str; 3] =
+    ["https://store.steampowered.com/", "https://help.steampowered.com/", "https://github.com/SeniorMatt/kettle"];
 
 /// Start the browser and return at once. A thread reaps the child so no
 /// zombie is left behind; the UI thread never waits.
 pub fn url(url: &str) -> Result<()> {
-    if !url.starts_with(ALLOWED_PREFIX) {
+    if !ALLOWED_PREFIXES.iter().any(|p| url.starts_with(p)) {
         bail!("refusing to open {url}");
     }
     let mut child = launcher(url).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn()?;

@@ -25,6 +25,21 @@ pub struct Settings {
     /// The Shift+Tab in-game overlay (the shortcut is registered only while a game we started runs).
     #[serde(default = "default_true")]
     pub overlay: bool,
+    /// Animations, scale, start page, tray.
+    #[serde(default)]
+    pub interface: crate::InterfaceSettings,
+    /// The performance overlay (MangoHud): preset, items, position, FPS limit.
+    #[serde(default)]
+    pub hud: crate::HudSettings,
+    /// Updates, speed limit, schedule, added library folders.
+    #[serde(default)]
+    pub downloads: crate::DownloadSettings,
+    /// Which desktop notifications to show.
+    #[serde(default)]
+    pub notifications: crate::NotifySettings,
+    /// Keep the sign-in token in the keyring so the next start needs no QR code.
+    #[serde(default = "default_true")]
+    pub keep_signed_in: bool,
 }
 
 fn default_true() -> bool {
@@ -37,12 +52,22 @@ fn default_workers() -> usize {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { library: None, workers: DEFAULT_WORKERS, start_steam: true, overlay: true }
+        Settings {
+            library: None,
+            workers: DEFAULT_WORKERS,
+            start_steam: true,
+            overlay: true,
+            interface: Default::default(),
+            hud: Default::default(),
+            downloads: Default::default(),
+            notifications: Default::default(),
+            keep_signed_in: true,
+        }
     }
 }
 
 impl Settings {
-    fn path() -> PathBuf {
+    pub(crate) fn path() -> PathBuf {
         store::data_dir().join("settings.json")
     }
 
@@ -77,6 +102,9 @@ pub fn library_choices(settings: &Settings) -> Vec<LibraryChoice> {
     };
     push(settings.default_library(), "Kettle library", true);
     push(content::default_library(), "Kettle library", true);
+    for p in &settings.downloads.libraries {
+        push(p.clone(), "Kettle library", true);
+    }
     for root in local::steam_roots() {
         for lib in local::library_folders(&root) {
             push(lib, "Steam library", false);
@@ -112,13 +140,18 @@ impl Client {
         self.save_settings();
     }
 
-    fn save_settings(&mut self) {
+    pub(crate) fn set_interface(&mut self, i: crate::InterfaceSettings) {
+        self.state.settings.interface = i.clamped();
+        self.save_settings();
+    }
+
+    pub(crate) fn save_settings(&mut self) {
         if let Err(e) = store::save_json(&Settings::path(), &self.state.settings) {
             self.state.notice = Some(format!("Couldn't save the settings: {e:#}"));
         }
     }
 
-    fn settings_changed(&mut self) {
+    pub(crate) fn settings_changed(&mut self) {
         self.save_settings();
         self.state.libraries = library_choices(&self.state.settings);
         // A newly chosen library may already hold games.
@@ -127,7 +160,7 @@ impl Client {
 
     /// Extra library folders to look for installed games in.
     pub(crate) fn extra_libraries(&self) -> Vec<PathBuf> {
-        self.state.settings.library.iter().cloned().collect()
+        self.state.settings.library.iter().chain(&self.state.settings.downloads.libraries).cloned().collect()
     }
 }
 
@@ -142,6 +175,7 @@ pub(crate) fn handle(client: &mut Client, cmd: Command) {
         Command::SetWorkers(n) => client.set_workers(n),
         Command::SetStartSteam(on) => client.set_start_steam(on),
         Command::SetOverlay(on) => client.set_overlay(on),
+        Command::SetInterface(i) => client.set_interface(i),
         _ => {}
     }
 }
@@ -167,5 +201,40 @@ mod tests {
         assert!(!valid_library(Path::new("relative/dir")));
         assert!(!valid_library(Path::new("/")));
         assert!(valid_library(Path::new("/games/lib")));
+    }
+
+    #[test]
+    fn an_old_settings_file_still_loads() {
+        // What settings.json looked like before downloads, notifications and the account options existed.
+        let old = r#"{"library": "/games/lib", "workers": 4, "start_steam": false, "overlay": true}"#;
+        let s: Settings = serde_json::from_str(old).unwrap();
+        assert_eq!(s.library, Some(PathBuf::from("/games/lib")));
+        assert_eq!((s.workers, s.start_steam, s.overlay), (4, false, true));
+        assert_eq!(s.downloads, crate::DownloadSettings::default());
+        assert_eq!(s.notifications, crate::NotifySettings::default());
+        assert!(s.keep_signed_in);
+        assert!(s.downloads.auto_update);
+        assert_eq!(s.downloads.limit_kbps, 0);
+        // An empty file and a partly filled new section work too.
+        let s: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(s.workers, 8);
+        let s: Settings = serde_json::from_str(r#"{"downloads": {"limit_kbps": 500}}"#).unwrap();
+        assert_eq!(s.downloads.limit_kbps, 500);
+        assert!(s.downloads.auto_update);
+        // And the new settings survive a round trip.
+        let mut s = Settings::default();
+        s.downloads.schedule_enabled = true;
+        s.downloads.libraries.push("/more".into());
+        s.notifications.friend_online = true;
+        let back: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+        assert_eq!(back, s);
+    }
+
+    #[test]
+    fn added_libraries_are_offered_as_ours() {
+        let mut s = Settings::default();
+        s.downloads.libraries.push("/extra/lib".into());
+        let choices = library_choices(&s);
+        assert!(choices.iter().any(|l| l.path == Path::new("/extra/lib") && l.ours));
     }
 }

@@ -7,7 +7,7 @@ A fast, native Steam client written in Rust: egui + wgpu, with no Chromium and n
 ## Status
 
 <!-- status:start -->
-**Kettle does 35.1% of what Steam does** (52 of 148 features; see the [roadmap](docs/roadmap.md)).
+**Kettle does 36.5% of what Steam does** (58 of 159 features; see the [roadmap](docs/roadmap.md)).
 
 ![Status](docs/images/status.svg)
 
@@ -16,17 +16,17 @@ A fast, native Steam client written in Rust: egui + wgpu, with no Chromium and n
 | Account | 4/10 (40%) |
 | Library | 11/24 (46%) |
 | Store | 3/11 (27%) |
-| Downloads | 6/16 (38%) |
+| Downloads | 10/18 (56%) |
 | Play | 6/12 (50%) |
 | Compatibility | 4/7 (57%) |
 | Cloud | 0/4 (0%) |
-| Friends | 2/8 (25%) |
-| Chat | 1/7 (14%) |
-| Overlay | 2/7 (29%) |
-| Community | 0/13 (0%) |
+| Friends | 2/9 (22%) |
+| Chat | 1/8 (12%) |
+| Overlay | 3/7 (43%) |
+| Community | 0/15 (0%) |
 | Notifications | 1/3 (33%) |
-| Settings | 5/10 (50%) |
-| Interface | 4/8 (50%) |
+| Settings | 5/12 (42%) |
+| Interface | 5/11 (45%) |
 | Platform | 3/8 (38%) |
 <!-- status:end -->
 
@@ -77,7 +77,7 @@ Developer CLI:
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for how the code is organized, and [REFERENCES.md](REFERENCES.md) for the projects studied.
 
-Game art is loaded at runtime from the local Steam cache or Steam's CDN, and is never part of this repository. The UI uses the Figtree and Inter fonts (OFL-1.1) and Phosphor icons (MIT).
+Game art is loaded at runtime from the local Steam cache or Steam's CDN, and is never part of this repository. The UI uses the Figtree and Inter fonts (OFL-1.1) and Phosphor icons (MIT). If you have Motiva Sans installed as a system font (for example in `~/.local/share/fonts`), Kettle uses it instead; it is never shipped with Kettle.
 
 ## License
 

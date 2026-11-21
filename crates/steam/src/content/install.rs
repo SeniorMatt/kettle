@@ -5,7 +5,7 @@
 use super::cdn::Cdn;
 use super::crypto::DepotKey;
 use super::manifest::{Chunk, FileEntry, Manifest, checksum};
-use super::{CancelToken, Phase, compress, crypto};
+use super::{CancelToken, Phase, bandwidth, compress, crypto};
 use anyhow::{Context, Result, ensure};
 use sha1::{Digest, Sha1};
 use std::collections::{HashMap, HashSet};
@@ -183,7 +183,11 @@ fn fetch_chunk(s: &Settings, depot: u32, key: &DepotKey, chunk: &Chunk) -> Resul
         if attempt > 0 {
             std::thread::sleep(Duration::from_millis(400 << attempt));
         }
-        match try_chunk(s.cdn, &path, key, chunk) {
+        bandwidth::wait_while_paused(s.cancel);
+        if s.cancel.is_cancelled() {
+            return Err(super::Cancelled.into());
+        }
+        match try_chunk(s.cdn, s.cancel, &path, key, chunk) {
             Ok(d) => return Ok(d),
             Err(e) => last = Some(e),
         }
@@ -191,8 +195,9 @@ fn fetch_chunk(s: &Settings, depot: u32, key: &DepotKey, chunk: &Chunk) -> Resul
     Err(last.unwrap()).with_context(|| format!("chunk {} of depot {depot}", chunk.id()))
 }
 
-fn try_chunk(cdn: &Cdn, path: &str, key: &DepotKey, chunk: &Chunk) -> Result<Vec<u8>> {
+fn try_chunk(cdn: &Cdn, cancel: &CancelToken, path: &str, key: &DepotKey, chunk: &Chunk) -> Result<Vec<u8>> {
     let body = cdn.get(path, 64 << 20)?;
+    bandwidth::received(body.len() as u64, cancel);
     let plain = crypto::decrypt(key, &body)?;
     let data = compress::decompress(&plain, chunk.size as usize)?;
     ensure!(Sha1::digest(&data)[..] == chunk.sha, "chunk hash mismatch");

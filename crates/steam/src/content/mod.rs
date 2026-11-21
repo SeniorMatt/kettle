@@ -7,14 +7,18 @@
 //! [`download`] (async, any connection) or [`Download::start`] (own thread).
 
 pub mod acf;
+pub mod bandwidth;
 pub mod cdn;
 pub mod cli;
 mod compress;
 mod crypto;
+pub mod delta;
 pub mod depots;
+pub mod estimate;
 mod install;
 pub mod manifest;
 pub mod product;
+pub mod updates;
 
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
@@ -231,17 +235,30 @@ async fn run<C: CmLink>(conn: &C, opts: &Options, cancel: &CancelToken, rep: &mu
     if app.branches.get(&opts.branch).is_some_and(|b| b.password_required) {
         bail!("branch {:?} needs a password", opts.branch);
     }
-    let os = opts.os.unwrap_or_else(|| Os::default_for(&app));
+    let installed = acf::load(&opts.library, opts.app_id);
+    // Without a choice, an update stays on the OS the installed depots are for (a Windows copy stays Windows).
+    let os = opts
+        .os
+        .or_else(|| installed.as_ref().and_then(|i| depots::installed_os(&app, i.depots.keys().copied())))
+        .unwrap_or_else(|| Os::default_for(&app));
     let target = depots::Target { os, language: &opts.language, branch: &opts.branch, dlc: &opts.dlc };
     let mut warnings = Vec::new();
-    let chosen = resolve(conn, &app, depots::select(&app, &target), &opts.branch, &mut warnings).await?;
+    let mut picked = depots::select(&app, &target);
+    // An update keeps every depot already installed (other languages, DLC) up to date, whatever the options say.
+    for d in &app.depots {
+        let have = installed.as_ref().is_some_and(|i| i.depots.contains_key(&d.id));
+        let usable = d.manifests.contains_key(&opts.branch) || d.from_app.is_some();
+        if have && usable && !picked.iter().any(|p| p.id == d.id) {
+            picked.push(d);
+        }
+    }
+    let chosen = resolve(conn, &app, picked, &opts.branch, &mut warnings).await?;
     if chosen.is_empty() {
         bail!("app {} has no depot for {} / {} on branch {:?}", app.appid, os.as_str(), opts.language, opts.branch);
     }
     let install_dir_name =
         if app.install_dir.is_empty() { format!("app_{}", app.appid) } else { app.install_dir.clone() };
     let dir = opts.library.join("steamapps/common").join(&install_dir_name);
-    let installed = acf::load(&opts.library, opts.app_id);
     let gids: BTreeMap<u32, u64> = chosen.iter().map(|c| (c.depot, c.gid)).collect();
     let summary = |stats, up_to_date, warnings, depots| Summary {
         app: app.clone(),
@@ -258,6 +275,13 @@ async fn run<C: CmLink>(conn: &C, opts: &Options, cancel: &CancelToken, rep: &mu
             && dir.is_dir()
             && gids.iter().all(|(d, g)| inst.depots.get(d).is_some_and(|(have, _)| have == g));
         if same {
+            // The files are right; make the recorded build id right too, or the game would look outdated forever.
+            let latest = app.build_id(&opts.branch);
+            if latest != 0 && inst.build_id != latest {
+                let mut st = inst.clone();
+                st.build_id = latest;
+                acf::save(&opts.library, &st)?;
+            }
             return Ok(summary(Stats::default(), true, warnings, gids));
         }
     }
@@ -291,6 +315,11 @@ async fn run<C: CmLink>(conn: &C, opts: &Options, cancel: &CancelToken, rep: &mu
         size_on_disk: installed.as_ref().map_or(0, |i| i.size_on_disk),
         build_id: installed.as_ref().map_or(0, |i| i.build_id),
         last_owner: opts.owner,
+        beta_key: if opts.branch != "public" {
+            opts.branch.clone()
+        } else {
+            installed.as_ref().map(|i| i.beta_key.clone()).unwrap_or_default()
+        },
         depots: installed.as_ref().map(|i| i.depots.clone()).unwrap_or_default(),
     };
     std::fs::create_dir_all(&dir)?;

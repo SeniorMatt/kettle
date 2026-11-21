@@ -62,12 +62,12 @@ fn action_bar(ui: &mut Ui, client: &mut Client, game: &sr_model::Game, ov: &mut 
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
-                if widgets::icon_button(ui, icon::SHOPPING_CART, 34.0, "Store page").clicked() {
+                if widgets::icon_button(ui, icon::SHOPPING_CART, 40.0, "Store page").clicked() {
                     client.send(Command::OpenStorePage(game.app_id));
                 }
-                widgets::icon_button(ui, icon::STAR, 34.0, "Add to Favorites");
-                widgets::icon_button(ui, icon::INFO, 34.0, "Game info");
-                let gear = widgets::icon_button(ui, icon::GEAR, 34.0, "Manage");
+                widgets::icon_button(ui, icon::STAR, 40.0, "Add to Favorites");
+                widgets::icon_button(ui, icon::INFO, 40.0, "Game info");
+                let gear = widgets::icon_button(ui, icon::GEAR, 40.0, "Manage");
                 crate::game_menu::manage(&gear, client, game, ov);
             });
         });

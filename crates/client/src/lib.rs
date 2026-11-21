@@ -12,33 +12,64 @@ mod art;
 mod cm_hub;
 mod collections;
 mod demo;
+mod download_settings;
 mod downloads;
+mod extras;
 mod friends;
+mod hud_settings;
+mod interface_settings;
 mod launch;
 mod launch_options;
 mod manage;
 mod notes;
+mod notify;
 mod open;
+mod overlay_proto;
 mod play;
+mod profile;
 mod settings;
+mod shortcuts;
+mod storage;
+mod sysinfo;
 mod tools;
 mod web_image;
 
 pub use art::ArtImage;
 pub use collections::{CollCmd, Collections, FAVORITE, HIDDEN};
+pub use download_settings::{
+    DownloadSettings, NotifyKind, NotifySettings, SteamUpdatePolicy, UpdateBehavior, hour_in_window, local_hour,
+    rate_text,
+};
 pub use downloads::{
     ActiveDownload, DownloadItem, DownloadKind, DownloadPhase, DownloadRequest, DownloadStatus, DownloadsState,
     FinishedDownload, OsChoice, Outcome, PausedDownload, StopKind,
 };
+pub use downloads::{SPEED_SAMPLES, SpeedHistory, free_space, library_of_path};
+pub use extras::{DlcInfo, ExtraState, InstallInfo, ManageCmd, UpdateCheck, with_margin};
 pub use friends::{
-    Chat, Delivery, Friend, FriendsState, FriendsStatus, GamePlayed, HistoryState, MAX_TEXT, Me, Message, PersonaState,
-    Toast, local_utc_offset,
+    Chat, Delivery, Friend, FriendAction, FriendsState, FriendsStatus, GamePlayed, GroupChat, GroupInfo, GroupMessage,
+    GroupsState, HistoryState, LOADING as NAME_LOADING, MAX_GROUP_MESSAGES, MAX_TEXT, Me, Message, PersonaState,
+    RoomInfo, Toast, local_utc_offset, sort_key as friend_sort_key,
 };
+pub use hud_settings::{
+    DEFAULT_TOGGLE_KEY, Detection as HudDetection, FPS_LIMIT_CHOICES, FontSize as HudFontSize, HudSettings,
+    INSTALL_HINTS as HUD_INSTALL_HINTS, INSTALL_URL as HUD_INSTALL_URL, Items as HudItems, Position as HudPosition,
+    Preset as HudPreset, TextColor as HudColor, detect as detect_hud,
+};
+pub use interface_settings::{AnimationMode, InterfaceSettings, MAX_SCALE_PERCENT, MIN_SCALE_PERCENT, StartPage};
 pub use launch_options::LaunchOptionsState;
 pub use notes::MAX_NOTE_CHARS;
+pub use overlay_proto::{
+    ChatRow, FriendRow, FromHelper, MAX_LINE as OVERLAY_MAX_LINE, MsgRow, Snapshot as OverlaySnapshot, ToHelper,
+    snapshot as overlay_snapshot,
+};
 pub use play::{PlayProblem, RunningGame};
+pub use profile::{EditPhase, ProfileEntry, ProfileLoad, ProfileState};
 pub use settings::{LibraryChoice, MAX_WORKERS, MIN_WORKERS, Settings};
+pub use sr_steam::community::{EditableProfile, MostPlayed, Privacy, ProfileXml, avatar_full_url};
 pub use sr_steam::storefront::{AppDetails, Platforms, Price, Screenshot, Section, StoreItem};
+pub use storage::MoveState;
+pub use sysinfo::system_info;
 pub use tools::{
     CompatInfo, CompatState, ReleaseInfo, Source, ToolInfo, ToolInstall, ToolKind, ToolOrigin, ToolPhase, ToolTarget,
 };
@@ -119,10 +150,14 @@ pub struct State {
     /// Free bytes by library path, from `Command::CheckFree` (`None` = unknown). At most [`FREE_KEPT`].
     pub free_space: Vec<(PathBuf, Option<u64>)>,
     pub friends: FriendsState,
+    /// The profile page.
+    pub profile: ProfileState,
     /// The overlay's per-game notes, by app id.
     pub notes: std::collections::BTreeMap<String, String>,
     /// Favourites, hidden games and collections (ours merged with the official client's).
     pub collections: Collections,
+    /// Updates found, install dialog data, storage moves (see `extras`).
+    pub extra: ExtraState,
 }
 
 /// How many disk-space answers are kept.
@@ -216,6 +251,8 @@ pub enum Command {
     /// Cancel an active, queued or paused download.
     CancelDownload(AppId),
     ClearFinishedDownloads,
+    /// Updates, install info, library folders, storage moves, notifications (see `ManageCmd`).
+    Manage(ManageCmd),
     /// Delete an installed game. `confirmed` must be true for games in a Steam library.
     Uninstall {
         app: AppId,
@@ -253,8 +290,14 @@ pub enum Command {
     SetStartSteam(bool),
     /// Turn the Shift+Tab in-game overlay on or off.
     SetOverlay(bool),
+    /// Save the interface settings (animations, scale, start page, tray).
+    SetInterface(InterfaceSettings),
+    /// Open a web page in the browser (only a short list of addresses is allowed, see `open`).
+    OpenUrl(String),
     /// Save a game's overlay note (an empty text deletes it).
     SetNote(AppId, String),
+    /// Save the performance overlay (MangoHud) settings; they apply from the next game launch.
+    SetHud(HudSettings),
     /// Favourites, hidden games and collections.
     Collections(CollCmd),
     /// Load the featured rows (no-op while loading or fresh).
@@ -275,6 +318,23 @@ pub enum Command {
     ShowFriendList,
     SendChat(SteamId, String),
     SetPersonaState(PersonaState),
+    /// Send a friend request, accept one, remove a friend or block someone.
+    FriendAct(FriendAction, SteamId),
+    /// "Add a friend": a friend code, a SteamID or a profile link.
+    AddFriend(String),
+    /// Open a text channel of a group chat (group id, channel id).
+    OpenGroup(u64, u64),
+    SendGroupChat(u64, u64, String),
+    /// Ask Steam for the group chats again.
+    ReloadGroups,
+    /// Show someone's profile page (our own SteamID shows our profile).
+    ViewProfile(SteamId),
+    /// Start editing our profile (asks Steam for a web session and the current values).
+    ProfileEditStart,
+    ProfileEditSave(EditableProfile),
+    ProfileEditCancel,
+    /// The window gained or lost focus (desktop notifications only show while it is unfocused).
+    WindowFocus(bool),
 }
 
 /// Results of background work. `generation` ties a result to the session that
@@ -371,6 +431,7 @@ enum Event {
         error: String,
     },
     Notice(String),
+    Extra(extras::Extra),
     StoreSections(Result<Vec<Section>, String>),
     StoreSearched {
         generation: u64,
@@ -384,6 +445,10 @@ enum Event {
     Friends {
         generation: u64,
         ev: sr_steam::friends::FriendsEvent,
+    },
+    Profile {
+        generation: u64,
+        ev: profile::ProfileEvent,
     },
 }
 
@@ -412,6 +477,7 @@ pub struct Client {
     steam_missing: HashMap<AppId, String>,
     dl_running: Option<downloads::RunningDl>,
     dl_seq: u64,
+    extras: extras::ExtraInner,
     tool_job: Option<tools::ToolJob>,
     tool_seq: u64,
     compat_seq: u64,
@@ -466,8 +532,10 @@ impl Client {
                 settings,
                 free_space: Vec::new(),
                 friends: FriendsState::default(),
+                profile: ProfileState::default(),
                 notes: notes::Notes::load().apps,
                 collections: Collections::load(),
+                extra: ExtraState::default(),
             },
             session: None,
             friends: friends::FriendsInner::default(),
@@ -477,6 +545,7 @@ impl Client {
             steam_missing: HashMap::new(),
             dl_running: None,
             dl_seq: 0,
+            extras: Default::default(),
             tool_job: None,
             tool_seq: 0,
             compat_seq: 0,
@@ -533,6 +602,7 @@ impl Client {
             Command::ResumeDownload(app) => self.dl_resume(app),
             Command::CancelDownload(app) => self.dl_cancel(app),
             Command::ClearFinishedDownloads => self.dl_clear_finished(),
+            Command::Manage(m) => self.manage(m),
             Command::Uninstall { app, confirmed } => self.uninstall(app, confirmed),
             Command::BrowseFiles(app) => self.browse_files(app),
             Command::CheckFree(path) => self.check_free(path),
@@ -547,8 +617,11 @@ impl Client {
             c @ (Command::SetLibrary(_)
             | Command::SetWorkers(_)
             | Command::SetStartSteam(_)
-            | Command::SetOverlay(_)) => settings::handle(self, c),
+            | Command::SetOverlay(_)
+            | Command::SetInterface(_)) => settings::handle(self, c),
+            Command::OpenUrl(u) => self.notice_on_err(open::url(&u)),
             Command::SetNote(app, text) => self.set_note(app, text),
+            Command::SetHud(h) => self.set_hud(h),
             Command::Collections(c) => self.collections_cmd(c),
             Command::StoreLoad => self.store_load(),
             Command::StoreSearch(q) => self.store_search(q),
@@ -560,6 +633,16 @@ impl Client {
             Command::ShowFriendList => self.show_friend_list(),
             Command::SendChat(id, text) => self.send_chat(id, text),
             Command::SetPersonaState(s) => self.set_persona_state(s),
+            Command::FriendAct(a, id) => self.friend_action(a, id),
+            Command::AddFriend(input) => self.add_friend_input(&input),
+            Command::OpenGroup(g, r) => self.open_group(g, r),
+            Command::SendGroupChat(g, r, text) => self.send_group_chat(g, r, text),
+            Command::ReloadGroups => self.load_groups(),
+            Command::ViewProfile(id) => self.view_profile(id),
+            Command::ProfileEditStart => self.profile_edit_start(),
+            Command::ProfileEditSave(p) => self.profile_edit_save(p),
+            Command::ProfileEditCancel => self.profile_edit_cancel(),
+            Command::WindowFocus(on) => self.state.friends.window_unfocused = !on,
             Command::OpenStorePage(app) => {
                 self.notice_on_err(open::url(&format!("https://store.steampowered.com/app/{app}")));
             }
@@ -614,7 +697,9 @@ impl Client {
             }
             Event::LoggedIn { generation, mut tokens } if generation == current => {
                 let account = Account { account_name: tokens.account_name.clone(), steam_id: SteamId(tokens.steamid) };
-                if let Err(e) = secrets::save_refresh_token(&account.account_name, &tokens.refresh_token) {
+                if self.state.settings.keep_signed_in
+                    && let Err(e) = secrets::save_refresh_token(&account.account_name, &tokens.refresh_token)
+                {
                     self.state.notice = Some(format!("Couldn't save the login to the keyring: {e:#}"));
                 }
                 remember_account(&account);
@@ -657,9 +742,11 @@ impl Client {
                 self.state.timings.local_scan = Some(took);
                 self.installed = apps;
                 self.merge_installed();
+                self.run_pending_play(true);
             }
             Event::DlProgress { job, progress } => self.dl_progress(job, progress),
             Event::DlDone { job, result } => self.dl_done(job, result),
+            Event::Extra(e) => self.apply_extra(e),
             Event::GameStarted { app, pid } => self.game_started(app, pid),
             Event::GameExited { app, seconds, success } => self.game_exited(app, seconds, success),
             Event::PlayFailed(problem) => self.play_failed(problem),
@@ -698,6 +785,7 @@ impl Client {
             }
             Event::StoreDetails { app, result } => self.apply_details(app, result),
             Event::Friends { generation, ev } if generation == current => self.apply_friends(ev),
+            Event::Profile { generation, ev } if generation == current => self.apply_profile(ev),
             // Stale result from an older generation.
             _ => {}
         }
@@ -741,7 +829,7 @@ impl Client {
             g.install = match self.installed.get(&g.app_id.0) {
                 Some(a) if a.fully_installed() || a.state_flags & 2 != 0 => {
                     let path = a.install_dir.display().to_string();
-                    if a.state_flags & 2 != 0 {
+                    if a.state_flags & 2 != 0 || self.state.extra.updates.contains(&a.appid) {
                         InstallState::UpdateRequired { size_bytes: a.size_on_disk, path }
                     } else {
                         InstallState::Installed { size_bytes: a.size_on_disk, path }
@@ -768,6 +856,7 @@ impl Client {
     }
 
     fn apply_hub(&mut self, status: ConnectionStatus) {
+        self.hub_status_changed(matches!(status, ConnectionStatus::Online));
         match &status {
             ConnectionStatus::Connecting => self.state.friends.status = FriendsStatus::Connecting,
             ConnectionStatus::Failed(why) => self.state.friends.status = FriendsStatus::Disconnected(why.clone()),
@@ -941,8 +1030,11 @@ impl Client {
         self.hub = None;
         self.state.connection = ConnectionStatus::Offline;
         self.reset_friends();
+        self.state.profile = ProfileState::default();
         self.state.account = None;
         self.state.games.clear();
+        self.state.extra.updates.clear();
+        self.state.extra.update_check = UpdateCheck::Idle;
         self.local_only.clear();
         self.state.library_rev += 1;
         self.state.selected = None;

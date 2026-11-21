@@ -5,8 +5,9 @@ use crate::properties::PropsTab;
 use crate::widgets::{self, ButtonStyle};
 use crate::{Nav, SettingsTab, fmt, theme};
 use egui::{Context, Id, RichText, Ui};
-use sr_client::{Client, Command, DownloadRequest, OsChoice, ToolKind, ToolOrigin};
+use sr_client::{Client, Command, DownloadRequest, Load, ManageCmd, OsChoice, ToolKind, ToolOrigin};
 use sr_model::AppId;
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 const DIALOG_W: f32 = 440.0;
@@ -18,6 +19,13 @@ struct InstallDialog {
     os: OsChoice,
     /// The path whose free space was last asked for, so it is asked again only when the choice changes.
     asked: Option<PathBuf>,
+    /// Language chosen ("" = the setting's default) and DLC ticked.
+    language: String,
+    dlc: HashSet<u32>,
+    desktop: bool,
+    menu: bool,
+    /// The platform and language the size lookup was last asked for.
+    info_asked: Option<(OsChoice, String)>,
 }
 
 /// Which dialogs are open.
@@ -33,7 +41,18 @@ pub struct Overlays {
 
 impl Overlays {
     pub fn open_install(&mut self, app: AppId, name: &str) {
-        self.install = Some(InstallDialog { app, name: name.to_string(), library: 0, os: OsChoice::Auto, asked: None });
+        self.install = Some(InstallDialog {
+            app,
+            name: name.to_string(),
+            library: 0,
+            os: OsChoice::Auto,
+            asked: None,
+            language: String::new(),
+            dlc: HashSet::new(),
+            desktop: false,
+            menu: false,
+            info_asked: None,
+        });
     }
 
     pub fn open_uninstall(&mut self, app: AppId) {
@@ -53,6 +72,8 @@ impl Overlays {
         self.install_dialog(ctx, client);
         self.uninstall_dialog(ctx, client);
         self.play_problem(ctx, client);
+        self.update_prompt(ctx, client);
+        self.steam_update_prompt(ctx, client);
     }
 
     fn install_dialog(&mut self, ctx: &Context, client: &mut Client) {
@@ -67,7 +88,19 @@ impl Overlays {
             d.asked = Some(lib.path.clone());
             client.send(Command::CheckFree(lib.path.clone()));
         }
+        // Ask for the size, DLC and languages again when the platform or language changes.
+        let wanted = (d.os, d.language.clone());
+        if d.info_asked.as_ref() != Some(&wanted) {
+            d.info_asked = Some(wanted);
+            client.send(Command::Manage(ManageCmd::LoadInstallInfo {
+                app: d.app,
+                os: d.os,
+                language: d.language.clone(),
+            }));
+        }
         let free = client.state().free_space.iter().find(|(p, _)| *p == lib.path).map(|(_, f)| *f);
+        let info = client.state().extra.install_info.get(&d.app.0).cloned();
+        let default_language = client.state().settings.downloads.language_or_default().to_string();
         let mut start = false;
         let modal = modal(Id::new("install-dialog")).show(ctx, |ui| {
             ui.set_width(DIALOG_W);
@@ -92,36 +125,193 @@ impl Overlays {
                     ui.selectable_value(&mut d.os, os, os.label());
                 }
             });
+            let ready = info.as_ref().and_then(|l| l.ready());
+            if let Some(i) = ready.filter(|i| i.languages.len() > 1) {
+                field(ui, "LANGUAGE");
+                let current = if d.language.is_empty() { default_language.as_str() } else { d.language.as_str() };
+                let current =
+                    if i.languages.iter().any(|l| l == current) { current.to_string() } else { "english".to_string() };
+                widgets::combo(
+                    ui,
+                    "install-lang",
+                    DIALOG_W,
+                    crate::settings_downloads::language_name(&current),
+                    |ui| {
+                        for l in &i.languages {
+                            if ui.selectable_label(*l == current, crate::settings_downloads::language_name(l)).clicked()
+                            {
+                                d.language = l.clone();
+                            }
+                        }
+                    },
+                );
+            }
+            if let Some(i) = ready.filter(|i| !i.dlc.is_empty()) {
+                field(ui, "DLC");
+                egui::ScrollArea::vertical().max_height(110.0).show(ui, |ui| {
+                    for c in &i.dlc {
+                        let mut on = d.dlc.contains(&c.appid);
+                        let name = if c.name.is_empty() { format!("DLC {}", c.appid) } else { c.name.clone() };
+                        let label = if c.bytes > 0 { format!("{name}  ({})", fmt::bytes(c.bytes)) } else { name };
+                        if ui.checkbox(&mut on, label).changed() {
+                            if on {
+                                d.dlc.insert(c.appid);
+                            } else {
+                                d.dlc.remove(&c.appid);
+                            }
+                        }
+                    }
+                });
+            }
             field(ui, "DISK SPACE");
+            let needed = ready.map(|i| {
+                let extra: u64 = i.dlc.iter().filter(|c| d.dlc.contains(&c.appid)).map(|c| c.bytes).sum();
+                i.disk_bytes + extra
+            });
+            let free_now = free.flatten();
+            match (&info, needed) {
+                (_, Some(n)) => {
+                    ui.label(RichText::new(format!("Required: {}", fmt::bytes(n))).color(theme::TEXT));
+                }
+                (Some(Load::Failed(e)), None) => {
+                    ui.label(RichText::new(format!("The size is not known: {e}")).color(theme::TEXT_DIM).small());
+                }
+                _ => {
+                    ui.label(RichText::new("Required: checking...").color(theme::TEXT_DIM));
+                }
+            }
             let free_text = match free {
-                Some(Some(b)) => format!("{} free on this disk", fmt::bytes(b)),
-                Some(None) => "Free space is not known for this disk".to_string(),
-                None => "Checking...".to_string(),
+                Some(Some(b)) => format!("Available: {} on this disk", fmt::bytes(b)),
+                Some(None) => "Available: not known for this disk".to_string(),
+                None => "Available: checking...".to_string(),
             };
             ui.label(RichText::new(free_text).color(theme::TEXT));
-            ui.label(
-                RichText::new(
-                    "The size is known once the download starts; it stops with a message if the disk is too small.",
-                )
-                .color(theme::TEXT_DIM)
-                .small(),
-            );
+            let too_small = matches!((needed, free_now), (Some(n), Some(f)) if sr_client::with_margin(n) > f);
+            if too_small {
+                ui.label(RichText::new("There is not enough free space on this disk.").color(theme::ERROR_TEXT));
+            }
+            field(ui, "SHORTCUTS");
+            ui.checkbox(&mut d.desktop, "Create desktop shortcut");
+            ui.checkbox(&mut d.menu, "Create application menu shortcut");
             ui.add_space(14.0);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
-                start = widgets::button(ui, "Install", ButtonStyle::Primary, true).clicked();
+                start = widgets::button(ui, "Install", ButtonStyle::Primary, !too_small).clicked();
                 if widgets::button(ui, "Cancel", ButtonStyle::Secondary, true).clicked() {
                     ui.close();
                 }
             });
         });
         if start {
-            let (app, name, os) = (d.app, d.name.clone(), d.os);
-            client.send(Command::Download(DownloadRequest { app, name, library: lib.path.clone(), os, verify: false }));
+            let mut req = DownloadRequest::new(d.app, d.name.clone(), lib.path.clone());
+            req.os = d.os;
+            req.language = d.language.clone();
+            req.dlc = d.dlc.iter().copied().collect();
+            req.desktop_shortcut = d.desktop;
+            req.menu_shortcut = d.menu;
+            client.send(Command::Download(req));
             self.install = None;
             self.goto = Some(Nav::Downloads);
         } else if modal.should_close() {
             self.install = None;
+        }
+    }
+
+    /// Play on a game whose update is waiting.
+    fn update_prompt(&mut self, ctx: &Context, client: &mut Client) {
+        let Some(app) = client.state().extra.update_prompt else { return };
+        let name = client.state().game(app).map_or_else(|| "This game".to_string(), |g| g.name.clone());
+        let mut action = None;
+        let modal = modal(Id::new("update-prompt")).show(ctx, |ui| {
+            ui.set_width(DIALOG_W);
+            title(ui, "Update required");
+            ui.label(RichText::new(format!("{name} has an update on Steam.")).color(theme::TEXT));
+            ui.label(
+                RichText::new("Playing the old version may not work with other players or newer saves.")
+                    .color(theme::TEXT_DIM)
+                    .small(),
+            );
+            ui.add_space(14.0);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                if widgets::button(ui, "Update now", ButtonStyle::Primary, true).clicked() {
+                    action = Some(true);
+                }
+                if widgets::button(ui, "Play anyway", ButtonStyle::Secondary, true).clicked() {
+                    action = Some(false);
+                }
+                if widgets::button(ui, "Cancel", ButtonStyle::Secondary, true).clicked() {
+                    ui.close();
+                }
+            });
+        });
+        match action {
+            Some(true) => {
+                client.send(Command::Manage(ManageCmd::DismissUpdatePrompt));
+                client.send(Command::Update(app));
+                self.goto = Some(Nav::Downloads);
+            }
+            Some(false) => client.send(Command::Manage(ManageCmd::PlayAnyway(app))),
+            None if modal.should_close() => client.send(Command::Manage(ManageCmd::DismissUpdatePrompt)),
+            None => {}
+        }
+    }
+
+    /// Updating a game in the official client's library folder: say what that means and ask.
+    fn steam_update_prompt(&mut self, ctx: &Context, client: &mut Client) {
+        let Some(app) = client.state().extra.steam_update_prompt else { return };
+        let (name, path) = match client.state().game(app) {
+            Some(g) => {
+                let path = match &g.install {
+                    sr_model::InstallState::Installed { path, .. }
+                    | sr_model::InstallState::UpdateRequired { path, .. } => path.clone(),
+                    _ => String::new(),
+                };
+                (g.name.clone(), path)
+            }
+            None => ("This game".to_string(), String::new()),
+        };
+        use sr_client::SteamUpdatePolicy as P;
+        let mut answer = None;
+        let modal = modal(Id::new("steam-update-prompt")).show(ctx, |ui| {
+            ui.set_width(DIALOG_W);
+            title(ui, "Update a game the Steam client installed?");
+            ui.label(RichText::new(format!("{name} lives in a library folder of the official Steam client:")).color(theme::TEXT));
+            ui.label(RichText::new(&path).color(theme::TEXT_DIM).small());
+            ui.add_space(6.0);
+            ui.label(
+                RichText::new(
+                    "If Kettle updates it, both programs write into this folder. The official client may then see the \
+                     game as changed and check its files. Nothing is changed unless you agree. You can change this later \
+                     in Settings > Downloads.",
+                )
+                .color(theme::TEXT)
+                .small(),
+            );
+            ui.add_space(14.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                if widgets::button(ui, "Update this time", ButtonStyle::Primary, true).clicked() {
+                    answer = Some((P::Ask, true));
+                }
+                if widgets::button(ui, "Always allow", ButtonStyle::Secondary, true).clicked() {
+                    answer = Some((P::Yes, true));
+                }
+                if widgets::button(ui, "Never", ButtonStyle::Secondary, true).clicked() {
+                    answer = Some((P::Never, false));
+                }
+                if widgets::button(ui, "Cancel", ButtonStyle::Secondary, true).clicked() {
+                    ui.close();
+                }
+            });
+        });
+        if let Some((policy, update)) = answer {
+            client.send(Command::Manage(ManageCmd::SteamUpdateAnswer { app, policy, update }));
+            if update {
+                self.goto = Some(Nav::Downloads);
+            }
+        } else if modal.should_close() {
+            client.send(Command::Manage(ManageCmd::DismissSteamUpdatePrompt));
         }
     }
 

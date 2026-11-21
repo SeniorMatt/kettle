@@ -82,7 +82,14 @@ impl Client {
             self.state.notice = Some("Uninstalling from a Steam library needs your confirmation.".into());
             return;
         }
-        self.spawn_store(move || run_uninstall(&plan), move |r| Event::Uninstalled { app, result: r });
+        self.spawn_store(
+            move || {
+                run_uninstall(&plan)?;
+                super::shortcuts::remove(app.0);
+                Ok(())
+            },
+            move |r| Event::Uninstalled { app, result: r },
+        );
     }
 
     pub(crate) fn browse_files(&mut self, app: AppId) {

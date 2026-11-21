@@ -10,6 +10,11 @@ use futures_util::StreamExt;
 use std::collections::HashSet;
 use std::time::Duration;
 use steam_vent::{Connection, ConnectionTrait, NetMessage, RawNetMessage};
+use steam_vent_proto_steam::steammessages_chat_steamclient::{
+    CChatRoom_GetMessageHistory_Request, CChatRoom_GetMyChatRoomGroups_Request,
+    CChatRoom_IncomingChatMessage_Notification, CChatRoom_SendChatMessage_Request,
+    CChatRoom_SetSessionActiveChatRoomGroups_Request,
+};
 use steam_vent_proto_steam::steammessages_clientserver_friends::{
     CMsgClientChangeStatus, CMsgClientFriendsList, CMsgClientPersonaState, CMsgClientRequestFriendData,
     cmsg_client_persona_state::Friend as PersonaFriend,
@@ -17,6 +22,9 @@ use steam_vent_proto_steam::steammessages_clientserver_friends::{
 use steam_vent_proto_steam::steammessages_friendmessages_steamclient::{
     CFriendMessages_GetRecentMessages_Request, CFriendMessages_IncomingMessage_Notification,
     CFriendMessages_SendMessage_Request,
+};
+use steam_vent_proto_steam::steammessages_player_steamclient::{
+    CPlayer_AddFriend_Request, CPlayer_IgnoreFriend_Request, CPlayer_RemoveFriend_Request,
 };
 use tokio::sync::mpsc;
 
@@ -28,10 +36,14 @@ const COMMAND_QUEUE: usize = 64;
 const REQUEST_CHUNK: usize = 400;
 /// How many recent messages a chat loads when it opens.
 pub const HISTORY_COUNT: u32 = 50;
-/// `CMsgClientRequestFriendData` flags: name, presence, source id, last seen, game extra info.
-const PERSONA_FLAGS: u32 = 1 | 2 | 4 | 64 | 256;
-/// `EFriendRelationship::Friend`.
-const RELATIONSHIP_FRIEND: u32 = 3;
+/// `EClientPersonaStateFlag`: Status | PlayerName | QueryPort | SourceID | Presence | LastSeen | UserClanRank |
+/// GameExtraInfo | GameDataBlob | ClanData | RichPresence. `Presence` (16) is what carries the avatar and the
+/// game being played; without it a friend shows neither.
+pub const PERSONA_FLAGS: u32 = 1 | 2 | 4 | 8 | 16 | 64 | 128 | 256 | 512 | 1024 | 4096;
+/// How many recent messages a group chat channel loads when it opens.
+pub const HISTORY_GROUP_COUNT: u32 = 50;
+/// Steam's base for individual accounts: SteamID64 = this + account id.
+pub const INDIVIDUAL_BASE: u64 = 76_561_197_960_265_728;
 /// `EChatEntryType::ChatMsg` (typing notifications and others are ignored).
 const CHAT_MSG: i32 = 1;
 const AVATAR_HOST: &str = "https://avatars.steamstatic.com";
@@ -107,6 +119,65 @@ pub struct GamePlayed {
     pub name: String,
 }
 
+/// `EFriendRelationship`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Relationship {
+    None,
+    Blocked,
+    /// Someone asked us to be friends.
+    RequestRecipient,
+    Friend,
+    /// We asked them.
+    RequestInitiator,
+    Ignored,
+    IgnoredFriend,
+    Suggested,
+}
+
+impl Relationship {
+    pub fn from_wire(v: u32) -> Self {
+        match v {
+            1 => Self::Blocked,
+            2 => Self::RequestRecipient,
+            3 => Self::Friend,
+            4 => Self::RequestInitiator,
+            5 => Self::Ignored,
+            6 => Self::IgnoredFriend,
+            7 | 8 => Self::Suggested,
+            _ => Self::None,
+        }
+    }
+}
+
+/// One text channel of a chat group.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RoomInfo {
+    pub id: u64,
+    pub name: String,
+}
+
+/// A chat room group the account is in ("group chat").
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct GroupInfo {
+    pub id: u64,
+    pub name: String,
+    pub tagline: String,
+    pub members: u32,
+    pub default_room: u64,
+    pub rooms: Vec<RoomInfo>,
+}
+
+/// One line in a group chat.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupLine {
+    /// Account id (32-bit) of the sender.
+    pub sender: u32,
+    pub from_me: bool,
+    pub text: String,
+    pub time: u64,
+    pub ordinal: u32,
+}
+
 /// What a persona-state message says about one account. `None` = not mentioned, keep what we have.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct PersonaUpdate {
@@ -117,6 +188,8 @@ pub struct PersonaUpdate {
     /// `Some(None)` = stopped playing.
     pub game: Option<Option<GamePlayed>>,
     pub last_logoff: Option<u64>,
+    /// Simple rich-presence text (the `status` key), when the game sets one.
+    pub rich: Option<String>,
 }
 
 /// One chat line, ours or theirs.
@@ -141,7 +214,8 @@ pub enum FriendsEvent {
     /// The friends list (`incremental` = only changes; removed friends have `friend == false`).
     List {
         incremental: bool,
-        entries: Vec<(u64, bool)>,
+        /// Every relationship (friends, requests, blocked ...); the consumer decides what to show.
+        entries: Vec<(u64, Relationship)>,
     },
     Personas(Vec<PersonaUpdate>),
     Message {
@@ -161,6 +235,35 @@ pub enum FriendsEvent {
         friend: u64,
         token: u64,
         result: Result<ChatLine, String>,
+    },
+    /// The chat groups we are in.
+    Groups(Vec<GroupInfo>),
+    GroupsFailed(String),
+    GroupMessage {
+        group: u64,
+        room: u64,
+        line: GroupLine,
+    },
+    GroupHistory {
+        group: u64,
+        room: u64,
+        lines: Vec<GroupLine>,
+    },
+    GroupHistoryFailed {
+        group: u64,
+        room: u64,
+        error: String,
+    },
+    GroupSent {
+        group: u64,
+        room: u64,
+        token: u64,
+        result: Result<GroupLine, String>,
+    },
+    /// Result of a friend action (add, accept, remove, block): `what` is a short past-tense text.
+    Action {
+        what: String,
+        result: Result<(), String>,
     },
 }
 
@@ -238,6 +341,45 @@ pub fn order_history(mut lines: Vec<ChatLine>) -> Vec<ChatLine> {
     lines
 }
 
+/// The friend code Steam shows is the 32-bit account id.
+pub fn friend_code(id: u64) -> u32 {
+    account_id(id)
+}
+
+/// SteamID64 of the individual account with this friend code.
+pub fn id_from_friend_code(code: u32) -> u64 {
+    INDIVIDUAL_BASE + u64::from(code)
+}
+
+/// Understand what a person typed into "Add a friend": a friend code (up to 10 digits), a SteamID64, a
+/// `steamcommunity.com/profiles/<id>` link or `[U:1:<code>]`. Vanity links (`/id/name`) can't be resolved
+/// without the web, so they give `None`.
+pub fn parse_friend_target(input: &str) -> Option<u64> {
+    let t = input.trim().trim_end_matches('/');
+    if t.is_empty() {
+        return None;
+    }
+    if let Some(inner) = t.strip_prefix("[U:1:").and_then(|r| r.strip_suffix(']')) {
+        return inner.parse::<u32>().ok().filter(|c| *c != 0).map(id_from_friend_code);
+    }
+    let tail = match t.find("/profiles/") {
+        Some(i) => t[i + "/profiles/".len()..].split(['/', '?', '#']).next().unwrap_or_default(),
+        None if t.contains('/') => return None,
+        None => t,
+    };
+    if tail.is_empty() || !tail.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let n: u64 = tail.parse().ok()?;
+    if n > 0 && n <= u64::from(u32::MAX) {
+        Some(id_from_friend_code(n as u32))
+    } else if is_individual(n) && account_id(n) != 0 {
+        Some(n)
+    } else {
+        None
+    }
+}
+
 /// Individual accounts only (not clans, chat groups or game servers).
 pub fn is_individual(id: u64) -> bool {
     (id >> 52) & 0xF == 1
@@ -263,7 +405,13 @@ fn persona_update(f: &PersonaFriend) -> Option<PersonaUpdate> {
         state: f.persona_state.map(PersonaState::from_wire),
         avatar_url: f.avatar_hash.as_ref().map(|h| avatar_url(h)),
         game,
-        last_logoff: f.last_logoff.filter(|t| *t != 0).map(u64::from),
+        last_logoff: f.last_logoff.or(f.last_seen_online).filter(|t| *t != 0).map(u64::from),
+        rich: f
+            .rich_presence
+            .iter()
+            .find(|kv| kv.key() == "status")
+            .map(|kv| kv.value().trim().to_string())
+            .filter(|v| !v.is_empty() && !v.starts_with('#')),
     })
 }
 
@@ -274,6 +422,21 @@ enum Cmd {
     SetState(PersonaState),
     History(u64),
     RequestData(Vec<u64>),
+    Friend(FriendAction, u64),
+    LoadGroups,
+    GroupHistory { group: u64, room: u64 },
+    GroupSend { group: u64, room: u64, token: u64, text: String },
+}
+
+/// Things you can do to another account from the friends list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FriendAction {
+    /// Send a request, or accept one we received.
+    Add,
+    /// Remove a friend, decline a request or cancel one we sent.
+    Remove,
+    Block,
+    Unblock,
 }
 
 /// Requests to a running session. Cheap to clone; every method returns at once.
@@ -295,6 +458,23 @@ impl FriendsHandle {
     /// Load the recent messages with `friend` ([`FriendsEvent::History`]).
     pub fn history(&self, friend: u64) -> bool {
         self.tx.try_send(Cmd::History(friend)).is_ok()
+    }
+
+    pub fn friend_action(&self, action: FriendAction, id: u64) -> bool {
+        self.tx.try_send(Cmd::Friend(action, id)).is_ok()
+    }
+
+    /// Load our chat groups ([`FriendsEvent::Groups`]).
+    pub fn load_groups(&self) -> bool {
+        self.tx.try_send(Cmd::LoadGroups).is_ok()
+    }
+
+    pub fn group_history(&self, group: u64, room: u64) -> bool {
+        self.tx.try_send(Cmd::GroupHistory { group, room }).is_ok()
+    }
+
+    pub fn group_send(&self, group: u64, room: u64, token: u64, text: &str) -> bool {
+        self.tx.try_send(Cmd::GroupSend { group, room, token, text: text.to_string() }).is_ok()
     }
 
     /// Ask Steam for names and presence of these accounts.
@@ -336,12 +516,14 @@ async fn run(
     let mut lists = Box::pin(conn.on::<CMsgClientFriendsList>());
     let mut personas = Box::pin(conn.on::<CMsgClientPersonaState>());
     let mut incoming = Box::pin(conn.on_notification::<CFriendMessages_IncomingMessage_Notification>());
+    let mut group_incoming = Box::pin(conn.on_notification::<CChatRoom_IncomingChatMessage_Notification>());
     if out.send(FriendsEvent::Connected { me }).await.is_err() {
         return "closed".into();
     }
     if let Err(e) = set_state(&conn, initial).await {
         return format!("{e}");
     }
+    request_data(&conn, &[me]).await;
     let mut known: HashSet<u64> = HashSet::new();
     for raw in early.into_iter().chain(conn.take_unprocessed()) {
         if raw.kind == CMsgClientFriendsList::KIND {
@@ -383,6 +565,13 @@ async fn run(
                     return "closed".into();
                 }
             }
+            Some(m) = group_incoming.next() => {
+                if let Ok(m) = m && let Some(ev) = group_incoming_event(&m, me)
+                    && out.send(ev).await.is_err()
+                {
+                    return "closed".into();
+                }
+            }
             else => return "Connection to Steam closed".into(),
         }
     }
@@ -392,6 +581,10 @@ async fn set_state(conn: &Connection, state: PersonaState) -> anyhow::Result<()>
     let msg = CMsgClientChangeStatus {
         persona_state: Some(state.to_wire()),
         persona_set_by_user: Some(true),
+        // Which fields Steam should push for our friends from now on.
+        persona_state_flags: Some(PERSONA_FLAGS),
+        // Send our own persona (name, avatar) back too.
+        need_persona_response: Some(true),
         ..Default::default()
     };
     conn.send(msg).await?;
@@ -405,13 +598,21 @@ async fn on_list(
     known: &mut HashSet<u64>,
     out: &mpsc::Sender<FriendsEvent>,
 ) -> Result<(), ()> {
-    let entries: Vec<(u64, bool)> = l
+    let entries: Vec<(u64, Relationship)> = l
         .friends
         .iter()
-        .filter_map(|f| Some((f.ulfriendid?, f.efriendrelationship? == RELATIONSHIP_FRIEND)))
+        .filter_map(|f| Some((f.ulfriendid?, Relationship::from_wire(f.efriendrelationship?))))
         .filter(|(id, _)| is_individual(*id))
         .collect();
-    let new: Vec<u64> = entries.iter().filter(|(id, friend)| *friend && known.insert(*id)).map(|(id, _)| *id).collect();
+    // Names and avatars are needed for friends and for people with a pending request.
+    let new: Vec<u64> = entries
+        .iter()
+        .filter(|(id, r)| {
+            matches!(r, Relationship::Friend | Relationship::RequestRecipient | Relationship::RequestInitiator)
+                && known.insert(*id)
+        })
+        .map(|(id, _)| *id)
+        .collect();
     out.send(FriendsEvent::List { incremental: l.bincremental(), entries }).await.map_err(|_| ())?;
     request_data(conn, &new).await;
     Ok(())
@@ -426,6 +627,104 @@ async fn request_data(conn: &Connection, ids: &[u64]) {
         };
         let _ = conn.send(msg).await;
     }
+}
+
+async fn friend_action(conn: &Connection, action: FriendAction, id: u64) -> Result<(), String> {
+    let wait = Duration::from_secs(20);
+    let fail = |e: String| Err(e);
+    match action {
+        FriendAction::Add => {
+            let req = CPlayer_AddFriend_Request { steamid: Some(id), ..Default::default() };
+            match tokio::time::timeout(wait, conn.service_method(req)).await {
+                Ok(Ok(r)) if r.result() == 1 || r.result() == 0 => Ok(()),
+                Ok(Ok(r)) => fail(format!("Steam refused the request (result {})", r.result())),
+                Ok(Err(e)) => fail(e.to_string()),
+                Err(_) => fail("Steam did not answer in time".into()),
+            }
+        }
+        FriendAction::Remove => {
+            let req = CPlayer_RemoveFriend_Request { steamid: Some(id), ..Default::default() };
+            match tokio::time::timeout(wait, conn.service_method(req)).await {
+                Ok(Ok(_)) => Ok(()),
+                Ok(Err(e)) => fail(e.to_string()),
+                Err(_) => fail("Steam did not answer in time".into()),
+            }
+        }
+        FriendAction::Block | FriendAction::Unblock => {
+            let req = CPlayer_IgnoreFriend_Request {
+                steamid: Some(id),
+                unignore: Some(action == FriendAction::Unblock),
+                ..Default::default()
+            };
+            match tokio::time::timeout(wait, conn.service_method(req)).await {
+                Ok(Ok(_)) => Ok(()),
+                Ok(Err(e)) => fail(e.to_string()),
+                Err(_) => fail("Steam did not answer in time".into()),
+            }
+        }
+    }
+}
+
+/// The chat groups we are in, with their text channels. Also tells Steam these groups are active, which is
+/// what makes it push their new messages to us.
+async fn load_groups(conn: &Connection) -> Result<Vec<GroupInfo>, String> {
+    let wait = Duration::from_secs(25);
+    let resp =
+        match tokio::time::timeout(wait, conn.service_method(CChatRoom_GetMyChatRoomGroups_Request::default())).await {
+            Ok(Ok(r)) => r,
+            Ok(Err(e)) => return Err(e.to_string()),
+            Err(_) => return Err("Steam did not answer in time".into()),
+        };
+    let groups: Vec<GroupInfo> = resp
+        .chat_room_groups
+        .iter()
+        .filter_map(|pair| {
+            let g = pair.group_summary.as_ref()?;
+            let id = g.chat_group_id?;
+            let rooms: Vec<RoomInfo> = g
+                .chat_rooms
+                .iter()
+                .filter_map(|r| Some(RoomInfo { id: r.chat_id?, name: r.chat_name.clone().unwrap_or_default() }))
+                .collect();
+            let default_room =
+                g.default_chat_id.filter(|d| *d != 0).or_else(|| rooms.first().map(|r| r.id)).unwrap_or(0);
+            Some(GroupInfo {
+                id,
+                name: g.chat_group_name.clone().filter(|n| !n.is_empty()).unwrap_or_else(|| "Group chat".into()),
+                tagline: g.chat_group_tagline.clone().unwrap_or_default(),
+                members: g.active_member_count.unwrap_or(0),
+                default_room,
+                rooms,
+            })
+        })
+        .collect();
+    if !groups.is_empty() {
+        let req = CChatRoom_SetSessionActiveChatRoomGroups_Request {
+            chat_group_ids: groups.iter().map(|g| g.id).collect(),
+            ..Default::default()
+        };
+        let _ = tokio::time::timeout(wait, conn.service_method(req)).await;
+    }
+    Ok(groups)
+}
+
+fn group_incoming_event(m: &CChatRoom_IncomingChatMessage_Notification, me: u64) -> Option<FriendsEvent> {
+    let text = display_text(m.message(), m.message_no_bbcode());
+    if text.is_empty() || m.chat_group_id() == 0 {
+        return None;
+    }
+    let sender = account_id(m.steamid_sender());
+    Some(FriendsEvent::GroupMessage {
+        group: m.chat_group_id(),
+        room: m.chat_id(),
+        line: GroupLine {
+            sender,
+            from_me: sender == account_id(me),
+            text,
+            time: u64::from(m.timestamp()),
+            ordinal: m.ordinal(),
+        },
+    })
 }
 
 fn incoming_event(m: &CFriendMessages_IncomingMessage_Notification) -> Option<FriendsEvent> {
@@ -453,6 +752,88 @@ async fn run_cmd(conn: &Connection, me: u64, cmd: Cmd, out: &mpsc::Sender<Friend
             let _ = set_state(conn, s).await;
         }
         Cmd::RequestData(ids) => request_data(conn, &ids).await,
+        Cmd::Friend(action, id) => {
+            let (conn, out) = (conn.clone(), out.clone());
+            tokio::spawn(async move {
+                let result = friend_action(&conn, action, id).await;
+                let what = match action {
+                    FriendAction::Add => "Friend request sent or accepted",
+                    FriendAction::Remove => "Friend removed",
+                    FriendAction::Block => "Blocked",
+                    FriendAction::Unblock => "Unblocked",
+                };
+                let _ = out.send(FriendsEvent::Action { what: what.into(), result }).await;
+            });
+        }
+        Cmd::LoadGroups => {
+            let (conn, out) = (conn.clone(), out.clone());
+            tokio::spawn(async move {
+                let ev = match load_groups(&conn).await {
+                    Ok(g) => FriendsEvent::Groups(g),
+                    Err(e) => FriendsEvent::GroupsFailed(e),
+                };
+                let _ = out.send(ev).await;
+            });
+        }
+        Cmd::GroupHistory { group, room } => {
+            let (conn, out) = (conn.clone(), out.clone());
+            tokio::spawn(async move {
+                let req = CChatRoom_GetMessageHistory_Request {
+                    chat_group_id: Some(group),
+                    chat_id: Some(room),
+                    max_count: Some(HISTORY_GROUP_COUNT),
+                    ..Default::default()
+                };
+                let ev = match tokio::time::timeout(Duration::from_secs(20), conn.service_method(req)).await {
+                    Ok(Ok(r)) => {
+                        let mine = account_id(me);
+                        let mut lines: Vec<GroupLine> = r
+                            .messages
+                            .iter()
+                            .filter(|m| !m.deleted() && !m.message().is_empty())
+                            .map(|m| GroupLine {
+                                sender: m.sender(),
+                                from_me: m.sender() == mine,
+                                text: unescape_incoming(m.message()),
+                                time: u64::from(m.server_timestamp()),
+                                ordinal: m.ordinal(),
+                            })
+                            .collect();
+                        lines.sort_by_key(|l| (l.time, l.ordinal));
+                        FriendsEvent::GroupHistory { group, room, lines }
+                    }
+                    Ok(Err(e)) => FriendsEvent::GroupHistoryFailed { group, room, error: e.to_string() },
+                    Err(_) => {
+                        FriendsEvent::GroupHistoryFailed { group, room, error: "Steam did not answer in time".into() }
+                    }
+                };
+                let _ = out.send(ev).await;
+            });
+        }
+        Cmd::GroupSend { group, room, token, text } => {
+            let (conn, out) = (conn.clone(), out.clone());
+            tokio::spawn(async move {
+                let req = CChatRoom_SendChatMessage_Request {
+                    chat_group_id: Some(group),
+                    chat_id: Some(room),
+                    message: Some(escape_outgoing(&text)),
+                    echo_to_sender: Some(false),
+                    ..Default::default()
+                };
+                let result = match tokio::time::timeout(Duration::from_secs(20), conn.service_method(req)).await {
+                    Ok(Ok(r)) => Ok(GroupLine {
+                        sender: account_id(me),
+                        from_me: true,
+                        text,
+                        time: u64::from(r.server_timestamp()),
+                        ordinal: r.ordinal(),
+                    }),
+                    Ok(Err(e)) => Err(e.to_string()),
+                    Err(_) => Err("Steam did not answer in time".to_string()),
+                };
+                let _ = out.send(FriendsEvent::GroupSent { group, room, token, result }).await;
+            });
+        }
         Cmd::Send { friend, token, text } => {
             let (conn, out) = (conn.clone(), out.clone());
             tokio::spawn(async move {
@@ -603,5 +984,42 @@ mod tests {
         let u = persona_update(&only_state).unwrap();
         assert_eq!((u.name, u.avatar_url, u.last_logoff, u.game), (None, None, None, Some(None)));
         assert!(persona_update(&PersonaFriend { friendid: Some(1), ..Default::default() }).is_none());
+    }
+
+    #[test]
+    fn relationships_map_from_the_wire() {
+        assert_eq!(Relationship::from_wire(3), Relationship::Friend);
+        assert_eq!(Relationship::from_wire(2), Relationship::RequestRecipient);
+        assert_eq!(Relationship::from_wire(4), Relationship::RequestInitiator);
+        assert_eq!(Relationship::from_wire(1), Relationship::Blocked);
+        assert_eq!(Relationship::from_wire(0), Relationship::None);
+        assert_eq!(Relationship::from_wire(99), Relationship::None);
+    }
+
+    #[test]
+    fn friend_codes_and_steam_ids_convert() {
+        let id = 76_561_198_314_275_551u64;
+        let code = friend_code(id);
+        assert_eq!(code, 354_009_823);
+        assert_eq!(u64::from(code), id - INDIVIDUAL_BASE);
+        assert_eq!(id_from_friend_code(code), id);
+        assert!(is_individual(id_from_friend_code(1)));
+    }
+
+    #[test]
+    fn friend_targets_are_understood() {
+        let id = 76_561_198_314_275_551u64;
+        let code = friend_code(id);
+        assert_eq!(parse_friend_target(&code.to_string()), Some(id));
+        assert_eq!(parse_friend_target(&id.to_string()), Some(id));
+        assert_eq!(parse_friend_target(&format!("  https://steamcommunity.com/profiles/{id}/ ")), Some(id));
+        assert_eq!(parse_friend_target(&format!("steamcommunity.com/profiles/{id}?x=1")), Some(id));
+        assert_eq!(parse_friend_target(&format!("[U:1:{code}]")), Some(id));
+        assert_eq!(parse_friend_target("https://steamcommunity.com/id/gabelogannewell"), None);
+        assert_eq!(parse_friend_target(""), None);
+        assert_eq!(parse_friend_target("0"), None);
+        assert_eq!(parse_friend_target("abc"), None);
+        // A clan id is not an individual.
+        assert_eq!(parse_friend_target("103582791429521412"), None);
     }
 }

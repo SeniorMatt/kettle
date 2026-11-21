@@ -30,6 +30,10 @@ pub struct OverlayView {
     focus_sent: bool,
     /// The note being edited, with the game it belongs to.
     note: Option<(AppId, String)>,
+    /// A helper process draws the overlay (see `crates/app/src/overlay_host.rs`): `toggle` then only records a
+    /// request that the app picks up with [`OverlayView::take_request`].
+    external: bool,
+    requested: bool,
 }
 
 /// "under a minute", "12 min", "1 h 05 min".
@@ -50,6 +54,10 @@ fn current_game(client: &Client) -> Option<AppId> {
 impl OverlayView {
     /// Show or hide. Showing needs a running game and the setting on.
     pub fn toggle(&mut self, client: &mut Client) {
+        if self.external {
+            self.requested = true;
+            return;
+        }
         if self.open {
             self.close(client);
         } else if client.state().settings.overlay
@@ -60,6 +68,15 @@ impl OverlayView {
             self.focus_sent = false;
             self.note = Some((app, client.state().note(app).to_string()));
         }
+    }
+
+    pub fn set_external(&mut self, on: bool) {
+        self.external = on;
+    }
+
+    /// Was "show the overlay" asked for while a helper process draws it?
+    pub fn take_request(&mut self) -> bool {
+        std::mem::take(&mut self.requested)
     }
 
     fn close(&mut self, client: &mut Client) {

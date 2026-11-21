@@ -3,6 +3,26 @@
 //! is actually moving.
 
 use egui::{Context, Id};
+pub use sr_client::AnimationMode;
+
+/// Remember the animation setting for this frame (call once per frame, before drawing).
+pub fn set_mode(ctx: &Context, mode: AnimationMode) {
+    ctx.data_mut(|d| d.insert_temp(Id::new("anim-mode"), mode));
+}
+
+pub fn mode(ctx: &Context) -> AnimationMode {
+    ctx.data(|d| d.get_temp::<AnimationMode>(Id::new("anim-mode"))).unwrap_or_default()
+}
+
+/// False when animations are off: everything jumps to its end value.
+pub fn enabled(ctx: &Context) -> bool {
+    mode(ctx) != AnimationMode::Off
+}
+
+/// True only for "full": things may move (slide, lift, scale). "Reduced" keeps fades only.
+pub fn movement(ctx: &Context) -> bool {
+    mode(ctx) == AnimationMode::Full
+}
 
 /// Default duration of UI transitions, in seconds.
 pub const FAST: f32 = 0.14;
@@ -32,6 +52,9 @@ impl Tween {
 /// the tween from wherever the value currently is. The first call for an id
 /// returns `target` right away (no animation on first appearance).
 pub fn animate_to(ctx: &Context, id: Id, target: f32, dur: f32) -> f32 {
+    if !enabled(ctx) {
+        return target;
+    }
     let now = ctx.input(|i| i.time);
     let stored = ctx.data(|d| d.get_temp::<Tween>(id));
     let Some(mut tw) = stored else {
@@ -65,6 +88,9 @@ pub fn animate_bool(ctx: &Context, id: Id, on: bool, dur: f32) -> f32 {
 /// Progress 0..1 (eased) of an animation that started at `start` (egui time).
 /// Requests repaints until it is done.
 pub fn since(ctx: &Context, start: f64, dur: f32) -> f32 {
+    if !enabled(ctx) {
+        return 1.0;
+    }
     let t = ((ctx.input(|i| i.time) - start) as f32 / dur).clamp(0.0, 1.0);
     if t < 1.0 {
         ctx.request_repaint();
@@ -77,6 +103,9 @@ pub fn since(ctx: &Context, start: f64, dur: f32) -> f32 {
 /// between updates instead of jumping. Repaints at about 15 Hz, and only while the value is still moving, so a
 /// bar that is full or paused costs nothing. The first call for an id returns `target` at once.
 pub fn glide(ctx: &Context, id: Id, target: f32, per_sec: f32) -> f32 {
+    if !enabled(ctx) {
+        return target;
+    }
     #[derive(Clone, Copy)]
     struct Glide {
         value: f32,

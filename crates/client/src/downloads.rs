@@ -6,9 +6,10 @@
 //!
 //! Pause is cancel plus resume later: the downloader resumes by hashing what is already on disk.
 
-use super::{Client, Event, Waker};
+use super::download_settings::{NotifyKind, SteamUpdatePolicy, UpdateBehavior};
+use super::{Client, Event, Waker, shortcuts};
 use sr_model::AppId;
-use sr_steam::content::{self, Auth, Download, Options, Os, Progress};
+use sr_steam::content::{self, Auth, Download, Options, Os, Progress, acf, bandwidth};
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -45,7 +46,7 @@ impl OsChoice {
         }
     }
 
-    fn os(self) -> Option<Os> {
+    pub(crate) fn os(self) -> Option<Os> {
         match self {
             OsChoice::Auto => None,
             OsChoice::Linux => Some(Os::Linux),
@@ -63,6 +64,29 @@ pub struct DownloadRequest {
     pub library: PathBuf,
     pub os: OsChoice,
     pub verify: bool,
+    /// Language for new installs ("" = the setting, English by default).
+    pub language: String,
+    /// DLC app ids to install too.
+    pub dlc: Vec<u32>,
+    /// After a successful install: write a desktop icon / an application menu entry (`kettle --play <id>`).
+    pub desktop_shortcut: bool,
+    pub menu_shortcut: bool,
+}
+
+impl DownloadRequest {
+    pub fn new(app: AppId, name: impl Into<String>, library: PathBuf) -> Self {
+        DownloadRequest {
+            app,
+            name: name.into(),
+            library,
+            os: OsChoice::Auto,
+            verify: false,
+            language: String::new(),
+            dlc: Vec::new(),
+            desktop_shortcut: false,
+            menu_shortcut: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,6 +130,10 @@ pub struct ActiveDownload {
     pub message: Option<String>,
     /// A pause or cancel was requested and the downloader is winding down.
     pub stopping: Option<StopKind>,
+    /// Fastest network speed seen during this download, bytes per second.
+    pub peak_bytes_per_sec: f64,
+    /// Bytes received from the network so far (compressed, as sent).
+    pub network_bytes: u64,
 }
 
 impl ActiveDownload {
@@ -153,6 +181,47 @@ pub struct DownloadsState {
     pub paused: Vec<PausedDownload>,
     /// Newest first.
     pub finished: VecDeque<FinishedDownload>,
+    /// Network and disk speed of the last minute, one sample per second.
+    pub speed: SpeedHistory,
+    /// Downloads are held because a game started by Kettle is running (setting "Allow downloads during gameplay").
+    pub gameplay_paused: bool,
+}
+
+/// How many one-second samples the speed graph keeps.
+pub const SPEED_SAMPLES: usize = 60;
+
+/// Speed of the last minute: `(network, disk)` bytes per second, oldest first.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SpeedHistory {
+    pub samples: VecDeque<(f32, f32)>,
+}
+
+impl SpeedHistory {
+    pub fn push(&mut self, network: f32, disk: f32) {
+        self.samples.push_back((network.max(0.0), disk.max(0.0)));
+        while self.samples.len() > SPEED_SAMPLES {
+            self.samples.pop_front();
+        }
+    }
+
+    /// The largest value in the window (network or disk), for scaling the graph.
+    pub fn max(&self) -> f32 {
+        self.samples.iter().flat_map(|&(n, d)| [n, d]).fold(0.0, f32::max)
+    }
+
+    pub fn clear(&mut self) {
+        self.samples.clear();
+    }
+}
+
+/// Move item `i` of `v` by `delta` places (negative = earlier), staying inside the list.
+pub(crate) fn move_item<T>(v: &mut Vec<T>, i: usize, delta: i32) {
+    if i >= v.len() {
+        return;
+    }
+    let to = (i as i64 + i64::from(delta)).clamp(0, v.len() as i64 - 1) as usize;
+    let item = v.remove(i);
+    v.insert(to, item);
 }
 
 /// How a game relates to the queue, for its page.
@@ -197,11 +266,25 @@ pub enum DlResult {
 pub(crate) struct RunningDl {
     pub job: u64,
     pub(crate) ctl: Arc<AtomicU8>,
+    /// For the speed graph: when, and the network and disk counters at the last sample.
+    clock: SampleClock,
+}
+
+struct SampleClock {
+    at: Instant,
+    net: u64,
+    disk: u64,
+    net_start: u64,
 }
 
 impl Client {
     /// Add a download to the queue and start it when nothing else runs.
     pub(crate) fn dl_enqueue(&mut self, req: DownloadRequest) {
+        self.dl_enqueue_at(req, false);
+    }
+
+    /// Like [`Self::dl_enqueue`]; `front` puts it before everything that waits (not before the running one).
+    pub(crate) fn dl_enqueue_at(&mut self, req: DownloadRequest, front: bool) {
         let app = req.app;
         if self.state.downloads.status(app) != DownloadStatus::None {
             self.state.notice = Some(format!("{} is already in the download queue.", req.name));
@@ -217,33 +300,148 @@ impl Client {
             (false, true) => DownloadKind::Update,
             (false, false) => DownloadKind::Install,
         };
-        self.state.downloads.queue.push(DownloadItem { request: req, kind });
+        let item = DownloadItem { request: req, kind };
+        if front {
+            self.state.downloads.queue.insert(0, item);
+        } else {
+            self.state.downloads.queue.push(item);
+        }
         self.dl_start_next();
     }
 
     /// Queue a verify of an installed game, in the library it lives in.
     pub(crate) fn dl_verify(&mut self, app: AppId) {
+        let Some((library, name)) = self.installed_in(app) else { return };
+        if !self.may_write_library(app, &library) {
+            return;
+        }
+        let mut req = DownloadRequest::new(app, name, library);
+        req.verify = true;
+        self.dl_enqueue(req);
+    }
+
+    /// Queue an update of an installed game, in its own library. A game in the official client's library
+    /// folder is only touched when the setting allows it; with "ask" a dialog opens first.
+    pub(crate) fn dl_update(&mut self, app: AppId) {
+        let Some((library, name)) = self.installed_in(app) else { return };
+        if !self.may_write_library(app, &library) {
+            return;
+        }
+        self.dl_enqueue(DownloadRequest::new(app, name, library));
+    }
+
+    /// Update without asking (the user just answered the dialog, or the policy is "yes").
+    pub(crate) fn dl_update_confirmed(&mut self, app: AppId, front: bool) {
+        let Some((library, name)) = self.installed_in(app) else { return };
+        self.dl_enqueue_at(DownloadRequest::new(app, name, library), front);
+    }
+
+    /// Queue the automatic update of `app` when its settings, the schedule and the library policy allow it.
+    /// Returns whether it was queued.
+    pub(crate) fn dl_auto_update(&mut self, app: AppId, hour: u8) -> bool {
+        let d = &self.state.settings.downloads;
+        let behavior = d.behavior_of(app);
+        if behavior == UpdateBehavior::OnLaunch || !d.may_auto_update_at(hour) {
+            return false;
+        }
+        let policy = d.steam_policy;
+        let Some((library, _)) = self.installed_in(app) else { return false };
+        if !self.is_our_library(&library) && policy != SteamUpdatePolicy::Yes {
+            return false; // never silently write into the official client's folders
+        }
+        if self.state.downloads.status(app) != DownloadStatus::None {
+            return false;
+        }
+        self.dl_update_confirmed(app, behavior == UpdateBehavior::HighPriority);
+        true
+    }
+
+    /// Library and name of an installed game, with a notice when it can't be told.
+    fn installed_in(&mut self, app: AppId) -> Option<(PathBuf, String)> {
         let Some(a) = self.installed.get(&app.0) else {
             self.state.notice = Some("This game is not installed.".into());
-            return;
+            return None;
         };
         let Some(library) = library_of(&a.install_dir) else {
             self.state.notice = Some("Can't tell which library this game is in.".into());
-            return;
+            return None;
         };
-        let name = a.name.clone();
-        self.dl_enqueue(DownloadRequest { app, name, library, os: OsChoice::Auto, verify: true });
+        Some((library, a.name.clone()))
     }
 
-    /// Queue an update of an installed game, in its own library.
-    pub(crate) fn dl_update(&mut self, app: AppId) {
-        let Some(a) = self.installed.get(&app.0) else { return };
-        let Some(library) = library_of(&a.install_dir) else { return };
-        let name = a.name.clone();
-        self.dl_enqueue(DownloadRequest { app, name, library, os: OsChoice::Auto, verify: false });
+    /// May we write into `library` for `app`? Our own folders always; the official client's only when the
+    /// setting says so. Without an answer yet it asks (the UI shows the dialog).
+    fn may_write_library(&mut self, app: AppId, library: &Path) -> bool {
+        if self.is_our_library(library) {
+            return true;
+        }
+        match self.state.settings.downloads.steam_policy {
+            SteamUpdatePolicy::Yes => true,
+            SteamUpdatePolicy::Never => {
+                self.state.notice = Some(
+                    "Games installed by the Steam client are not changed (Settings > Downloads). Use the Steam client to update or verify them."
+                        .into(),
+                );
+                false
+            }
+            SteamUpdatePolicy::Ask => {
+                self.state.extra.steam_update_prompt = Some(app);
+                false
+            }
+        }
+    }
+
+    /// Put a queued download first (it starts after the running one).
+    pub(crate) fn dl_prioritize(&mut self, app: AppId) {
+        let q = &mut self.state.downloads.queue;
+        if let Some(i) = q.iter().position(|x| x.request.app == app) {
+            move_item(q, i, -(i as i32));
+        }
+    }
+
+    /// Move a queued download up (`delta` < 0) or down.
+    pub(crate) fn dl_move(&mut self, app: AppId, delta: i32) {
+        let q = &mut self.state.downloads.queue;
+        if let Some(i) = q.iter().position(|x| x.request.app == app) {
+            move_item(q, i, delta);
+        }
+    }
+
+    /// Pause the running download and everything that waits.
+    pub(crate) fn dl_pause_all(&mut self) {
+        let d = &mut self.state.downloads;
+        let waiting: Vec<DownloadItem> = d.queue.drain(..).collect();
+        d.paused.extend(waiting.into_iter().map(|item| PausedDownload { item, done_bytes: 0, total_bytes: 0 }));
+        if let Some(app) = d.active.as_ref().map(|a| a.item.request.app) {
+            self.dl_stop_active(app, StopKind::Pause);
+        }
+    }
+
+    /// Put every paused download back in the queue.
+    pub(crate) fn dl_resume_all(&mut self) {
+        let d = &mut self.state.downloads;
+        let items: Vec<DownloadItem> = d.paused.drain(..).map(|p| p.item).collect();
+        d.queue.extend(items);
+        self.dl_start_next();
+    }
+
+    /// Apply the speed limit, and hold downloads while a game runs when the setting says so.
+    pub(crate) fn apply_bandwidth(&mut self) {
+        let d = &self.state.settings.downloads;
+        bandwidth::set_limit(d.limit_bytes_per_sec());
+        let hold = !d.allow_during_gameplay && !self.state.running.is_empty();
+        bandwidth::set_paused(hold);
+        self.state.downloads.gameplay_paused = hold && self.state.downloads.active.is_some();
     }
 
     pub(crate) fn dl_pause(&mut self, app: AppId) {
+        // A waiting download is just moved to the paused list.
+        let d = &mut self.state.downloads;
+        if let Some(i) = d.queue.iter().position(|x| x.request.app == app) {
+            let item = d.queue.remove(i);
+            d.paused.push(PausedDownload { item, done_bytes: 0, total_bytes: 0 });
+            return;
+        }
         self.dl_stop_active(app, StopKind::Pause);
     }
 
@@ -298,6 +496,17 @@ impl Client {
         opts.os = r.os.os();
         opts.verify = r.verify;
         opts.workers = self.state.settings.workers;
+        opts.language = if r.language.is_empty() {
+            self.state.settings.downloads.language_or_default().to_string()
+        } else {
+            r.language.clone()
+        };
+        opts.dlc = r.dlc.clone();
+        if item.kind != DownloadKind::Install
+            && let Some(beta) = acf::load(&r.library, r.app.0).map(|s| s.beta_key).filter(|b| !b.is_empty())
+        {
+            opts.branch = beta; // keep a game on its beta branch
+        }
         // Signed in: use the shared connection (a second logon of the same account would replace it).
         let hub = self.session.as_ref().and_then(|_| self.hub.clone());
         let owner = self.session.as_ref().map_or(0, |s| s.account.steam_id.0);
@@ -318,7 +527,10 @@ impl Client {
             self.finish(item, Outcome::Failed(e.to_string()));
             return;
         }
-        self.dl_running = Some(RunningDl { job, ctl });
+        let net = bandwidth::net_bytes();
+        let clock = SampleClock { at: Instant::now(), net, disk: 0, net_start: net };
+        self.dl_running = Some(RunningDl { job, ctl, clock });
+        self.state.downloads.speed.clear();
         self.state.downloads.active = Some(ActiveDownload {
             item,
             phase: DownloadPhase::Preparing,
@@ -327,13 +539,17 @@ impl Client {
             bytes_per_sec: 0.0,
             message: None,
             stopping: None,
+            peak_bytes_per_sec: 0.0,
+            network_bytes: 0,
         });
+        self.apply_bandwidth();
     }
 
     pub(crate) fn dl_progress(&mut self, job: u64, p: Progress) {
         if self.dl_running.as_ref().map(|r| r.job) != Some(job) {
             return; // stale: a job that already ended
         }
+        let done = p.done_bytes;
         if let Some(a) = &mut self.state.downloads.active {
             (a.phase, a.done_bytes, a.total_bytes, a.bytes_per_sec) =
                 (p.phase, p.done_bytes, p.total_bytes, p.bytes_per_sec);
@@ -341,6 +557,20 @@ impl Client {
                 a.message = p.message;
             }
         }
+        // One graph sample per second: network from the shared counter, disk from the bytes handled.
+        let (Some(run), Some(a)) = (&mut self.dl_running, &mut self.state.downloads.active) else { return };
+        let now = Instant::now();
+        let secs = now.duration_since(run.clock.at).as_secs_f64();
+        if secs < 1.0 {
+            return;
+        }
+        let net_now = bandwidth::net_bytes();
+        let network = net_now.saturating_sub(run.clock.net) as f64 / secs;
+        let disk = done.saturating_sub(run.clock.disk) as f64 / secs;
+        run.clock = SampleClock { at: now, net: net_now, disk: done, net_start: run.clock.net_start };
+        a.peak_bytes_per_sec = a.peak_bytes_per_sec.max(network);
+        a.network_bytes = net_now.saturating_sub(run.clock.net_start);
+        self.state.downloads.speed.push(network as f32, disk as f32);
     }
 
     pub(crate) fn dl_done(&mut self, job: u64, result: DlResult) {
@@ -356,6 +586,15 @@ impl Client {
                 if let Some(w) = warnings.last() {
                     self.state.notice = Some(format!("{name}: {w}"));
                 }
+                self.state.extra.updates.remove(&item.request.app.0);
+                let r = &item.request;
+                if item.kind == DownloadKind::Install && (r.desktop_shortcut || r.menu_shortcut) {
+                    self.make_shortcuts(r.app, name.clone(), r.desktop_shortcut, r.menu_shortcut);
+                }
+                if item.kind != DownloadKind::Verify {
+                    let what = if item.kind == DownloadKind::Update { "was updated" } else { "is ready to play" };
+                    self.notify(NotifyKind::DownloadDone, "Download finished", &format!("{name} {what}."));
+                }
                 self.finish(item, Outcome::Done { bytes_downloaded, seconds, up_to_date });
             }
             (DlResult::Cancelled, 1) => {
@@ -369,8 +608,26 @@ impl Client {
             }
         }
         self.dl_start_next();
+        self.apply_bandwidth();
         // Whatever happened, the files on disk may have changed.
         self.spawn_local_scan();
+    }
+
+    /// Write the `.desktop` files on a worker thread and say what happened.
+    pub(crate) fn make_shortcuts(&self, app: AppId, name: String, desktop: bool, menu: bool) {
+        self.spawn_store(
+            move || {
+                let icon = sr_steam::local::steam_roots().iter().find_map(|r| sr_steam::local::cached_icon(r, app.0));
+                shortcuts::create(&name, app.0, desktop, menu, icon.as_deref())
+            },
+            |r| {
+                Event::Notice(match r {
+                    Ok(files) if files.is_empty() => "No shortcut was asked for.".to_string(),
+                    Ok(files) => format!("Shortcut created: {}", files[0].display()),
+                    Err(e) => format!("Couldn't create the shortcut: {e}"),
+                })
+            },
+        );
     }
 
     fn finish(&mut self, item: DownloadItem, outcome: Outcome) {
@@ -386,6 +643,11 @@ pub(crate) fn library_of(install_dir: &Path) -> Option<PathBuf> {
     let steamapps = common.parent()?;
     (common.file_name()? == "common" && steamapps.file_name()? == "steamapps")
         .then(|| steamapps.parent().map(Path::to_path_buf))?
+}
+
+/// `<library>/steamapps/common/<dir>` as text (the form `InstallState` keeps) -> `<library>`.
+pub fn library_of_path(install_dir: &str) -> Option<PathBuf> {
+    library_of(Path::new(install_dir))
 }
 
 pub(crate) fn now_unix() -> u64 {
@@ -452,7 +714,7 @@ fn pump(dl: Download, job: u64, ctl: Arc<AtomicU8>, library: &Path, tx: mpsc::Se
             warnings: s.warnings,
         },
         (Err(e), None) if content::is_cancelled(&e) => DlResult::Cancelled,
-        (Err(e), None) => DlResult::Failed(format!("{e:#}")),
+        (Err(e), None) => DlResult::Failed(friendly_error(&e)),
     };
     let _ = tx.blocking_send(Event::DlDone { job, result });
     wake();
@@ -464,8 +726,16 @@ fn not_enough_space(p: &Progress, library: &Path) -> Option<String> {
         return None;
     }
     let free = free_space(library)?;
-    (p.total_bytes > free)
-        .then(|| format!("Not enough disk space: {} needed, {} free.", human(p.total_bytes), human(free)))
+    let needed = content::estimate::with_margin(p.total_bytes);
+    (needed > free).then(|| format!("Not enough disk space: {} needed, {} free.", human(needed), human(free)))
+}
+
+/// The error text for the user: a full disk gets a plain sentence, anything else the error chain.
+pub(crate) fn friendly_error(e: &anyhow::Error) -> String {
+    let full = e
+        .chain()
+        .any(|c| c.downcast_ref::<std::io::Error>().is_some_and(|io| io.kind() == std::io::ErrorKind::StorageFull));
+    if full { "The disk is full. Free some space, then resume the download.".to_string() } else { format!("{e:#}") }
 }
 
 fn human(b: u64) -> String {
@@ -515,16 +785,8 @@ mod tests {
     fn status_and_eta() {
         let mut d = DownloadsState::default();
         assert_eq!(d.status(AppId(1)), DownloadStatus::None);
-        let item = DownloadItem {
-            request: DownloadRequest {
-                app: AppId(1),
-                name: "G".into(),
-                library: "/l".into(),
-                os: OsChoice::Auto,
-                verify: false,
-            },
-            kind: DownloadKind::Install,
-        };
+        let item =
+            DownloadItem { request: DownloadRequest::new(AppId(1), "G", "/l".into()), kind: DownloadKind::Install };
         d.queue.push(item.clone());
         assert_eq!(d.status(AppId(1)), DownloadStatus::Queued);
         d.queue.clear();
@@ -536,9 +798,48 @@ mod tests {
             bytes_per_sec: 5.0,
             message: None,
             stopping: None,
+            peak_bytes_per_sec: 0.0,
+            network_bytes: 0,
         });
         assert_eq!(d.status(AppId(1)), DownloadStatus::Active(0.25));
         assert_eq!(d.active.as_ref().and_then(ActiveDownload::eta_secs), Some(15));
+    }
+
+    #[test]
+    fn queue_reordering_stays_in_bounds() {
+        let mut v = vec![1, 2, 3, 4];
+        move_item(&mut v, 2, -1);
+        assert_eq!(v, [1, 3, 2, 4]);
+        move_item(&mut v, 0, -5);
+        assert_eq!(v, [1, 3, 2, 4]);
+        move_item(&mut v, 1, 10);
+        assert_eq!(v, [1, 2, 4, 3]);
+        move_item(&mut v, 3, -3);
+        assert_eq!(v, [3, 1, 2, 4]);
+        move_item(&mut v, 9, 1); // no such item: nothing happens
+        assert_eq!(v, [3, 1, 2, 4]);
+    }
+
+    #[test]
+    fn speed_history_keeps_a_minute() {
+        let mut h = SpeedHistory::default();
+        for i in 0..100 {
+            h.push(i as f32, 1.0);
+        }
+        assert_eq!(h.samples.len(), SPEED_SAMPLES);
+        assert_eq!(h.samples.front(), Some(&(40.0, 1.0)));
+        assert_eq!(h.max(), 99.0);
+        h.push(-5.0, 0.0);
+        assert_eq!(h.samples.back(), Some(&(0.0, 0.0)));
+    }
+
+    #[test]
+    fn a_full_disk_gets_a_plain_message() {
+        let io = std::io::Error::from(std::io::ErrorKind::StorageFull);
+        let e = anyhow::Error::new(io).context("write game.bin");
+        assert!(friendly_error(&e).starts_with("The disk is full"));
+        let other = anyhow::anyhow!("boom");
+        assert_eq!(friendly_error(&other), "boom");
     }
 
     #[cfg(unix)]

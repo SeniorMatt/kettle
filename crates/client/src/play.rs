@@ -72,6 +72,10 @@ fn is_compat_problem(message: &str) -> bool {
 
 impl Client {
     pub(crate) fn play(&mut self, app: AppId) {
+        // An update is waiting: the UI asks "Update now / Play anyway" first.
+        if self.update_gate(app) {
+            return;
+        }
         if self.state.running.contains_key(&app) || self.state.starting_steam.contains(&app) {
             return;
         }
@@ -80,7 +84,7 @@ impl Client {
         let (tx, wake) = (self.tx.clone(), self.wake.clone());
         let start_steam = self.state.settings.start_steam;
         let (ours, account) = self.launch_options_for(app);
-        let options = LaunchText { ours, account };
+        let options = LaunchText { ours, account, hud: self.state.settings.hud.clone() };
         self.rt.spawn_blocking(move || launch(app, name, installed, start_steam, options, tx, wake));
     }
 
@@ -97,10 +101,12 @@ impl Client {
     pub(crate) fn game_started(&mut self, app: AppId, pid: u32) {
         self.state.starting_steam.retain(|a| *a != app);
         self.state.running.insert(app, RunningGame { pid, started: std::time::Instant::now() });
+        self.apply_bandwidth();
     }
 
     pub(crate) fn game_exited(&mut self, app: AppId, seconds: u64, success: bool) {
         self.state.running.remove(&app);
+        self.apply_bandwidth();
         self.play_stats.add(app, seconds, super::downloads::now_unix());
         let _ = store::save_json(&PlayStats::path(), &self.play_stats);
         self.merge_installed();
@@ -135,6 +141,8 @@ impl Client {
 struct LaunchText {
     ours: Option<String>,
     account: Option<u32>,
+    /// The performance overlay setting at the time of the launch.
+    hud: sr_steam::mangohud::HudSettings,
 }
 
 /// Worker: prepare the plan from Steam's app data and start it.
@@ -158,7 +166,12 @@ fn launch(
             Some(_) => sr_steam::launch_opts::effective(app.0, options.ours.as_deref(), options.account),
             None => options.ours.clone(),
         };
-        run::prepare_with(&info, installed.as_ref(), &run::PrepareOpts { launch_options, ..Default::default() })
+        // MangoHud: writes the game's config file; a problem here only means no HUD, never a failed launch.
+        let hud = sr_steam::mangohud::prepare(&options.hud, app.0).unwrap_or_else(|e| {
+            eprintln!("[hud] not applied: {e:#}");
+            None
+        });
+        run::prepare_with(&info, installed.as_ref(), &run::PrepareOpts { launch_options, hud, ..Default::default() })
     });
     let send = move |ev: Event| {
         let _ = tx.blocking_send(ev);

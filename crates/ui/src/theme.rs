@@ -43,6 +43,13 @@ pub const DISCOUNT_BG: Color32 = Color32::from_rgb(0x4c, 0x6b, 0x22);
 pub const DISCOUNT_TEXT: Color32 = Color32::from_rgb(0xbe, 0xee, 0x11);
 /// Price tag background next to a discount box.
 pub const PRICE_BG: Color32 = Color32::from_rgb(0x30, 0x3a, 0x44);
+/// Library home: the faint blue glow at the top of the page.
+pub const HOME_GLOW: Color32 = Color32::from_rgb(0x2a, 0x3a, 0x50);
+/// Selected game in the list: a blue gradient fading to the right.
+pub const ROW_SELECTED_A: Color32 = Color32::from_rgb(0x2f, 0x5f, 0x8e);
+pub const ROW_SELECTED_B: Color32 = Color32::from_rgb(0x23, 0x2e, 0x40);
+/// "Running" label in the game list.
+pub const RUNNING: Color32 = Color32::from_rgb(0x90, 0xba, 0x3c);
 pub const ACCENT: Color32 = Color32::from_rgb(0x1a, 0x9f, 0xff);
 /// Destructive buttons (uninstall) and error text.
 pub const DANGER: Color32 = Color32::from_rgb(0xa8, 0x32, 0x32);
@@ -90,15 +97,32 @@ pub const CHAT_THEIRS: Color32 = Color32::from_rgb(0x2f, 0x33, 0x3d);
 
 // ---- sizes (points) -----------------------------------------------------
 
-pub const MENU_BAR_H: f32 = 26.0;
+/// Control heights: no button is shorter than `CONTROL_SMALL`.
+pub const CONTROL_SMALL: f32 = 28.0;
+pub const CONTROL_NORMAL: f32 = 36.0;
+pub const CONTROL_LARGE: f32 = 48.0;
+pub const MENU_BAR_H: f32 = 28.0;
 pub const NAV_BAR_H: f32 = 52.0;
 pub const BOTTOM_BAR_H: f32 = 40.0;
-pub const SIDEBAR_W: f32 = 280.0;
+pub const SIDEBAR_W: f32 = 300.0;
 pub const FRIENDS_W: f32 = 320.0;
-pub const LIST_ROW_H: f32 = 26.0;
+pub const LIST_ROW_H: f32 = 28.0;
 pub const CAPSULE_W: f32 = 150.0;
 pub const CAPSULE_H: f32 = 225.0;
-pub const GRID_GAP: f32 = 16.0;
+pub const GRID_GAP: f32 = 20.0;
+/// Cover-size slider range (capsule width; the height is 3:2 of it).
+pub const CAPSULE_W_MIN: f32 = 110.0;
+pub const CAPSULE_W_MAX: f32 = 250.0;
+/// "Recent games" shelf: the first capsule is larger, like the official library.
+pub const RECENT_HERO_W: f32 = 300.0;
+pub const RECENT_HERO_H: f32 = 140.0;
+pub const RECENT_W: f32 = 220.0;
+pub const RECENT_H: f32 = 103.0;
+pub const SHELF_TITLE_H: f32 = 34.0;
+pub const SHELF_BUCKET_H: f32 = 24.0;
+/// Height of the "ALL GAMES" bar above the grid.
+pub const ALL_BAR_H: f32 = 44.0;
+pub const NAV_TAB_FONT: f32 = 22.0;
 pub const WINDOW_BUTTON_W: f32 = 44.0;
 /// Invisible zone along each window edge that starts a resize.
 pub const RESIZE_EDGE: f32 = 6.0;

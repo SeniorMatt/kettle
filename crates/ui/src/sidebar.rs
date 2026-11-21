@@ -287,23 +287,50 @@ impl SidebarView {
                     let selected = state.selected == Some(g.app_id);
                     let hover = anim::animate_bool(ui.ctx(), resp.id.with("hover"), resp.hovered(), anim::FAST);
                     if selected {
-                        ui.painter().rect_filled(rect, 0.0, theme::BG_ROW_SELECTED);
+                        widgets::gradient(ui, rect, theme::ROW_SELECTED_A, theme::ROW_SELECTED_B);
                     } else if hover > 0.0 {
                         ui.painter().rect_filled(rect, 0.0, theme::BG_ROW_HOVER.gamma_multiply(hover));
                     }
+                    let icons = client.state().settings.interface.sidebar_icons;
                     let icon_rect =
                         Rect::from_center_size(Pos2::new(rect.left() + 28.0, rect.center().y), Vec2::splat(16.0));
-                    match tex.get(client, g.app_id, ArtKind::Icon) {
-                        Art::Ready(t, a) => {
-                            widgets::image_cover(ui, icon_rect, t, egui::Color32::WHITE.gamma_multiply(a))
-                        }
-                        _ => {
-                            ui.painter().rect_filled(icon_rect, 1.0, theme::BG_CAPSULE);
+                    if icons {
+                        match tex.get(client, g.app_id, ArtKind::Icon) {
+                            Art::Ready(t, a) => {
+                                widgets::image_cover(ui, icon_rect, t, egui::Color32::WHITE.gamma_multiply(a))
+                            }
+                            _ => {
+                                ui.painter().rect_filled(icon_rect, 1.0, theme::BG_CAPSULE);
+                            }
                         }
                     }
-                    let color = if g.install.is_installed() { theme::TEXT } else { theme::TEXT_UNINSTALLED };
-                    let text_rect = Rect::from_min_max(Pos2::new(rect.left() + 44.0, rect.top()), rect.right_bottom());
-                    let galley = ui.painter().layout(g.name.clone(), theme::medium(14.0), color, f32::INFINITY);
+                    let color =
+                        if selected || g.install.is_installed() { theme::TEXT } else { theme::TEXT_UNINSTALLED };
+                    let status = if state.running.contains_key(&g.app_id) {
+                        Some(("RUNNING", theme::RUNNING))
+                    } else if matches!(
+                        g.install,
+                        InstallState::Downloading { .. } | InstallState::UpdateRequired { .. }
+                    ) {
+                        Some(("UPDATING", theme::ACCENT))
+                    } else {
+                        None
+                    };
+                    let text_rect = Rect::from_min_max(
+                        Pos2::new(rect.left() + if icons { 44.0 } else { 28.0 }, rect.top()),
+                        rect.right_bottom(),
+                    );
+                    let galley = ui.painter().layout(g.name.clone(), theme::regular(14.0), color, f32::INFINITY);
+                    let name_w = galley.size().x;
+                    if let Some((label, c)) = status {
+                        ui.painter().with_clip_rect(text_rect).text(
+                            Pos2::new(text_rect.left() + name_w + 8.0, rect.center().y),
+                            egui::Align2::LEFT_CENTER,
+                            label,
+                            theme::bold(11.0),
+                            c,
+                        );
+                    }
                     ui.painter().with_clip_rect(text_rect).galley(
                         Pos2::new(text_rect.left(), rect.center().y - galley.size().y / 2.0),
                         galley,

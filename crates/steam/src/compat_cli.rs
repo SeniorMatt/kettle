@@ -6,7 +6,7 @@
 //!   sr-cli proton install <source> <tag|latest> --dir D
 //!   sr-cli proton remove <name> --dir D
 //!   sr-cli appinfo <appid>                             launch entries from Steam's appinfo.vdf
-//!   sr-cli launch <appid> [--dry-run] [--windows] [--tool NAME] [-- args...]
+//!   sr-cli launch <appid> [--dry-run] [--windows] [--tool NAME] [--hud off|fps|graph|full] [-- args...]
 
 use crate::compat::{self, ToolOrigin};
 use crate::proton_releases::{self as rel, Phase, Source};
@@ -141,6 +141,20 @@ fn cmd_appinfo(args: &[String]) -> Result<()> {
     bail!("app {appid} not found in appinfo.vdf")
 }
 
+/// The performance overlay a launch would add: the saved setting, or `--hud off|fps|graph|full` to try one.
+fn cli_hud(appid: u32, preset: Option<String>) -> Option<crate::mangohud::Hud> {
+    use crate::mangohud::{self, Preset};
+    let mut s = mangohud::settings_from_disk();
+    match preset.as_deref() {
+        Some("off") => s.preset = Preset::Off,
+        Some("fps") => s.preset = Preset::FpsOnly,
+        Some("graph") => s.preset = Preset::FpsGraph,
+        Some("full") => s.preset = Preset::Full,
+        _ => {}
+    }
+    mangohud::prepare(&s, appid).ok().flatten()
+}
+
 fn cmd_launch(args: &[String]) -> Result<()> {
     let appid = appid_arg(args)?;
     let split = args.iter().position(|a| a == "--").unwrap_or(args.len());
@@ -153,6 +167,7 @@ fn cmd_launch(args: &[String]) -> Result<()> {
             let ours = launch_opts::LaunchOptions::load();
             launch_opts::effective(appid, ours.get(appid), None)
         }),
+        hud: cli_hud(appid, flag_value(&args[..split], "--hud")),
     };
     let p = run::prepare(appid, &opts)?;
     println!("{} ({appid}){}", p.name, if p.installed { "" } else { "  [not installed: path is where it would go]" });

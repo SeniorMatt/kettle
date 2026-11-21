@@ -16,6 +16,9 @@ tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+# Desktop notifications over D-Bus (MIT OR Apache-2.0); Linux only.
+[target.'cfg(target_os = "linux")'.dependencies]
+notify-rust = { version = "4", default-features = false, features = ["z"] }
 
 [dev-dependencies]
 serde_json = "1"

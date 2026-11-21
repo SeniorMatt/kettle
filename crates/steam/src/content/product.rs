@@ -25,6 +25,9 @@ pub struct DepotInfo {
     pub shared_install: bool,
     /// Manifest gid per branch name.
     pub manifests: BTreeMap<String, u64>,
+    /// Per branch: (size on disk, download size) as PICS states them next to the manifest id. Missing for
+    /// the old one-number manifest format.
+    pub sizes: BTreeMap<String, (u64, u64)>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -61,6 +64,8 @@ pub struct AppInfo {
     pub depots: Vec<DepotInfo>,
     pub branches: BTreeMap<String, Branch>,
     pub launch: Vec<LaunchEntry>,
+    /// DLC app ids (`extended/listofdlc` plus the apps depots are tied to).
+    pub dlc: Vec<u32>,
     /// The PICS text as received; saved next to the install so the launcher
     /// works without the official client's `appinfo.vdf`.
     pub raw: String,
@@ -108,6 +113,17 @@ pub fn parse(appid: u32, text: &str) -> Result<AppInfo> {
             }
         }
     }
+    let mut dlc: Vec<u32> = root
+        .path(&["extended", "listofdlc"])
+        .and_then(Node::str)
+        .unwrap_or_default()
+        .split(',')
+        .filter_map(|x| x.trim().parse().ok())
+        .collect();
+    dlc.extend(app.depots.iter().filter_map(|d| d.dlc_app));
+    dlc.sort_unstable();
+    dlc.dedup();
+    app.dlc = dlc;
     if let Some(l) = root.path(&["config", "launch"]) {
         app.launch = l.children().iter().map(|(k, v)| launch(k, v)).collect();
     }
@@ -119,11 +135,13 @@ fn depot(key: &str, v: &Node) -> Option<DepotInfo> {
     let cfg = v.get("config");
     let cs = |k: &str| cfg.and_then(|c| c.get_str(k)).unwrap_or_default().to_string();
     let mut manifests = BTreeMap::new();
+    let mut sizes = BTreeMap::new();
     for (branch, m) in v.get("manifests").map(Node::children).unwrap_or_default() {
         // Current format: `public { gid "..." size "..." }`; older: `public "gid"`.
         let gid = m.get_str("gid").or_else(|| m.str()).and_then(|s| s.trim().parse::<u64>().ok());
         if let Some(g) = gid.filter(|g| *g != 0) {
             manifests.insert(branch.clone(), g);
+            sizes.insert(branch.clone(), (num(m, "size"), num(m, "download")));
         }
     }
     Some(DepotInfo {
@@ -135,6 +153,7 @@ fn depot(key: &str, v: &Node) -> Option<DepotInfo> {
         dlc_app: v.get_u64("dlcappid").map(|x| x as u32).filter(|x| *x != 0),
         shared_install: num(v, "sharedinstall") != 0,
         manifests,
+        sizes,
     })
 }
 
@@ -181,6 +200,41 @@ pub async fn fetch<C: CmLink>(conn: &C, appid: u32) -> Result<AppInfo> {
     parse(appid, &String::from_utf8_lossy(entry.buffer()))
 }
 
+/// Ask PICS for many apps at once (batches of [`BATCH`]). Apps Steam won't tell us about (no access token)
+/// are left out; so are answers that don't parse.
+pub async fn fetch_many<C: CmLink>(conn: &C, appids: &[u32]) -> Result<Vec<AppInfo>> {
+    const BATCH: usize = 40;
+    let mut out = Vec::new();
+    for ids in appids.chunks(BATCH) {
+        let tokens: CMsgClientPICSAccessTokenResponse =
+            conn.job(CMsgClientPICSAccessTokenRequest { appids: ids.to_vec(), ..Default::default() }).await?;
+        let apps = ids
+            .iter()
+            .map(|&id| AppRequest {
+                appid: Some(id),
+                access_token: Some(
+                    tokens.app_access_tokens.iter().find(|t| t.appid() == id).map_or(0, |t| t.access_token()),
+                ),
+                only_public_obsolete: Some(true),
+                ..Default::default()
+            })
+            .collect();
+        let req = CMsgClientPICSProductInfoRequest {
+            apps,
+            meta_data_only: Some(false),
+            single_response: Some(true),
+            ..Default::default()
+        };
+        let resp: CMsgClientPICSProductInfoResponse = conn.job(req).await?;
+        for entry in resp.apps.iter().filter(|a| !a.missing_token()) {
+            if let Ok(info) = parse(entry.appid(), &String::from_utf8_lossy(entry.buffer())) {
+                out.push(info);
+            }
+        }
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -205,6 +259,8 @@ mod tests {
         assert_eq!((d.os.clone(), d.arch.as_str()), (vec!["linux".to_string()], "64"));
         assert_eq!(d.manifests["public"], 123);
         assert_eq!(d.manifests["beta"], 456);
+        assert_eq!(d.sizes["public"], (9, 0));
+        assert_eq!(a.dlc, [55]);
         let d9 = a.depot(9).unwrap();
         assert_eq!(
             (d9.language.as_str(), d9.dlc_app, d9.from_app, d9.shared_install),

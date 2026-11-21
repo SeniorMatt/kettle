@@ -41,6 +41,26 @@ impl FromStr for Os {
     }
 }
 
+/// The OS the depots `installed` are for, judged by the OS-specific ones among them (Linux wins when both
+/// kinds are there). `None` when every installed depot is for all systems.
+pub fn installed_os(app: &AppInfo, installed: impl Iterator<Item = u32>) -> Option<Os> {
+    let (mut linux, mut windows, mut mac) = (false, false, false);
+    for d in installed.filter_map(|id| app.depot(id)) {
+        linux |= d.os.iter().any(|o| o == "linux");
+        windows |= d.os.iter().any(|o| o == "windows");
+        mac |= d.os.iter().any(|o| o == "macos");
+    }
+    if linux {
+        Some(Os::Linux)
+    } else if windows {
+        Some(Os::Windows)
+    } else if mac {
+        Some(Os::MacOs)
+    } else {
+        None
+    }
+}
+
 pub struct Target<'a> {
     pub os: Os,
     pub language: &'a str,
@@ -98,6 +118,15 @@ mod tests {
         assert_eq!(Os::default_for(&app), Os::Linux);
         assert_eq!(ids(Os::Linux), [1, 4, 6]);
         assert_eq!(ids(Os::Windows), [1, 2, 6]);
+    }
+
+    #[test]
+    fn installed_os_follows_the_installed_depots() {
+        let mut app = AppInfo::default();
+        app.depots = vec![depot(1, &[], "", ""), depot(2, &["windows"], "", ""), depot(3, &["linux"], "64", "")];
+        assert_eq!(installed_os(&app, [1u32, 2].into_iter()), Some(Os::Windows));
+        assert_eq!(installed_os(&app, [1u32, 3].into_iter()), Some(Os::Linux));
+        assert_eq!(installed_os(&app, [1u32, 99].into_iter()), None);
     }
 
     #[test]

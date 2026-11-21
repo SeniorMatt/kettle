@@ -51,7 +51,13 @@ All HTTPS uses rustls with certificate verification.
 
 ## Friends and chat
 
-Chat messages and your friends list are held in memory only (at most 2000 friends and 500 messages per chat) and are never written to disk. Messages go to Steam over the CM connection, the same way the official client sends them. Only avatar pictures are cached on disk (see above).
+Chat messages and your friends list are held in memory only (at most 2000 friends and 500 messages per chat) and are never written to disk. Messages go to Steam over the CM connection, the same way the official client sends them. Only avatar pictures are cached on disk (see above). The one thing remembered between runs is the online state you picked (`friends.json` in our data folder).
+
+## Profiles
+
+Opening someone's profile asks the community website for two public pages, without any login: `https://steamcommunity.com/profiles/<SteamID>?xml=1` (name, summary, location, privacy) and `https://steamcommunity.com/miniprofile/<account id>/json` (Steam level). The answers are kept in memory only (at most 24 profiles). The picture comes from `avatars.steamstatic.com` like the friends' pictures.
+
+Editing your own profile (name, real name, summary) uses the community website's own form. For each load or save we ask Steam for a short-lived access token over the CM connection and send it to `steamcommunity.com` as the cookie `steamLoginSecure`, together with a random `sessionid` cookie and form field, the same way the website does. The cookies exist only in memory for the length of that one request: they are never written to disk or the log, and error messages have them removed before they are shown.
 
 ## Launch options
 
@@ -60,6 +66,22 @@ When you have not set launch options for a game, we show and use the ones the of
 ## In-game overlay
 
 The Shift+Tab shortcut is registered only while a game started here is running (and the setting is on); nothing is sent anywhere. Notes are saved per game in `notes.json` in our data folder.
+
+The overlay is drawn by a second process, `kettle --overlay`, started from the same program file while such a game runs and ended with it. It talks to the main app over a Unix socket in your runtime folder (`$XDG_RUNTIME_DIR/kettle-overlay-<pid>.sock`, readable only by you, removed when the game ends). Nothing leaves your computer through it. What goes over it: your friends' names and states, the open chats, the game's note and the performance overlay settings; and back: chat messages you type, note text and settings you change. The helper has no Steam sign-in or token.
+
+## Performance overlay (MangoHud)
+
+If you turn it on (Settings > In Game), we write a small config file per game to `mangohud/<app id>.conf` in our data folder (readable only by you) and start the game with `MANGOHUD=1` and `MANGOHUD_CONFIGFILE` set. MangoHud itself is a separate program that draws the numbers inside the game; we send nothing anywhere.
+
+## Updates, downloads and notifications
+
+Checking for updates asks Steam, over the shared connection, for the public build and manifest numbers of the games you have installed (the same product info requests a download makes). Nothing else is sent. Games that the official Steam client installed are only read for this check; Kettle writes into their folders only when you answer "Update this time" or "Always allow" in the dialog (Settings > Downloads, "Update games installed by the Steam client": ask / never / yes).
+
+Desktop notifications are local: a message from Kettle to your desktop's notification service on D-Bus (`org.freedesktop.Notifications`), made by the `notify-rust` library. They are off for friends by default and can be switched off completely. The optional sound is a name from your sound theme; Kettle ships no sounds.
+
+Shortcuts are plain `.desktop` files, written only when you ask for them (install dialog, or Properties > General): `~/.local/share/applications/kettle-game-<id>.desktop` and `<your Desktop folder>/kettle-game-<id>.desktop`. They contain the game's name and the command `kettle --play <id>`. Uninstalling the game deletes them.
+
+Moving a game copies its folder (and its Proton prefix, so saves stay with it) into another library you chose, then deletes the old copy. "Clear cache" and "Delete local data" delete our cache folder only. Download settings (speed limit, schedule, update policy, added library folders) are in `settings.json` in our data folder.
 
 ## Known limits
 

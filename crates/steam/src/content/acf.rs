@@ -21,6 +21,8 @@ pub struct AppState {
     pub size_on_disk: u64,
     pub build_id: u64,
     pub last_owner: u64,
+    /// `UserConfig/BetaKey`: the beta branch the game follows (empty = public).
+    pub beta_key: String,
     /// depot -> (manifest gid, installed size)
     pub depots: BTreeMap<u32, (u64, u64)>,
 }
@@ -63,7 +65,11 @@ pub fn render(a: &AppState) -> String {
             "\t\t\"{depot}\"\n\t\t{{\n\t\t\t\"manifest\"\t\t\"{gid}\"\n\t\t\t\"size\"\t\t\"{size}\"\n\t\t}}\n"
         ));
     }
-    s.push_str("\t}\n\t\"UserConfig\"\n\t{\n\t}\n\t\"MountedConfig\"\n\t{\n\t}\n}\n");
+    s.push_str("\t}\n\t\"UserConfig\"\n\t{\n");
+    if !a.beta_key.is_empty() {
+        s.push_str(&format!("\t\t\"BetaKey\"\t\t\"{}\"\n", esc(&a.beta_key)));
+    }
+    s.push_str("\t}\n\t\"MountedConfig\"\n\t{\n\t}\n}\n");
     s
 }
 
@@ -85,6 +91,7 @@ pub fn parse(text: &str) -> Option<AppState> {
         size_on_disk: s.get_u64("SizeOnDisk").unwrap_or(0),
         build_id: s.get_u64("buildid").unwrap_or(0),
         last_owner: s.get_u64("LastOwner").unwrap_or(0),
+        beta_key: s.path(&["UserConfig", "BetaKey"]).and_then(vdf::Node::str).unwrap_or_default().to_string(),
         depots,
     })
 }
@@ -120,6 +127,7 @@ mod tests {
             size_on_disk: 123,
             build_id: 42,
             last_owner: 0,
+            beta_key: "beta".into(),
             ..Default::default()
         };
         a.depots.insert(1006, (99, 123));
@@ -127,6 +135,7 @@ mod tests {
         let b = parse(&text).unwrap();
         assert_eq!((b.appid, b.name.as_str(), b.state_flags, b.build_id), (1007, a.name.as_str(), 4, 42));
         assert_eq!(b.depots[&1006], (99, 123));
+        assert_eq!(b.beta_key, "beta");
         // Our own scanner must accept it too.
         let doc = vdf::parse(&text);
         assert_eq!(doc.path(&["AppState", "installdir"]).and_then(vdf::Node::str), Some("Steamworks SDK Redist"));
