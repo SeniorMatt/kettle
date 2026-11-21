@@ -186,6 +186,7 @@ impl PropertiesView {
         let last = fmt::last_played(game.last_played, fmt::now_unix());
         widgets::setting_row(ui, "Last played", "", |ui| value(ui, &last));
         crate::settings_downloads::game_rows(ui, client, game);
+        crate::cloud_ui::game_row(ui, client, app);
     }
 
     // ---- installed files ---------------------------------------------------------------------------

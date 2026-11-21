@@ -198,3 +198,15 @@ Write down anything that looks off, along with a screenshot.
 - [ ] Click your name or avatar in the panel header, or the profile tab: your profile page shows avatar, name, level, real name and location (if set), summary and recent games. Edit profile: change the summary, Save; the page shows the new text. Change the profile name: the panel header shows it a moment later.
 - [ ] View profile on a friend and on a private profile ("This profile is private."). No token or cookie appears in the terminal output or in any error message.
 
+
+## Steam Cloud saves (real account; written, not yet tried)
+Use a small game that has Steam Cloud and starts under Kettle. Open the launch log (`~/.local/share/kettle/logs/launch-<appid>.log`) after each step: it starts with `cloud:` lines. Set `KETTLE_CLOUD_DRYRUN=1` first to see the plan without any change.
+- [ ] Dry run: start Kettle with `KETTLE_CLOUD_DRYRUN=1`, play the game. The log lists `download` / `upload` lines and `dry run, nothing changed`; no save file or `~/.local/share/kettle/cloud/<appid>.json` changed.
+- [ ] Download: save progress on another machine (or the official client), close the game there, then start the game in Kettle. "Syncing..." shows, the log says `downloaded <file>`, and the game loads that save.
+- [ ] Upload: play, save, quit. The log ends with `uploaded <file>`; in the official client (or on another machine) the new save loads.
+- [ ] Conflict: change saves here without Kettle noticing (offline), change them elsewhere, go online and press Play. The dialog shows both times and the game does not start. "Cancel" leaves everything as it was. "Keep cloud saves" replaces the local ones (the old ones are in `~/.local/share/kettle/cloud-backups/<appid>/`). "Keep this computer's saves" uploads them first. Both then start the game.
+- [ ] Proton game: saves land inside `compatdata/<appid>/pfx/drive_c/users/steamuser/...` (check the path in the log). A game whose prefix does not exist yet says so and starts without Cloud; the next launch syncs.
+- [ ] Per-game off and the global switch: with either off the log has no `cloud:` lines and nothing is sent. Settings survive a restart.
+- [ ] Failure: disconnect the network just before Play (or sign out of the hub): the game still starts, a notice says Cloud could not sync, and nothing is uploaded after the session.
+- [ ] No save file is ever deleted by Kettle; a file deleted in the cloud stays on disk.
+- [ ] With the official Steam client installed: a game that keeps its saves in `userdata/<account>/<app>/remote` is not synced for that folder; the launch log says `Cloud: remote/ belongs to the Steam client, skipped` and the game page shows it. Nothing under the Steam folder changes (check modification times). Saves in the game folder, home or the Proton prefix still sync.

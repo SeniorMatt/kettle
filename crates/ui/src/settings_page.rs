@@ -18,6 +18,7 @@ pub enum SettingsTab {
     Interface,
     Library,
     Storage,
+    Cloud,
     Downloads,
     Notifications,
     Compatibility,
@@ -27,14 +28,15 @@ pub enum SettingsTab {
 
 impl SettingsTab {
     /// The official client's order: Account, Notifications, Interface, Library, Downloads, Storage, In Game,
-    /// Compatibility (Privacy is ours and goes last).
-    const ALL: [(SettingsTab, &'static str); 9] = [
+    /// Cloud, Compatibility (Privacy is ours and goes last).
+    const ALL: [(SettingsTab, &'static str); 10] = [
         (SettingsTab::Account, "Account"),
         (SettingsTab::Notifications, "Notifications"),
         (SettingsTab::Interface, "Interface"),
         (SettingsTab::Library, "Library"),
         (SettingsTab::Downloads, "Downloads"),
         (SettingsTab::Storage, "Storage"),
+        (SettingsTab::Cloud, "Cloud"),
         (SettingsTab::InGame, "In Game"),
         (SettingsTab::Compatibility, "Compatibility"),
         (SettingsTab::Privacy, "Privacy"),
@@ -147,6 +149,7 @@ impl SettingsView {
                     SettingsTab::Interface => crate::settings_interface::show(ui, client),
                     SettingsTab::Library => crate::settings_storage::folders(ui, client),
                     SettingsTab::Storage => crate::settings_storage::storage(ui, client),
+                    SettingsTab::Cloud => crate::cloud_ui::settings_row(ui, client),
                     SettingsTab::Downloads => crate::settings_downloads::show(ui, client),
                     SettingsTab::Notifications => crate::settings_notify::notifications(ui, client),
                     SettingsTab::Compatibility => self.compatibility(ui, client),

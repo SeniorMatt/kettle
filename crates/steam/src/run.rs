@@ -733,6 +733,24 @@ fn spawn_error(plan: &LaunchPlan, e: &std::io::Error) -> anyhow::Error {
 /// becomes a zombie) and calls `on_exit` when it ends. stdout and stderr go to [`log_path`], below a header
 /// with the command.
 pub fn spawn(plan: &LaunchPlan, on_exit: impl FnOnce(Finished) + Send + 'static) -> Result<u32> {
+    spawn_with_preamble(plan, "", on_exit)
+}
+
+/// Add lines to the end of a game's launch log (for what happens after it ended, such as the Cloud upload).
+pub fn append_log(appid: u32, text: &str) {
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new().append(true).create(true).open(log_path(appid)) {
+        let _ = write!(f, "{}", tidy(text));
+    }
+}
+
+/// Like [`spawn`], with `preamble` written to the log before the launch description (what was done before the
+/// start, such as the Cloud download).
+pub fn spawn_with_preamble(
+    plan: &LaunchPlan,
+    preamble: &str,
+    on_exit: impl FnOnce(Finished) + Send + 'static,
+) -> Result<u32> {
     use std::io::Write;
     for d in &plan.create_dirs {
         std::fs::create_dir_all(d).with_context(|| format!("creating {}", d.display()))?;
@@ -743,6 +761,9 @@ pub fn spawn(plan: &LaunchPlan, on_exit: impl FnOnce(Finished) + Send + 'static)
         store::private_dir(dir)?;
     }
     let mut out = std::fs::File::create(&log).with_context(|| format!("creating {}", log.display()))?;
+    if !preamble.is_empty() {
+        let _ = write!(out, "{}", tidy(preamble));
+    }
     let _ = write!(out, "{}", describe(plan));
     if let Some(n) = note {
         let _ = writeln!(out, "{}", tidy(&n));

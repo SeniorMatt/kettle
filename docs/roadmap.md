@@ -115,9 +115,9 @@ Nothing here is a promise. The owner decides what comes next. Bugs found on real
 
 ## Cloud
 
-- [ ] Cloud: download saves before playing
-- [ ] Cloud: upload saves after playing
-- [ ] Cloud: conflict dialog
+- [x] Cloud: download saves before playing (unit-tested; not tried on a real account)
+- [x] Cloud: upload saves after playing (unit-tested; not tried on a real account)
+- [x] Cloud: conflict dialog (decision and flow unit-tested; the dialog is in `cloud_ui.rs` and is not hooked into the pages yet; not tried on a real account)
 - [ ] Cloud: Steam Cloud for non-Steam-Cloud games (local backups)
 
 ## Friends

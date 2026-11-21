@@ -9,6 +9,7 @@
 //! in the keyring, never in `State`.
 
 mod art;
+mod cloud;
 mod cm_hub;
 mod collections;
 mod demo;
@@ -39,6 +40,7 @@ mod tools;
 mod web_image;
 
 pub use art::ArtImage;
+pub use cloud::{CloudChoice, CloudConflict, CloudGames, CloudPhase, CloudState};
 pub use collections::{CollCmd, Collections, FAVORITE, HIDDEN};
 pub use download_settings::{
     DownloadSettings, NotifyKind, NotifySettings, SteamUpdatePolicy, UpdateBehavior, hour_in_window, local_hour,
@@ -161,6 +163,8 @@ pub struct State {
     pub launch_options: LaunchOptionsState,
     /// Per-game "Run in Gamescope" choices (games that follow the global setting are not listed).
     pub gamescope_games: GamescopeGames,
+    /// Steam Cloud saves: per-game switch, running syncs, a conflict to answer.
+    pub cloud: CloudState,
     pub settings: Settings,
     /// Places a game can be installed into.
     pub libraries: Vec<LibraryChoice>,
@@ -324,6 +328,12 @@ pub enum Command {
     SetGamescope(GamescopeSettings),
     /// A game's own choice: follow the global setting, always, or never.
     SetGameGamescope(AppId, GamescopeOverride),
+    /// The global "Steam Cloud sync" switch (on by default).
+    SetCloudSync(bool),
+    /// Steam Cloud for one game: `true` = on (follows the global switch), `false` = never.
+    SetGameCloud(AppId, bool),
+    /// The answer to the Steam Cloud conflict dialog (`State::cloud.conflict`); `Cancel` does not start the game.
+    CloudResolve(AppId, CloudChoice),
     /// Favourites, hidden games and collections.
     Collections(CollCmd),
     /// Load the featured rows (no-op while loading or fresh).
@@ -418,6 +428,8 @@ enum Event {
         success: bool,
     },
     PlayFailed(PlayProblem),
+    /// Steam Cloud progress and results (see `cloud`).
+    Cloud(cloud::CloudEvent),
     /// The game needs the Steam client and we are starting it.
     SteamStarting {
         app: AppId,
@@ -506,6 +518,10 @@ pub struct Client {
     play_stats: play::PlayStats,
     /// Games that need the Steam client but run without it: why, for the notice if they exit early.
     steam_missing: HashMap<AppId, String>,
+    /// Where the saves of games whose Cloud download worked are, for the upload after they exit.
+    cloud_ctx: HashMap<AppId, cloud::Ctx>,
+    /// The answer to a conflict, taken by the next launch of that game.
+    cloud_choice: HashMap<AppId, sr_steam::cloud::Resolution>,
     dl_running: Option<downloads::RunningDl>,
     dl_seq: u64,
     extras: extras::ExtraInner,
@@ -562,6 +578,7 @@ impl Client {
                     ..Default::default()
                 },
                 gamescope_games: GamescopeGames::load(),
+                cloud: CloudState { games: CloudGames::load(), ..Default::default() },
                 libraries: settings::library_choices(&settings),
                 settings,
                 free_space: Vec::new(),
@@ -577,6 +594,8 @@ impl Client {
             base_play: HashMap::new(),
             play_stats: play::PlayStats::load(),
             steam_missing: HashMap::new(),
+            cloud_ctx: HashMap::new(),
+            cloud_choice: HashMap::new(),
             dl_running: None,
             dl_seq: 0,
             extras: Default::default(),
@@ -660,6 +679,9 @@ impl Client {
             Command::SetHud(h) => self.set_hud(h),
             Command::SetGamescope(g) => self.set_gamescope(g),
             Command::SetGameGamescope(app, o) => self.set_game_gamescope(app, o),
+            Command::SetCloudSync(on) => self.set_cloud_sync(on),
+            Command::SetGameCloud(app, on) => self.set_game_cloud(app, on),
+            Command::CloudResolve(app, c) => self.cloud_resolve(app, c),
             Command::Collections(c) => self.collections_cmd(c),
             Command::StoreLoad => self.store_load(),
             Command::StoreSearch(q) => self.store_search(q),
@@ -789,6 +811,7 @@ impl Client {
             Event::GameStarted { app, pid, gamescope } => self.game_started(app, pid, gamescope),
             Event::GameExited { app, seconds, success } => self.game_exited(app, seconds, success),
             Event::PlayFailed(problem) => self.play_failed(problem),
+            Event::Cloud(e) => self.apply_cloud(e),
             Event::SteamStarting { app } => self.steam_starting(app),
             Event::SteamMissing { app, message } => self.steam_missing(app, message),
             Event::Uninstalled { app, result } => {

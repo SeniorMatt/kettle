@@ -5,6 +5,7 @@
 
 mod anim;
 mod chrome;
+mod cloud_ui;
 mod collections_ui;
 mod dialogs;
 mod downloads_page;
@@ -268,6 +269,7 @@ impl AppUi {
             }
         });
         self.overlays.show(ui.ctx(), client);
+        cloud_ui::conflict_dialog(ui.ctx(), client);
         collections_ui::show_prompt(ui.ctx(), client);
         if let Some((app, tab)) = self.overlays.properties.take() {
             self.properties.open(app, tab, client, ui.ctx());

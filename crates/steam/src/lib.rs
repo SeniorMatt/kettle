@@ -3,6 +3,8 @@ pub mod appinfo;
 pub mod art;
 pub mod auth;
 pub mod cm;
+pub mod cloud;
+pub mod cloud_sync;
 pub mod collections;
 pub mod community;
 pub mod compat;
