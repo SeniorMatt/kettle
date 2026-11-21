@@ -39,7 +39,7 @@ All files are readable only by you: folders are mode `0700` and files `0600`.
 
 If a game needs the Steam client (Settings, Games tab, on by default), we start the official client minimized with `-silent` before it. We only start the program and read its pid file; nothing is sent to it or to Valve by us for this.
 
-We **never write** to the official Steam client's files. We only read its `steamapps/*.acf`, `libraryfolders.vdf`, `appcache/librarycache` and, for your collections, favourites and hidden games, `userdata/<account>/config/cloudstorage/cloud-storage-namespace-1.json` (read only; ours are kept separately in `collections.json`).
+We **never write** to the official Steam client's files. We only read its `steamapps/*.acf`, `appcache/stats/UserGameStats*_<app>.bin` (achievements on the game page), `libraryfolders.vdf`, `appcache/librarycache` and, for your collections, favourites and hidden games, `userdata/<account>/config/cloudstorage/cloud-storage-namespace-1.json` (read only; ours are kept separately in `collections.json`).
 
 ## Network connections
 
@@ -49,6 +49,8 @@ We **never write** to the official Steam client's files. We only read its `steam
 | Steam CM servers (`*.steamserver.net`) | The client connection (encrypted): your owned games, downloads and short-lived access tokens. After sign-in it also carries Friends & Chat: your friends list, their names and presence, your own online state (Online by default; you can pick Away, Busy, Invisible or Offline in the panel) and chat messages |
 | `shared.steamstatic.com` | Cover art (only the app ID is sent) |
 | `media.steampowered.com` | Small game icons |
+| `api.steampowered.com` (news) | `ISteamNews/GetNewsForApp` for the game page's news list: no key, no login, only the app ID is sent. The answer is cached for one hour in our cache folder |
+| `cdn.fastly.steamstatic.com` | Achievement icons on the game page (only the app ID and the icon name are in the URL) |
 | `store.steampowered.com` | Public store data for the Store tab: featured lists, search and app details. No login or cookies; only the country and language are sent (`cc=` and `l=`), plus the search text, app ID, tag ID and list offset you look at. The country is the one Steam reported when you signed in (from your IP address); before that, or if it is missing, no country is sent and Steam picks one from your IP address. The language is the one in Settings > Downloads (English by default). Store pages also request the app's user reviews (`/appreviews/<app id>`) and Browse uses `/search/results/?json=1`. Kettle never adds or removes wishlist entries, buys anything or sends cookies |
 | `*.steamstatic.com` | Store screenshots and capsules (only the image URL is requested). Trailers are not played in the app: a click hands the video address (on `video.*.steamstatic.com`) to your system's video player or browser |
 | `api.github.com` | Kettle's own update check (only when Kettle runs as an AppImage and "Check for Kettle updates" is on): `GET /repos/SeniorMatt/kettle/releases` at start and every 6 hours. No account, no token, no cookies; only a generic `Kettle` User-Agent and your IP address are visible to GitHub |

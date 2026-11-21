@@ -159,6 +159,12 @@ impl Client {
         self.state.protondb.insert(app.0, Load::Loading);
         let (tx, wake) = (self.tx.clone(), self.wake.clone());
         self.rt.spawn_blocking(move || {
+            // Games with a Linux build don't run through Proton, so their rating would only confuse.
+            if cfg!(target_os = "linux") && sr_steam::run::has_native_linux(app.0) == Some(true) {
+                let _ = tx.blocking_send(Event::ProtonDb { app, result: Ok(None) });
+                wake();
+                return;
+            }
             let result = load(app.0, super::downloads::now_unix());
             let _ = tx.blocking_send(Event::ProtonDb { app, result });
             wake();

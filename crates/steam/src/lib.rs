@@ -11,6 +11,7 @@ pub mod compat;
 pub mod compat_cli;
 pub mod content;
 pub mod friends;
+pub mod gamepage;
 pub mod gamescope;
 pub mod http;
 pub mod http_dl;

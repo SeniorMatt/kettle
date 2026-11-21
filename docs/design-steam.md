@@ -40,6 +40,13 @@ reference shows none (the PLAY button is flat green).
 | Panel (recommendation box) | `#434952` | (1230,420)-(1500,430) |
 | Post-game area (dark panel) | `#202329` | (1230,555)-(1750,740) |
 | Running-game icon | `#82c12a` | (945,519) |
+| Featured card strip / outline / body | `#1b6192` / `#4a7a9e` / `#2a2f36` | (1240,768)-(1330,785), left edge (1229,820), body (1240,795)-(1600,860); the real card has a soft gradient, Kettle draws it flat |
+| Featured "FEATURED" / kind / title text | `#e8ffff` / `#969ca3` / `#d0d3d9` | (1240,770), (1304,806), (1304,827) |
+| Page section title (ACTIVITY, FRIENDS WHO PLAY) | `#a0a4a7` | (1229,906), (1650,761) |
+| Friends box fill / edge / text | `#272c32` / `#3a4047` / `#cbcfd2` | (1655,790)-(1695,800), x 1650, (1662,796) |
+| Friend name / rich presence line | `#ecf8e6` / `#a0b29a` | (1702,837), (1702,853) |
+| Link ("View all friends who play", "View Latest News") | `#8f9498` | (1692,902)-(1815,936), (1498,987) |
+| Date group header / rule above it | `#8c8e90` / `#323337` | "TODAY" (1229,1016), line y 1023 |
 
 ## Sizes and positions
 
@@ -65,6 +72,9 @@ reference shows none (the PLAY button is flat green).
 | LAST PLAYED / PLAY TIME | x 1411 and x 1518, 13 px | y 312 scan |
 | Gear / info / heart | 32 x 32, radius 4, 10 px apart, ending x 1837 | x 1737 scan |
 | Tab box | y 357-395 (38 px), x 1229-1837; texts at +23 px with 68 px between, "..." at -44 px | scans |
+| Game page columns | left = rest (389), gap 32, right 187; both start 24 px below the tab box in Kettle (Steam has the recommendation box and post-game summary in between, which Kettle does not have) | x 1229-1618, 1650-1837 |
+| Featured card | 389 x 100, strip 27 px, icon 36 px at x +20, kind text 13 px caps at x +75, title 19 px | y 765-865 |
+| Right boxes | section title 14 px, 9 px gap, box 1 px edge radius 2, padding 11, 30 px between sections | y 761-951 |
 | Radii | list rows 0, boxes and buttons 2, icon buttons 4 | zoomed crops |
 
 ## Behaviour: Steam against Kettle
@@ -92,7 +102,7 @@ reference shows none (the PLAY button is flat green).
 | Escape in a drop-down or popup | closes only the popup | same: the Settings and Properties windows ignore Escape while a popup is open or a field has the keyboard |
 | Escape in the main window | goes back | same, unless a menu, dialog or text field is active |
 
-Not done: Steam's penguin (Linux only) filter icon, the wallet balance, cloud status icon, the faint logo
+Not done on the game page: the "Say something about this game" box, the recommendation box and post-game summary, the Steam Workshop / guides / reviews strips, the Featured card's gradient (Kettle's is flat by rule). Not done: Steam's penguin (Linux only) filter icon, the wallet balance, cloud status icon, the faint logo
 watermark in the Home box, store-tag based dynamic collections.
 
 ## What is tested

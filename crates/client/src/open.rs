@@ -6,9 +6,13 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 /// Only Valve's store is opened from the UI; anything else is refused.
-const ALLOWED_PREFIXES: [&str; 9] = [
+const ALLOWED_PREFIXES: [&str; 11] = [
     "https://store.steampowered.com/",
     "https://help.steampowered.com/",
+    // Community Hub, discussions, guides and groups links on game pages.
+    "https://steamcommunity.com/",
+    // News posts (game page Activity) that Steam hosts outside the store.
+    "https://steamstore-a.akamaihd.net/news/",
     "https://github.com/SeniorMatt/kettle",
     "https://www.protondb.com/app/",
     // Trailers (mp4/webm) from Steam's video CDN, opened in the system player.
@@ -97,6 +101,8 @@ mod tests {
     fn trailers_on_the_video_cdn_are_allowed() {
         assert!(super::allowed("https://video.fastly.steamstatic.com/store_trailers/1/2/movie_max.mp4"));
         assert!(super::allowed("https://store.steampowered.com/app/620"));
+        assert!(super::allowed("https://steamcommunity.com/app/440/discussions/"));
+        assert!(!super::allowed("https://steamcommunity.com.evil.example/app/440"));
         assert!(!super::allowed("http://video.fastly.steamstatic.com/store_trailers/1.mp4"));
         assert!(!super::allowed("https://video.fastly.steamstatic.com.evil.example/store_trailers/1.mp4"));
         assert!(!super::allowed("https://video.fastly.steamstatic.com/other/1.mp4"));

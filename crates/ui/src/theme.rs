@@ -396,3 +396,24 @@ pub const TOP_MENU_TEXT: Color32 = Color32::from_rgb(0x89, 0x8f, 0x96);
 /// Top of the sidebar below the Home strip is lighter and fades into the list colour over about 280 px (measured
 /// #2d3038 at y 124, #292e35 at y 200, #242830 from y 400).
 pub const SIDE_BG_TOP: Color32 = Color32::from_rgb(0x2c, 0x30, 0x37);
+
+// ---- game page, below the tab box (sampled from Steam, TF2 page in steam-vs-kettle.webp) ----
+pub const GP_FEATURED_HEADER: Color32 = Color32::from_rgb(0x1b, 0x61, 0x92); // sampled from Steam: "FEATURED" strip
+pub const GP_FEATURED_BORDER: Color32 = Color32::from_rgb(0x4a, 0x7a, 0x9e); // sampled from Steam: 1 px outline (#5a83a3 left, #3a5567 bottom)
+pub const GP_FEATURED_BODY: Color32 = Color32::from_rgb(0x2a, 0x2f, 0x36); // sampled from Steam (#282c31 left, #2c3239 right)
+pub const GP_FEATURED_TEXT: Color32 = Color32::from_rgb(0xe8, 0xff, 0xff); // sampled from Steam: "FEATURED"
+pub const GP_FEATURED_TYPE: Color32 = Color32::from_rgb(0x96, 0x9c, 0xa3); // sampled from Steam: "SMALL UPDATE / PATCH NOTES"
+pub const GP_FEATURED_TITLE: Color32 = Color32::from_rgb(0xd0, 0xd3, 0xd9); // sampled from Steam: event title
+pub const GP_SECTION_TITLE: Color32 = Color32::from_rgb(0xa0, 0xa4, 0xa7); // sampled from Steam: ACTIVITY / FRIENDS WHO PLAY
+pub const GP_BOX_BG: Color32 = Color32::from_rgb(0x27, 0x2c, 0x32); // sampled from Steam: friends box (#262c31 top, #2a2f37 bottom)
+pub const GP_BOX_BORDER: Color32 = Color32::from_rgb(0x3a, 0x40, 0x47); // sampled from Steam: friends box edge
+pub const GP_BOX_TEXT: Color32 = Color32::from_rgb(0xcb, 0xcf, 0xd2); // sampled from Steam: "1 friend is playing right now"
+pub const GP_FRIEND_NAME: Color32 = Color32::from_rgb(0xec, 0xf8, 0xe6); // sampled from Steam: friend in game
+pub const GP_FRIEND_RICH: Color32 = Color32::from_rgb(0xa0, 0xb2, 0x9a); // sampled from Steam: rich presence line
+pub const GP_LINK: Color32 = Color32::from_rgb(0x8f, 0x94, 0x98); // sampled from Steam: "View all friends who play", "View Latest News"
+pub const GP_DATE_HEAD: Color32 = Color32::from_rgb(0x8c, 0x8e, 0x90); // sampled from Steam: "TODAY"
+pub const GP_DATE_LINE: Color32 = Color32::from_rgb(0x32, 0x33, 0x37); // sampled from Steam: rule above the date
+pub const GP_FEATURED_H: f32 = 100.0; // measured: card y 425-525
+pub const GP_FEATURED_HEADER_H: f32 = 27.0; // measured: strip y 425-452
+pub const GP_RIGHT_W: f32 = 187.0; // measured: right column x 715-902
+pub const GP_COL_GAP: f32 = 32.0; // measured: left column ends x 683

@@ -25,7 +25,7 @@ mod overlay;
 mod overlay_panel;
 mod profile;
 mod properties;
-pub mod protondb_badge;
+mod protondb_badge;
 mod settings_downloads;
 mod settings_extra;
 mod settings_gamescope;

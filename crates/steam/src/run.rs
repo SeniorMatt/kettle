@@ -446,6 +446,12 @@ pub struct Prepared {
 }
 
 /// Launch data for `appid` from the official client's `appinfo.vdf` in any Steam root.
+/// Does the game have a Linux build? `None` when Steam's appinfo doesn't know the app (or can't be read).
+pub fn has_native_linux(appid: u32) -> Option<bool> {
+    let info = appinfo_for(appid).ok()??;
+    Some(info.launch.iter().any(native_entry) || info.oslist.iter().any(|o| o.eq_ignore_ascii_case("linux")))
+}
+
 pub fn appinfo_for(appid: u32) -> Result<Option<AppInfo>> {
     for root in local::steam_roots() {
         let path = AppInfoFile::path_in(&root);
