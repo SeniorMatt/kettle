@@ -35,7 +35,7 @@ pub fn games(target: usize) -> Vec<Game> {
         let lap = i / ids.len();
         let base = installed.get(&id).map(|a| a.name.clone()).unwrap_or_else(|| match id {
             DEMO_DOWNLOAD_APP => "Steamworks SDK Redist".to_string(),
-            _ => format!("App {id}"),
+            _ => known_name(id).map_or_else(|| format!("App {id}"), str::to_string),
         });
         let name = if lap == 0 { base } else { format!("{base} ({})", lap + 1) };
         let mut g = Game::new(AppId(id), name);
@@ -45,4 +45,38 @@ pub fn games(target: usize) -> Vec<Game> {
     }
     out.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
     out
+}
+
+/// Names of well-known apps, so demo screenshots show real titles even without a local Steam.
+fn known_name(id: u32) -> Option<&'static str> {
+    const NAMES: &[(u32, &str)] = &[
+        (220, "Half-Life 2"),
+        (400, "Portal"),
+        (440, "Team Fortress 2"),
+        (550, "Left 4 Dead 2"),
+        (570, "Dota 2"),
+        (620, "Portal 2"),
+        (730, "Counter-Strike 2"),
+        (4000, "Garry's Mod"),
+        (105600, "Terraria"),
+        (211820, "Starbound"),
+        (239140, "Dying Light"),
+        (252490, "Rust"),
+        (271590, "Grand Theft Auto V"),
+        (275850, "No Man's Sky"),
+        (292030, "The Witcher 3: Wild Hunt"),
+        (322330, "Don't Starve Together"),
+        (367520, "Hollow Knight"),
+        (374320, "DARK SOULS III"),
+        (413150, "Stardew Valley"),
+        (489830, "The Elder Scrolls V: Skyrim Special Edition"),
+        (504230, "Celeste"),
+        (646570, "Slay the Spire"),
+        (1086940, "Baldur's Gate 3"),
+        (1091500, "Cyberpunk 2077"),
+        (1145360, "Hades"),
+        (1174180, "Red Dead Redemption 2"),
+        (1245620, "ELDEN RING"),
+    ];
+    NAMES.iter().find(|(i, _)| *i == id).map(|(_, n)| *n)
 }

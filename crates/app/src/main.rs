@@ -29,8 +29,6 @@ struct App {
     overlay_host: overlay_host::Host,
     /// The tray icon, while "Show Kettle in the tray" is on.
     tray: Option<tray::Tray>,
-    /// (library revision, running games) the tray's recent-games list was built from.
-    tray_recent_key: (u64, usize),
     /// The window was hidden to the tray by closing it.
     quitting: bool,
     /// "Start minimized" is decided once, when the tray shows up (or after a few seconds without one).
@@ -75,15 +73,6 @@ impl App {
             t.stop();
         }
         let Some(tray) = &self.tray else { return };
-        // Recent games for the menu, rebuilt only when the library or the running games changed.
-        let key = (self.client.state().library_rev, self.client.state().running.len());
-        if key != self.tray_recent_key {
-            self.tray_recent_key = key;
-            let mut games: Vec<_> =
-                self.client.state().games.iter().filter(|g| g.last_played > 0 && g.install.is_installed()).collect();
-            games.sort_by_key(|g| std::cmp::Reverse(g.last_played));
-            tray.set_recent(games.into_iter().take(5).map(|g| (g.app_id.0, g.name.clone())).collect());
-        }
         if !self.start_checked {
             if tray.active() {
                 self.start_checked = true;
@@ -104,7 +93,6 @@ impl App {
                 tray::Msg::Friends => Some(TrayGo::Friends),
                 tray::Msg::Downloads => Some(TrayGo::Downloads),
                 tray::Msg::Settings => Some(TrayGo::Settings),
-                tray::Msg::Play(id) => Some(TrayGo::Play(id)),
                 tray::Msg::Exit => {
                     self.quitting = true;
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -221,7 +209,7 @@ fn main() -> eframe::Result {
             .with_decorations(false)
             .with_icon(app_icon())
             .with_app_id(theme::APP_ID)
-            .with_inner_size([1280.0, 800.0])
+            .with_inner_size(start_size())
             .with_min_inner_size([900.0, 560.0]),
         ..Default::default()
     };
@@ -264,7 +252,6 @@ fn main() -> eframe::Result {
                 toggles,
                 overlay_host,
                 tray: None,
-                tray_recent_key: (u64::MAX, 0),
                 quitting: false,
                 start_checked: false,
             }))
@@ -283,6 +270,17 @@ fn play_arg(mut args: impl Iterator<Item = String>) -> Option<u32> {
         }
     }
     None
+}
+
+/// Window size at start: 1280 x 800, or `KETTLE_SHOT_SIZE=<w>x<h>` (screenshots of the check workflow).
+fn start_size() -> [f32; 2] {
+    std::env::var("KETTLE_SHOT_SIZE")
+        .ok()
+        .and_then(|v| {
+            let (w, h) = v.split_once('x')?;
+            Some([w.parse().ok()?, h.parse().ok()?])
+        })
+        .unwrap_or([1280.0, 800.0])
 }
 
 #[cfg(test)]

@@ -397,8 +397,7 @@ impl Overlays {
 }
 
 /// A modal with our own frame: padded, themed, with a hairline border.
-/// Steam's modal: `DialogContent` background, 24 px padding, 2 px radius, and the 1 px blue gradient bar
-/// (`ModalPosition_TopBar`) across the top, drawn by [`bar`].
+/// Steam's modal: `DialogContent` background, 24 px padding, small radius, flat.
 fn modal(id: Id) -> egui::Modal {
     let frame = egui::Frame::new()
         .fill(theme::MODAL_BG)
@@ -408,15 +407,9 @@ fn modal(id: Id) -> egui::Modal {
     egui::Modal::new(id).frame(frame)
 }
 
-/// Title of a dialog (`DialogHeader`, 22 px bold) and the blue bar over the dialog's top edge.
+/// Title of a dialog (`DialogHeader`, 22 px bold).
 fn title(ui: &mut Ui, text: &str) {
     theme::dialog_style(ui);
-    let r = ui.max_rect();
-    let top = egui::Rect::from_min_size(
-        egui::pos2(r.left() - f32::from(theme::MODAL_PAD), r.top() - f32::from(theme::MODAL_PAD)),
-        egui::vec2(r.width() + 2.0 * f32::from(theme::MODAL_PAD), 1.0),
-    );
-    widgets::gradient(ui, top, theme::MODAL_BAR_A, theme::MODAL_BAR_B);
     widgets::page_title(ui, text);
 }
 

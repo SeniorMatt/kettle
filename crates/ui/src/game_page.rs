@@ -3,9 +3,8 @@
 
 use crate::dialogs::Overlays;
 use crate::textures::{Art, Textures};
-use crate::{fmt, theme, widgets};
-use egui::{Color32, Pos2, Rect, RichText, Ui, Vec2};
-use egui_phosphor::regular as icon;
+use crate::{anim, fmt, steam_icons, theme, widgets};
+use egui::{Color32, Id, Pos2, Rect, RichText, Ui, Vec2};
 use sr_client::{Client, CollCmd, Command, DownloadStatus};
 use sr_model::{AppId, ArtKind, InstallState};
 
@@ -14,34 +13,65 @@ pub fn show(ui: &mut Ui, client: &mut Client, tex: &mut Textures, app: AppId, ov
         client.send(Command::Select(None));
         return;
     };
+    page_background(ui);
     egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
         ui.spacing_mut().item_spacing = Vec2::ZERO;
-        hero(ui, client, tex, app, &game.name);
+        hero(ui, client, tex, &game);
         action_bar(ui, client, &game, ov);
         details(ui, client, &game);
     });
 }
 
-fn hero(ui: &mut Ui, client: &Client, tex: &mut Textures, app: AppId, name: &str) {
+/// Flat down to the middle of the page, then a darkening towards the bottom, as in the official client.
+fn page_background(ui: &Ui) {
+    let r = ui.max_rect();
+    let mid = r.top() + r.height() * 0.5;
+    ui.painter().rect_filled(Rect::from_min_max(r.min, Pos2::new(r.right(), mid)), 0.0, theme::PAGE_BG_TOP);
+    let mut mesh = egui::epaint::Mesh::default();
+    for (pos, c) in [
+        (Pos2::new(r.left(), mid), theme::PAGE_BG_TOP),
+        (Pos2::new(r.right(), mid), theme::PAGE_BG_TOP),
+        (r.right_bottom(), theme::PAGE_BG_BOTTOM),
+        (r.left_bottom(), theme::PAGE_BG_BOTTOM),
+    ] {
+        mesh.colored_vertex(pos, c);
+    }
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(0, 2, 3);
+    ui.painter().add(mesh);
+}
+
+fn hero(ui: &mut Ui, client: &Client, tex: &mut Textures, game: &sr_model::Game) {
+    let (app, name) = (game.app_id, game.name.as_str());
     let w = ui.available_width();
-    let h = (w * theme::HERO_ASPECT).clamp(240.0, 460.0);
+    let h = (w * theme::HERO_ASPECT).clamp(180.0, 460.0);
     let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), egui::Sense::hover());
     match tex.get(client, app, ArtKind::Hero) {
         Art::Ready(t, a) => widgets::image_cover(ui, rect, t, Color32::WHITE.gamma_multiply(a)),
         Art::Loading => widgets::placeholder(ui, rect),
-        Art::Missing => widgets::vgradient(ui, rect, theme::BG_CAPSULE, theme::BG_MAIN),
+        Art::Missing => {
+            ui.painter().rect_filled(rect, 0.0, theme::BG_CAPSULE);
+        }
     }
-    // Fade into the action bar.
-    let fade = Rect::from_min_max(Pos2::new(rect.left(), rect.bottom() - 90.0), rect.right_bottom());
-    widgets::vgradient(ui, fade, Color32::TRANSPARENT, Color32::from_black_alpha(140));
-
-    let logo_bounds =
-        Rect::from_min_size(Pos2::new(rect.left() + 40.0, rect.top() + h * 0.25), Vec2::new(w * 0.36, h * 0.6));
+    // "INSTALLED" tag in the top right corner.
+    if game.install.is_installed() {
+        let g = ui.painter().layout_no_wrap("INSTALLED".to_string(), theme::regular(12.0), theme::TEXT_HEADING);
+        let tag = Rect::from_min_size(
+            Pos2::new(rect.right() - 20.0 - g.size().x - 12.0, rect.top() + 16.0),
+            g.size() + Vec2::new(12.0, 8.0),
+        );
+        ui.painter().rect_filled(tag, 2.0, Color32::from_black_alpha(110));
+        ui.painter().galley(tag.min + Vec2::new(6.0, 4.0), g, theme::TEXT_HEADING);
+    }
+    let logo_bounds = Rect::from_min_max(
+        Pos2::new(rect.left() + 28.0, rect.top() + h * 0.2),
+        Pos2::new(rect.left() + 28.0 + w * 0.36, rect.bottom() - 20.0),
+    );
     match tex.get(client, app, ArtKind::Logo) {
         Art::Ready(t, a) => widgets::image_fit_bottom_left(ui, logo_bounds, t, a),
         Art::Missing => {
             let p = Pos2::new(logo_bounds.left(), logo_bounds.bottom());
-            ui.painter().text(p, egui::Align2::LEFT_BOTTOM, name, theme::bold(40.0), Color32::WHITE);
+            ui.painter().text(p, egui::Align2::LEFT_BOTTOM, name, theme::bold(36.0), Color32::WHITE);
         }
         Art::Loading => {}
     }
@@ -66,28 +96,44 @@ pub fn activate(client: &mut Client, ov: &mut Overlays, app: AppId) {
 }
 
 fn action_bar(ui: &mut Ui, client: &mut Client, game: &sr_model::Game, ov: &mut Overlays) {
-    let frame = egui::Frame::new().fill(theme::BG_ACTION_BAR).inner_margin(egui::Margin::symmetric(32, 16));
+    let frame = egui::Frame::new().fill(theme::BG_ACTION_BAR).inner_margin(egui::Margin {
+        left: 20,
+        right: 23,
+        top: 10,
+        bottom: 9,
+    });
     frame.show(ui, |ui| {
+        ui.set_width(ui.available_width());
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 32.0;
+            ui.spacing_mut().item_spacing.x = 0.0;
             primary_button(ui, client, game, ov);
+            ui.add_space(62.0);
             stat(ui, "LAST PLAYED", &fmt::last_played(game.last_played, fmt::now_unix()));
+            ui.add_space(18.0);
             stat(ui, "PLAY TIME", &fmt::playtime(game.playtime_minutes));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                // Left to right on screen: gear, info, favourite.
+                ui.spacing_mut().item_spacing.x = 10.0;
+                // Left to right on screen: gear, info, heart.
                 let fav = client.state().collections.is_favorite(game.app_id);
-                let star = square_button(ui, icon::STAR, if fav { theme::ACCENT } else { theme::TEXT }, "Favorite");
-                if star.clicked() {
+                let heart = square_button(ui, Icon::Heart, fav, "Favorite");
+                if heart.clicked() {
                     client.send(Command::Collections(CollCmd::SetFavorite(game.app_id, !fav)));
                 }
-                let info = square_button(ui, icon::INFO, theme::TEXT, "Game info");
+                let info = square_button(ui, Icon::Info, false, "Game info");
                 info_menu(&info, game);
-                let gear = square_button(ui, icon::GEAR, theme::TEXT, "Manage");
+                let gear = square_button(ui, Icon::Gear, false, "Manage");
                 crate::game_menu::manage(&gear, client, game, ov);
             });
         });
     });
+}
+
+/// The icons of the page's buttons.
+#[derive(Clone, Copy, PartialEq)]
+enum Icon {
+    Gear,
+    Info,
+    Heart,
 }
 
 /// The info (i) button's popup: where the game lives and how big it is.
@@ -105,54 +151,89 @@ fn info_menu(anchor: &egui::Response, game: &sr_model::Game) {
     });
 }
 
-/// Steam's action-bar icon button: a 48 px square, light fill, icon centered.
-fn square_button(ui: &mut Ui, glyph: &str, color: Color32, tip: &str) -> egui::Response {
+/// Steam's action-bar icon button: a 32 px square, 4 px radius, flat grey fill, light icon.
+fn square_button(ui: &mut Ui, icon: Icon, active: bool, tip: &str) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(Vec2::splat(theme::PAGE_ICON_BTN), egui::Sense::click());
-    let bg = if resp.hovered() { theme::PAGE_ICON_BTN_BG_HOVER } else { theme::PAGE_ICON_BTN_BG };
-    ui.painter().rect_filled(rect, theme::RADIUS, bg);
-    let c = if resp.hovered() && color == theme::TEXT { Color32::WHITE } else { color };
-    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, glyph, theme::regular(22.0), c);
+    let t = anim::animate_bool(ui.ctx(), resp.id.with("hover"), resp.hovered(), 0.12);
+    let bg = theme::PAGE_ICON_BTN_BG.lerp_to_gamma(theme::PAGE_ICON_BTN_BG_HOVER, t);
+    ui.painter().rect_filled(rect, 4.0, bg);
+    let base = if active { theme::ACCENT } else { Color32::from_rgb(0xa3, 0xa2, 0xa7) };
+    let color = base.lerp_to_gamma(Color32::WHITE, 0.5 * t);
+    let p = ui.painter();
+    match icon {
+        Icon::Gear => steam_icons::gear(p, rect.center(), 17.0, color, bg),
+        Icon::Info => steam_icons::info(p, rect.center(), 17.0, color, bg),
+        Icon::Heart => steam_icons::heart(p, rect.center(), 17.0, color),
+    }
     resp.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(tip)
 }
 
-/// The big button: 48 px high, at least 164 px wide, icon and bold label centered.
-fn big_button(ui: &mut Ui, glyph: &str, label: &str, colors: (Color32, Color32), enabled: bool) -> egui::Response {
-    let text = format!("{glyph}  {label}");
-    let galley = ui.painter().layout_no_wrap(text, theme::bold(17.0), Color32::WHITE);
-    let size = Vec2::new((galley.size().x + 48.0).max(theme::PAGE_PLAY_MIN_W), theme::PAGE_ACTION_H);
+/// What the big button shows before its label.
+#[derive(Clone, Copy)]
+enum Glyph {
+    Play,
+    Download,
+    Stop,
+}
+
+/// The big button: 33 px high, the icon and the upper-case label. `colors.0` is the button, `colors.1` the
+/// separate drop-down arrow segment next to it (None for buttons without one). Returns both responses.
+fn big_button(
+    ui: &mut Ui,
+    glyph: Glyph,
+    label: &str,
+    colors: (Color32, Option<Color32>),
+    enabled: bool,
+) -> (egui::Response, Option<egui::Response>) {
+    let text_color = if matches!(glyph, Glyph::Play) { Color32::from_rgb(0xdf, 0xff, 0xe5) } else { Color32::WHITE };
+    let galley = ui.painter().layout_no_wrap(label.to_uppercase(), theme::regular(17.0), text_color);
+    let size =
+        Vec2::new((galley.size().x + 15.0 + 12.0 + 11.0 + 14.0).max(theme::PAGE_PLAY_MIN_W), theme::PAGE_ACTION_H);
     let (rect, resp) = ui.allocate_exact_size(size, if enabled { egui::Sense::click() } else { egui::Sense::hover() });
-    let k = if !enabled {
-        1.0
-    } else if resp.is_pointer_button_down_on() {
-        0.85
-    } else if resp.hovered() {
-        1.15
+    let t = anim::animate_bool(ui.ctx(), resp.id.with("hover"), resp.hovered() && enabled, 0.12);
+    let bg = if enabled {
+        widgets::shade(colors.0, t, resp.is_pointer_button_down_on())
     } else {
-        1.0
+        theme::PAGE_ICON_BTN_BG_HOVER
     };
-    if enabled {
-        widgets::gradient(ui, rect, colors.0.gamma_multiply(k), colors.1.gamma_multiply(k));
-    } else {
-        ui.painter().rect_filled(rect, theme::RADIUS, theme::PAGE_ICON_BTN_BG_HOVER);
+    ui.painter().rect_filled(rect, 2.0, bg);
+    let fg = if enabled { text_color } else { theme::TEXT_DIM };
+    let icon_c = Pos2::new(rect.left() + 15.0 + 6.0, rect.center().y);
+    match glyph {
+        Glyph::Play => steam_icons::play_triangle(ui.painter(), icon_c, 12.0, fg),
+        Glyph::Download => steam_icons::arrow_down(ui.painter(), icon_c, 12.0, fg),
+        Glyph::Stop => steam_icons::window_close(ui.painter(), icon_c, fg),
     }
-    let fg = if enabled { Color32::WHITE } else { theme::TEXT_DIM };
-    ui.painter().galley_with_override_text_color(rect.center() - galley.size() / 2.0, galley, fg);
-    if enabled { resp.on_hover_cursor(egui::CursorIcon::PointingHand) } else { resp }
+    ui.painter().galley_with_override_text_color(
+        Pos2::new(rect.left() + 15.0 + 12.0 + 11.0, rect.center().y - galley.size().y / 2.0),
+        galley,
+        fg,
+    );
+    let main = if enabled { resp.on_hover_cursor(egui::CursorIcon::PointingHand) } else { resp };
+    let arrow = colors.1.map(|c| {
+        ui.add_space(3.0);
+        let (r, resp) = ui.allocate_exact_size(Vec2::new(24.0, theme::PAGE_ACTION_H), egui::Sense::click());
+        let t = anim::animate_bool(ui.ctx(), resp.id.with("hover"), resp.hovered(), 0.12);
+        ui.painter().rect_filled(r, 2.0, widgets::shade(c, t, resp.is_pointer_button_down_on()));
+        steam_icons::play_dropdown(ui.painter(), r.center(), Color32::WHITE);
+        resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+    });
+    (main, arrow)
 }
 
 /// Play, Stop, Install, Update or the state of the download, in the same spot.
 fn primary_button(ui: &mut Ui, client: &mut Client, game: &sr_model::Game, ov: &mut Overlays) {
     let app = game.app_id;
-    let play = (theme::PAGE_PLAY_A, theme::PAGE_PLAY_B);
-    let blue = (theme::PAGE_STOP_A, theme::PAGE_STOP_B);
+    let play = (theme::PAGE_PLAY_A, Some(theme::PAGE_PLAY_B));
+    let blue = (theme::PAGE_STOP_A, None);
     if client.state().running.contains_key(&app) {
-        if big_button(ui, icon::X, "Stop", blue, true).clicked() {
+        if big_button(ui, Glyph::Stop, "Stop", blue, true).0.clicked() {
             client.send(Command::Stop(app));
         }
         return;
     }
     if client.state().starting_steam.contains(&app) {
-        big_button(ui, icon::PLAY, "Starting Steam...", play, false);
+        big_button(ui, Glyph::Play, "Starting Steam...", (theme::PAGE_PLAY_A, None), false);
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(500));
         return;
     }
@@ -166,24 +247,28 @@ fn primary_button(ui: &mut Ui, client: &mut Client, game: &sr_model::Game, ov: &
         DownloadStatus::None => None,
     };
     if let Some(label) = label {
-        if big_button(ui, icon::DOWNLOAD_SIMPLE, &label, blue, true).clicked() {
+        if big_button(ui, Glyph::Download, &label, blue, true).0.clicked() {
             ov.goto = Some(crate::Nav::Downloads);
         }
         return;
     }
     match game.install {
         InstallState::Installed { .. } => {
-            if big_button(ui, icon::PLAY, "Play", play, true).clicked() {
+            let (main, arrow) = big_button(ui, Glyph::Play, "Play", play, true);
+            if main.clicked() {
                 client.send(Command::Play(app));
+            }
+            if let Some(arrow) = arrow {
+                crate::game_menu::play_menu(&arrow, client, game, ov);
             }
         }
         InstallState::UpdateRequired { .. } => {
-            if big_button(ui, icon::DOWNLOAD_SIMPLE, "Update", blue, true).clicked() {
+            if big_button(ui, Glyph::Download, "Update", blue, true).0.clicked() {
                 client.send(Command::Update(app));
             }
         }
         _ => {
-            if big_button(ui, icon::DOWNLOAD_SIMPLE, "Install", blue, true).clicked() {
+            if big_button(ui, Glyph::Download, "Install", blue, true).0.clicked() {
                 ov.open_install(app, &game.name);
             }
         }
@@ -192,77 +277,128 @@ fn primary_button(ui: &mut Ui, client: &mut Client, game: &sr_model::Game, ov: &
 
 fn stat(ui: &mut Ui, label: &str, value: &str) {
     ui.vertical(|ui| {
-        ui.add_space(4.0);
+        ui.spacing_mut().item_spacing.y = 0.0;
         ui.label(RichText::new(label).font(theme::regular(theme::PAGE_STAT_LABEL)).color(theme::PAGE_STAT_LABEL_COLOR));
-        ui.add_space(2.0);
-        ui.label(RichText::new(value).font(theme::regular(theme::PAGE_STAT_VALUE)).color(theme::TEXT));
+        ui.label(RichText::new(value).font(theme::regular(theme::PAGE_STAT_VALUE)).color(theme::PAGE_STAT_VALUE_COLOR));
     });
 }
 
-/// Links under the action bar. Store Page opens inside Kettle, the rest in the browser.
+/// The box under the play bar: Store Page, Community Hub and Discussions, and "..." for the rest. Store Page
+/// opens inside Kettle, the others in the browser.
 fn tab_strip(ui: &mut Ui, client: &mut Client, game: &sr_model::Game) {
     let id = game.app_id.0;
     let name = game.name.replace(' ', "%20");
     let tabs: [(&str, Option<String>); 7] = [
         ("Store Page", None),
-        ("DLC", Some(format!("https://store.steampowered.com/dlc/{id}"))),
         ("Community Hub", Some(format!("https://steamcommunity.com/app/{id}"))),
-        ("Find Groups", Some(format!("https://steamcommunity.com/search/groups/?text={name}"))),
         ("Discussions", Some(format!("https://steamcommunity.com/app/{id}/discussions/"))),
+        ("DLC", Some(format!("https://store.steampowered.com/dlc/{id}"))),
+        ("Find Groups", Some(format!("https://steamcommunity.com/search/groups/?text={name}"))),
         ("Guides", Some(format!("https://steamcommunity.com/app/{id}/guides/"))),
         ("Support", Some(format!("https://help.steampowered.com/en/wizard/HelpWithGame/?appid={id}"))),
     ];
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), theme::PAGE_TAB_H), egui::Sense::hover());
-    ui.painter().rect_filled(rect, 0.0, theme::BG_TOP);
-    ui.scope_builder(egui::UiBuilder::new().max_rect(rect.shrink2(Vec2::new(32.0, 0.0))), |ui| {
-        ui.horizontal_centered(|ui| {
-            ui.spacing_mut().item_spacing.x = 28.0;
-            for (label, url) in tabs {
-                if widgets::text_tab(ui, label, theme::medium(theme::PAGE_TAB_FONT), false).clicked() {
-                    match url {
-                        Some(u) => client.send(Command::OpenUrl(u)),
-                        None => client.send(Command::OpenStorePage(game.app_id)),
-                    }
+    let mut open: Option<(usize, Option<String>)> = None;
+    let w = ui.available_width() - 40.0;
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        ui.add_space(20.0);
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(w, theme::PAGE_TAB_H), egui::Sense::hover());
+        ui.painter().rect_filled(rect, 2.0, theme::TAB_BOX_BG);
+        ui.painter().rect_stroke(rect, 2.0, egui::Stroke::new(1.0, theme::TAB_BOX_BORDER), egui::StrokeKind::Inside);
+        let mut x = rect.left() + 23.0;
+        for (i, (label, url)) in tabs.iter().take(3).enumerate() {
+            let g =
+                ui.painter().layout_no_wrap(label.to_string(), theme::regular(theme::PAGE_TAB_FONT), theme::TAB_TEXT);
+            let r = Rect::from_min_size(Pos2::new(x, rect.center().y - g.size().y / 2.0), g.size());
+            let resp = ui.interact(r.expand2(Vec2::new(12.0, 10.0)), Id::new(("game-tab", i)), egui::Sense::click());
+            let t = anim::animate_bool(ui.ctx(), resp.id.with("h"), resp.hovered(), anim::FAST);
+            ui.painter().galley_with_override_text_color(r.min, g, theme::TAB_TEXT.lerp_to_gamma(theme::TEXT, t));
+            if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                open = Some((i, url.clone()));
+            }
+            x += r.width() + 68.0;
+        }
+        // "..." with the rest of the links.
+        let c = Pos2::new(rect.right() - 44.0, rect.center().y);
+        let more = ui.interact(
+            Rect::from_center_size(c, Vec2::new(36.0, 28.0)),
+            Id::new("game-tab-more"),
+            egui::Sense::click(),
+        );
+        let t = anim::animate_bool(ui.ctx(), more.id.with("h"), more.hovered(), anim::FAST);
+        steam_icons::ellipsis(ui.painter(), c, theme::TAB_TEXT.lerp_to_gamma(theme::TEXT, t));
+        widgets::popup_menu(&more.on_hover_cursor(egui::CursorIcon::PointingHand), |ui| {
+            for (i, (label, url)) in tabs.iter().enumerate().skip(3) {
+                if ui.button(*label).clicked() {
+                    open = Some((i, url.clone()));
+                    ui.close();
                 }
             }
         });
     });
+    if let Some((_, url)) = open {
+        match url {
+            Some(u) => client.send(Command::OpenUrl(u)),
+            None => client.send(Command::OpenStorePage(game.app_id)),
+        }
+    }
+}
+
+/// An upper-case section heading like the official page's ("POST-GAME SUMMARY").
+fn section_heading(ui: &mut Ui, text: &str) {
+    ui.label(RichText::new(text).font(theme::regular(14.0)).color(theme::TEXT_HEADING));
+    ui.add_space(8.0);
 }
 
 fn details(ui: &mut Ui, client: &mut Client, game: &sr_model::Game) {
     tab_strip(ui, client, game);
-    let playing: Vec<(String, bool)> = client
+    let playing: Vec<String> = client
         .state()
         .friends
         .friends
         .iter()
         .filter(|f| f.game.as_ref().is_some_and(|g| g.app_id == game.app_id.0))
-        .map(|f| (f.display_name(), true))
+        .map(|f| f.display_name())
         .collect();
-    egui::Frame::new().inner_margin(egui::Margin::symmetric(32, 24)).show(ui, |ui| {
+    egui::Frame::new().inner_margin(egui::Margin { left: 20, right: 23, top: 20, bottom: 24 }).show(ui, |ui| {
         ui.horizontal_top(|ui| {
-            let right_w = if playing.is_empty() { 0.0 } else { 260.0 };
+            ui.spacing_mut().item_spacing.x = 0.0;
+            let right_w = if playing.is_empty() { 0.0 } else { 187.0 };
+            let gap = if playing.is_empty() { 0.0 } else { 30.0 };
             ui.vertical(|ui| {
-                ui.set_width((ui.available_width() - right_w - 32.0).max(200.0));
-                ui.label(RichText::new("GAME INFO").font(theme::bold(13.0)).color(theme::TEXT_HEADING));
-                ui.add_space(8.0);
-                let text = match game.install {
-                    InstallState::Installed { ref path, .. } | InstallState::UpdateRequired { ref path, .. } => {
-                        format!("Installed in {path}")
-                    }
-                    _ => "Not installed.".to_string(),
-                };
-                ui.label(RichText::new(text).color(theme::TEXT_DIM));
+                ui.set_width((ui.available_width() - right_w - gap).max(200.0));
+                section_heading(ui, "GAME INFO");
+                egui::Frame::new()
+                    .fill(theme::BG_PANEL_DARK)
+                    .corner_radius(theme::RADIUS)
+                    .inner_margin(egui::Margin::same(12))
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        let text = match game.install {
+                            InstallState::Installed { ref path, .. }
+                            | InstallState::UpdateRequired { ref path, .. } => {
+                                format!("Installed in {path}")
+                            }
+                            _ => "Not installed.".to_string(),
+                        };
+                        ui.label(RichText::new(text).color(theme::TEXT_DIM));
+                    });
             });
             if !playing.is_empty() {
-                ui.add_space(32.0);
+                ui.add_space(gap);
                 ui.vertical(|ui| {
                     ui.set_width(right_w);
-                    ui.label(RichText::new("FRIENDS WHO PLAY").font(theme::bold(13.0)).color(theme::TEXT_HEADING));
-                    ui.add_space(8.0);
-                    for (name, _) in playing.iter().take(12) {
-                        ui.label(RichText::new(name).color(theme::FRIEND_INGAME));
-                    }
+                    section_heading(ui, "FRIENDS WHO PLAY");
+                    egui::Frame::new()
+                        .fill(theme::BG_PANEL_DARK)
+                        .corner_radius(theme::RADIUS)
+                        .inner_margin(egui::Margin::same(12))
+                        .show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            for name in playing.iter().take(12) {
+                                ui.label(RichText::new(name).color(theme::FRIEND_INGAME));
+                            }
+                        });
                 });
             }
         });

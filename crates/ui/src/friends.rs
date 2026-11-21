@@ -1060,18 +1060,25 @@ fn bubble(ui: &mut Ui, mine: bool, text: &str, delivery: &Delivery) {
 pub fn bottom_button(ui: &mut Ui, client: &Client) -> bool {
     let fs = &client.state().friends;
     let unread = fs.unread_total();
-    let label = format!("Friends & Chat  {}", icon::CHAT_CIRCLE);
     let on = anim::animate_bool(ui.ctx(), Id::new("friends-button-on"), fs.open, anim::FAST);
-    let galley = ui.painter().layout_no_wrap(label, theme::medium(13.0), theme::TEXT_DIM);
+    let galley = ui.painter().layout_no_wrap("Friends & Chat".to_string(), theme::regular(13.0), theme::BOTTOM_TEXT);
     let badge_w = if unread > 0 { 30.0 } else { 0.0 };
     let (rect, resp) =
-        ui.allocate_exact_size(vec2(galley.size().x + badge_w + 8.0, ui.available_height()), Sense::click());
+        ui.allocate_exact_size(vec2(galley.size().x + badge_w + 34.0, ui.available_height()), Sense::click());
     let hover = anim::animate_bool(ui.ctx(), resp.id.with("h"), resp.hovered(), anim::FAST);
-    let color = theme::TEXT_DIM.lerp_to_gamma(theme::TEXT, hover).lerp_to_gamma(theme::ACCENT, on);
+    let color = theme::BOTTOM_TEXT.lerp_to_gamma(theme::TEXT, hover).lerp_to_gamma(theme::ACCENT, on);
+    // Text, then Steam's small square icon at the right edge.
     ui.painter().galley_with_override_text_color(
-        Pos2::new(rect.right() - 4.0 - galley.size().x, rect.center().y - galley.size().y / 2.0),
+        Pos2::new(rect.right() - 28.0 - galley.size().x, rect.center().y - galley.size().y / 2.0),
         galley,
         color,
+    );
+    crate::steam_icons::friends_square(
+        ui.painter(),
+        Pos2::new(rect.right() - 12.0, rect.center().y),
+        16.0,
+        color,
+        theme::BG_TOP,
     );
     if unread > 0 {
         badge(ui, Pos2::new(rect.left() + 14.0, rect.center().y), unread);

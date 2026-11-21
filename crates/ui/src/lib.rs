@@ -29,13 +29,15 @@ mod settings_notify;
 mod settings_page;
 mod settings_storage;
 mod sidebar;
+mod steam_icons;
 mod store;
 mod textures;
+#[cfg(test)]
+mod tests;
 pub mod theme;
 mod widgets;
 
-use egui::{Align, Id, Layout, Pos2, RichText, Ui};
-use egui_phosphor::regular as icon;
+use egui::{Align, Id, Layout, RichText, Ui};
 use sr_client::{Client, CollCmd, Command, ConnectionStatus, Screen};
 use sr_model::AppId;
 
@@ -159,6 +161,34 @@ impl AppUi {
             self.started = true;
             if i.start_page == sr_client::StartPage::Store {
                 self.goto(Tab::Store, client);
+            }
+            // Screenshots in the check workflow: `KETTLE_SHOT_OPEN=game:<appid> | settings:<page> | downloads | store`.
+            if let Ok(open) = std::env::var("KETTLE_SHOT_OPEN") {
+                let (what, arg) = open.split_once(':').unwrap_or((open.as_str(), ""));
+                match what {
+                    "game" => {
+                        if let Ok(id) = arg.parse::<u32>() {
+                            self.navigate(ctx, Nav::Game(AppId(id)), client);
+                        }
+                    }
+                    "settings" => {
+                        let tab = match arg {
+                            "interface" => SettingsTab::Interface,
+                            "library" => SettingsTab::Library,
+                            "storage" => SettingsTab::Storage,
+                            "downloads" => SettingsTab::Downloads,
+                            "notifications" => SettingsTab::Notifications,
+                            "compatibility" => SettingsTab::Compatibility,
+                            "ingame" => SettingsTab::InGame,
+                            "privacy" => SettingsTab::Privacy,
+                            _ => SettingsTab::Account,
+                        };
+                        self.navigate(ctx, Nav::Settings(tab), client);
+                    }
+                    "downloads" => self.navigate(ctx, Nav::Downloads, client),
+                    "store" => self.goto(Tab::Store, client),
+                    _ => {}
+                }
             }
         }
     }
@@ -418,133 +448,242 @@ impl AppUi {
     }
 
     fn menu_bar(&mut self, ui: &mut Ui, client: &mut Client) {
-        let frame = egui::Frame::new().fill(theme::BG_TOP).inner_margin(egui::Margin { left: 8, ..Default::default() });
+        let frame = egui::Frame::new().fill(theme::BG_TOP);
         egui::Panel::top("menu").exact_size(theme::MENU_BAR_H).frame(frame).show_separator_line(false).show(ui, |ui| {
             // Empty space in the bar drags the window (the title bar).
             chrome::drag_region(ui);
             ui.horizontal_centered(|ui| {
                 ui.style_mut().override_font_id = Some(theme::regular(13.0));
-                // Plain text items; a box shows only on hover/open.
-                ui.visuals_mut().widgets.inactive.fg_stroke.color = theme::TEXT_HEADING;
-                ui.visuals_mut().widgets.hovered.weak_bg_fill = theme::BG_ROW_SELECTED;
+                ui.spacing_mut().item_spacing.x = 0.0;
+                // Plain text items: no box at rest, brighter text on hover.
                 ui.visuals_mut().widgets.open.weak_bg_fill = theme::MENU_BG;
                 ui.visuals_mut().widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
                 ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
+                ui.add_space(14.0);
+                let (mark, _) = ui.allocate_exact_size(egui::Vec2::splat(16.0), egui::Sense::hover());
+                steam_icons::kettle_mark(ui.painter(), mark.center(), 16.0, theme::TEXT_DIM);
+                ui.add_space(2.0);
                 let mut state = self.bar;
                 let act = menubar::bar(ui, &mut state, client);
                 self.bar = state;
                 if let Some(act) = act {
                     self.do_act(&ui.ctx().clone(), act, client);
                 }
+                let mut account_act = None;
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     chrome::window_buttons(ui);
-                    ui.add_space(10.0);
-                    if let Some(name) = self.display_name(client) {
-                        let chip = ui.label(RichText::new(name).font(theme::medium(13.0)).color(theme::TEXT));
-                        ui.add_space(6.0);
-                        let size = egui::Vec2::splat(20.0);
-                        let (av, _) = ui.allocate_exact_size(size, egui::Sense::hover());
-                        let url = client.state().friends.my_avatar_url().unwrap_or("").to_string();
-                        match self.textures.get_web(client, &url) {
-                            textures::Art::Ready(t, a) => {
-                                widgets::image_cover(ui, av, t, egui::Color32::WHITE.gamma_multiply(a));
-                            }
-                            _ => {
-                                ui.painter().text(
-                                    av.center(),
-                                    egui::Align2::CENTER_CENTER,
-                                    icon::USER_CIRCLE,
-                                    theme::regular(20.0),
-                                    theme::TEXT_DIM,
-                                );
-                            }
-                        }
-                        ui.add_space(8.0);
-                        match &client.state().connection {
-                            ConnectionStatus::Connecting => {
-                                ui.add(egui::Spinner::new().size(12.0)).on_hover_text("Connecting to Steam...");
-                            }
-                            ConnectionStatus::Failed(why) => {
-                                let short = "Can't reach Steam. Retrying...";
-                                ui.label(RichText::new(short).color(theme::ERROR_TEXT).small()).on_hover_text(why);
-                            }
-                            _ => {}
-                        }
-                        chip.on_hover_text(match &client.state().connection {
-                            ConnectionStatus::Online => "Connected to Steam",
-                            ConnectionStatus::Connecting => "Connecting to Steam...",
-                            ConnectionStatus::Failed(_) => "Not connected to Steam",
-                            ConnectionStatus::Offline => "Offline",
-                        });
-                    }
-                    if client.state().refreshing && client.state().connection == ConnectionStatus::Online {
-                        ui.add(egui::Spinner::new().size(12.0)).on_hover_text("Loading your games...");
-                    }
+                    self.top_right(ui, client, &mut account_act);
                 });
+                if let Some(act) = account_act {
+                    self.do_act(&ui.ctx().clone(), act, client);
+                }
             });
         });
     }
 
+    /// Right side of the top bar, laid out right to left: screen button, account pill, bell, announcements.
+    fn top_right(&mut self, ui: &mut Ui, client: &mut Client, act: &mut Option<menubar::Act>) {
+        use egui::{Rect, Sense, vec2};
+        let ctx = ui.ctx().clone();
+        // The "big screen" button: here it toggles full screen.
+        let (r, resp) = ui.allocate_exact_size(vec2(24.0, 26.0), Sense::click());
+        let t = anim::animate_bool(&ctx, resp.id.with("h"), resp.hovered(), anim::FAST);
+        steam_icons::monitor(ui.painter(), r.center(), 14.0, theme::TOP_ICON.lerp_to_gamma(egui::Color32::WHITE, t));
+        if resp.on_hover_text("Full screen").clicked() {
+            let full = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!full));
+        }
+        ui.add_space(13.0);
+        if let Some(name) = self.display_name(client) {
+            let galley = ui.painter().layout_no_wrap(name, theme::regular(13.0), theme::TOP_NAME);
+            let w = 3.0 + 24.0 + 6.0 + galley.size().x + 8.0 + 10.0 + 10.0;
+            let (rect, resp) = ui.allocate_exact_size(vec2(w, 26.0), Sense::click());
+            let t = anim::animate_bool(&ctx, resp.id.with("h"), resp.hovered(), anim::FAST);
+            ui.painter().rect_filled(rect, 2.0, theme::TOP_ACCOUNT.lerp_to_gamma(theme::BG_ROW_SELECTED, 0.3 * t));
+            let av = Rect::from_min_size(rect.min + vec2(2.0, 1.0), vec2(24.0, 24.0));
+            let url = client.state().friends.my_avatar_url().unwrap_or("").to_string();
+            match self.textures.get_web(client, &url) {
+                textures::Art::Ready(tex, a) => {
+                    widgets::image_cover(ui, av, tex, egui::Color32::WHITE.gamma_multiply(a))
+                }
+                _ => {
+                    ui.painter().rect_filled(av, 2.0, theme::BG_CAPSULE);
+                }
+            }
+            let text_pos = egui::pos2(av.right() + 6.0, rect.center().y - galley.size().y / 2.0);
+            let name_right = text_pos.x + galley.size().x;
+            ui.painter().galley(text_pos, galley, theme::TOP_NAME);
+            steam_icons::chevron_down(
+                ui.painter(),
+                egui::pos2(name_right + 11.0, rect.center().y + 1.0),
+                8.0,
+                theme::TOP_WALLET,
+            );
+            let tip = match &client.state().connection {
+                ConnectionStatus::Online => "Connected to Steam",
+                ConnectionStatus::Connecting => "Connecting to Steam...",
+                ConnectionStatus::Failed(_) => "Not connected to Steam",
+                ConnectionStatus::Offline => "Offline",
+            };
+            let resp = resp.on_hover_text(tip);
+            widgets::popup_menu(&resp, |ui| {
+                use menubar::Act;
+                use sr_client::PersonaState;
+                let mut pick = |ui: &mut Ui, label: &str, a: Act| {
+                    if ui.button(label).clicked() {
+                        *act = Some(a);
+                        ui.close();
+                    }
+                };
+                pick(ui, "View my profile", Act::ViewMyProfile);
+                pick(ui, "Edit my profile", Act::EditMyProfile);
+                widgets::menu_separator(ui);
+                pick(ui, "Online", Act::SetStatus(PersonaState::Online));
+                pick(ui, "Away", Act::SetStatus(PersonaState::Away));
+                pick(ui, "Invisible", Act::SetStatus(PersonaState::Invisible));
+                pick(ui, "Offline", Act::SetStatus(PersonaState::Offline));
+                widgets::menu_separator(ui);
+                pick(ui, "Settings", Act::Settings);
+                pick(ui, "Sign out", Act::SignOut);
+            });
+        }
+        ui.add_space(8.0);
+        // Bell: notifications (none yet).
+        let (r, resp) = ui.allocate_exact_size(vec2(48.0, 26.0), Sense::click());
+        let t = anim::animate_bool(&ctx, resp.id.with("h"), resp.hovered(), anim::FAST);
+        ui.painter().rect_filled(r, 2.0, theme::TOP_BELL_BTN.lerp_to_gamma(theme::BG_ROW_SELECTED, 0.3 * t));
+        steam_icons::bell(ui.painter(), r.center(), 14.0, theme::TOP_ICON.lerp_to_gamma(egui::Color32::WHITE, t));
+        widgets::popup_menu(&resp, |ui| widgets::menu_label(ui, "No new notifications", true));
+        ui.add_space(7.0);
+        // Announcements: the blue button.
+        let (r, resp) = ui.allocate_exact_size(vec2(52.0, 26.0), Sense::click());
+        let t = anim::animate_bool(&ctx, resp.id.with("h"), resp.hovered(), anim::FAST);
+        ui.painter().rect_filled(r, 2.0, widgets::shade(theme::BTN_PRIMARY_A, t, resp.is_pointer_button_down_on()));
+        steam_icons::megaphone(ui.painter(), r.center(), 15.0, egui::Color32::WHITE);
+        if resp.on_hover_text("Announcements").clicked() {
+            client.send(Command::OpenUrl("https://store.steampowered.com/news/".to_string()));
+        }
+        if client.state().refreshing && client.state().connection == ConnectionStatus::Online {
+            ui.add_space(8.0);
+            ui.add(egui::Spinner::new().size(12.0)).on_hover_text("Loading your games...");
+        }
+        if let ConnectionStatus::Failed(why) = &client.state().connection {
+            ui.add_space(8.0);
+            ui.label(RichText::new("Can't reach Steam. Retrying...").color(theme::ERROR_TEXT).small())
+                .on_hover_text(why);
+        }
+        if client.state().connection == ConnectionStatus::Connecting {
+            ui.add_space(8.0);
+            ui.add(egui::Spinner::new().size(12.0)).on_hover_text("Connecting to Steam...");
+        }
+    }
+
     fn nav_bar(&mut self, ui: &mut Ui, client: &mut Client) {
-        let frame = egui::Frame::new().fill(theme::BG_TOP).inner_margin(egui::Margin::symmetric(16, 0));
+        use egui::{Rect, Sense, pos2, vec2};
+        let frame = egui::Frame::new().fill(theme::BG_TOP);
         egui::Panel::top("nav").exact_size(theme::NAV_BAR_H).frame(frame).show_separator_line(false).show(ui, |ui| {
             chrome::drag_region(ui);
-            ui.horizontal_centered(|ui| {
-                ui.spacing_mut().item_spacing.x = 10.0;
-                let (can_back, can_fwd) = (self.history.can_back(), self.history.can_forward());
-                let back = ui.add_enabled_ui(can_back, |ui| {
-                    widgets::icon_button(ui, icon::CARET_LEFT, theme::CONTROL_SMALL, "Back (Alt+Left, mouse 4)")
-                });
-                if back.inner.clicked() {
-                    self.step_history(client, true);
+            let bar = ui.max_rect();
+            let cy = bar.top() + 12.0;
+            let ctx = ui.ctx().clone();
+            let (can_back, can_fwd) = (self.history.can_back(), self.history.can_forward());
+            // History arrows (mouse buttons 4 and 5 and Alt+Left/Right do the same).
+            for (i, left) in [true, false].into_iter().enumerate() {
+                let enabled = if left { can_back } else { can_fwd };
+                let c = pos2(bar.left() + 23.0 + 31.0 * i as f32, cy);
+                let resp =
+                    ui.interact(Rect::from_center_size(c, vec2(28.0, 28.0)), Id::new(("nav-arrow", i)), Sense::click());
+                let t = anim::animate_bool(&ctx, resp.id.with("h"), resp.hovered() && enabled, anim::FAST);
+                let base = if enabled { theme::TEXT_DIM } else { theme::TEXT_DIM.gamma_multiply(0.45) };
+                steam_icons::arrow(ui.painter(), c, 16.0, left, base.lerp_to_gamma(egui::Color32::WHITE, t));
+                if enabled
+                    && resp
+                        .on_hover_text(if left { "Back (Alt+Left, mouse 4)" } else { "Forward (Alt+Right, mouse 5)" })
+                        .clicked()
+                {
+                    self.step_history(client, left);
                 }
-                let fwd = ui.add_enabled_ui(can_fwd, |ui| {
-                    widgets::icon_button(ui, icon::CARET_RIGHT, theme::CONTROL_SMALL, "Forward (Alt+Right, mouse 5)")
-                });
-                if fwd.inner.clicked() {
-                    self.step_history(client, false);
+            }
+            let account = self.display_name(client).map(|n| n.to_uppercase()).unwrap_or_default();
+            let mut x = bar.left() + 77.0;
+            let mut active_rect = None;
+            for (tab, label) in [
+                (Tab::Store, "STORE"),
+                (Tab::Library, "LIBRARY"),
+                (Tab::Community, "COMMUNITY"),
+                (Tab::Profile, account.as_str()),
+            ] {
+                let active = self.tab == tab;
+                let galley =
+                    ui.painter().layout_no_wrap(label.to_string(), theme::medium(theme::NAV_TAB_FONT), theme::TEXT);
+                let size = galley.size();
+                let rect = Rect::from_min_size(pos2(x, cy - size.y / 2.0), size);
+                let resp = ui.interact(rect.expand2(vec2(8.0, 10.0)), Id::new(("nav-tab", label)), Sense::click());
+                let hover = anim::animate_bool(&ctx, resp.id.with("h"), resp.hovered() && !active, anim::FAST);
+                let color = if active { theme::ACCENT } else { theme::TEXT.lerp_to_gamma(egui::Color32::WHITE, hover) };
+                ui.painter().galley_with_override_text_color(rect.min, galley, color);
+                if active {
+                    active_rect = Some(rect);
                 }
-                ui.add_space(14.0);
-                ui.spacing_mut().item_spacing.x = 30.0;
-                let account = self.display_name(client).map(|n| n.to_uppercase()).unwrap_or_default();
-                let mut active_rect = None;
-                for (tab, label) in [
-                    (Tab::Store, "STORE"),
-                    (Tab::Library, "LIBRARY"),
-                    (Tab::Community, "COMMUNITY"),
-                    (Tab::Profile, account.as_str()),
-                ] {
-                    let resp = widgets::text_tab(ui, label, theme::bold(theme::NAV_TAB_FONT), self.tab == tab);
-                    if self.tab == tab {
-                        active_rect = Some(resp.rect);
-                    }
-                    if resp.clicked() {
-                        self.goto(tab, client);
-                    }
+                if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                    self.goto(tab, client);
                 }
-                if let Some(r) = active_rect {
-                    // One underline that slides to the active tab.
-                    let ctx = ui.ctx().clone();
-                    let left = anim::animate_to(&ctx, Id::new("tab-underline-l"), r.left(), anim::NORMAL);
-                    let right = anim::animate_to(&ctx, Id::new("tab-underline-r"), r.right(), anim::NORMAL);
-                    let y = r.bottom() + 1.0;
-                    ui.painter().line_segment([Pos2::new(left, y), Pos2::new(right, y)], (2.0, theme::ACCENT));
-                }
-            });
+                x += size.x + 21.0;
+            }
+            if let Some(r) = active_rect {
+                // One underline (3 px, the width of the tab text) that slides to the active tab.
+                let left = anim::animate_to(&ctx, Id::new("tab-underline-l"), r.left(), anim::NORMAL);
+                let right = anim::animate_to(&ctx, Id::new("tab-underline-r"), r.right(), anim::NORMAL);
+                let y = bar.top() + 25.0;
+                ui.painter().rect_filled(Rect::from_min_max(pos2(left, y), pos2(right, y + 3.0)), 1.0, theme::ACCENT);
+            }
         });
     }
 
     fn bottom_bar(&mut self, ui: &mut Ui, client: &mut Client) {
-        let frame = egui::Frame::new().fill(theme::BG_BOTTOM).inner_margin(egui::Margin::symmetric(16, 0));
+        use egui::{Rect, Sense, pos2, vec2};
+        let frame = egui::Frame::new().fill(theme::BG_BOTTOM).inner_margin(egui::Margin {
+            left: 0,
+            right: 16,
+            top: 0,
+            bottom: 0,
+        });
         egui::Panel::bottom("bottom").exact_size(theme::BOTTOM_BAR_H).frame(frame).show_separator_line(false).show(
             ui,
             |ui| {
+                // "Add a Game" at the left: a small menu.
+                let bar = ui.max_rect();
+                let ctx = ui.ctx().clone();
+                let r = Rect::from_min_size(pos2(bar.left() + 14.0, bar.top()), vec2(110.0, bar.height()));
+                let resp = ui.interact(r, Id::new("add-game"), Sense::click());
+                let t = anim::animate_bool(&ctx, resp.id.with("h"), resp.hovered(), anim::FAST);
+                let color = theme::BOTTOM_TEXT.lerp_to_gamma(theme::TEXT, t);
+                steam_icons::add_square(ui.painter(), pos2(r.left() + 9.0, r.center().y), 16.0, color, theme::BG_TOP);
+                ui.painter().text(
+                    pos2(r.left() + 26.0, r.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    "Add a Game",
+                    theme::regular(13.0),
+                    color,
+                );
+                widgets::popup_menu(&resp.on_hover_cursor(egui::CursorIcon::PointingHand), |ui| {
+                    if ui.button("Activate a product on Steam...").clicked() {
+                        client.send(Command::OpenUrl("https://store.steampowered.com/account/registerkey".to_string()));
+                        ui.close();
+                    }
+                    if ui.button("Redeem a Steam wallet code...").clicked() {
+                        client.send(Command::OpenUrl(
+                            "https://store.steampowered.com/account/redeemwalletcode".to_string(),
+                        ));
+                        ui.close();
+                    }
+                });
                 if downloads_button(ui, client) {
                     self.goto(Tab::Downloads, client);
                 }
                 let bar_w = ui.max_rect().width();
                 ui.horizontal_centered(|ui| {
-                    ui.style_mut().override_font_id = Some(theme::medium(13.0));
+                    ui.style_mut().override_font_id = Some(theme::regular(13.0));
                     let notice = client.state().notice.clone();
                     let toast = self.friends.current_toast(ui.ctx(), client);
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -576,41 +715,36 @@ impl AppUi {
     }
 }
 
-/// The centered "Downloads" button. While something downloads it also shows the name, the percentage, the
-/// speed and a thin gliding progress bar. Returns true when clicked.
+/// The centered "Downloads" button: Steam's square download icon and "Downloads"; while something downloads it
+/// adds the name, the percentage and the speed with a thin progress bar. Returns true when clicked.
 fn downloads_button(ui: &mut Ui, client: &Client) -> bool {
     let bar = ui.max_rect();
     let rect = egui::Rect::from_center_size(bar.center(), egui::vec2(380.0, bar.height()));
     let resp = ui.interact(rect, Id::new("downloads-button"), egui::Sense::click());
     let hover = anim::animate_bool(ui.ctx(), resp.id.with("hover"), resp.hovered(), anim::FAST);
-    let color = theme::TEXT_DIM.lerp_to_gamma(theme::TEXT, hover);
-    let painter = ui.painter();
-    match &client.state().downloads.active {
+    let color = theme::BOTTOM_TEXT.lerp_to_gamma(theme::TEXT, hover);
+    let line = match &client.state().downloads.active {
         Some(a) => {
             let shown = anim::glide(ui.ctx(), Id::new(("dl-bar", a.item.request.app.0)), a.fraction(), 4.0);
-            let line = format!(
-                "{}  {}  {:.0}%  {}",
-                icon::DOWNLOAD_SIMPLE,
-                a.item.request.name,
-                shown * 100.0,
-                fmt::speed(a.bytes_per_sec)
+            let track = egui::Rect::from_min_size(
+                egui::pos2(rect.center().x - 120.0, bar.bottom() - 6.0),
+                egui::vec2(240.0, 3.0),
             );
-            painter.text(
-                rect.center() - egui::vec2(0.0, 6.0),
-                egui::Align2::CENTER_CENTER,
-                line,
-                theme::medium(12.0),
-                color,
-            );
-            let track = egui::Rect::from_center_size(rect.center() + egui::vec2(0.0, 9.0), egui::vec2(240.0, 3.0));
-            painter.rect_filled(track, theme::RADIUS, theme::BG_TOP);
+            ui.painter().rect_filled(track, theme::RADIUS, theme::BG_TOP);
             let fill = egui::Rect::from_min_size(track.min, egui::vec2(track.width() * shown, track.height()));
-            painter.rect_filled(fill, theme::RADIUS, theme::ACCENT);
+            ui.painter().rect_filled(fill, theme::RADIUS, theme::ACCENT);
+            format!("Downloads - {}  {:.0}%  {}", a.item.request.name, shown * 100.0, fmt::speed(a.bytes_per_sec))
         }
-        None => {
-            let text = format!("{}  Downloads", icon::DOWNLOAD_SIMPLE);
-            painter.text(rect.center(), egui::Align2::CENTER_CENTER, text, theme::medium(13.0), color);
-        }
-    }
+        None => "Downloads".to_string(),
+    };
+    let galley = ui.painter().layout_no_wrap(line, theme::regular(13.0), color);
+    let total = 16.0 + 8.0 + galley.size().x;
+    let left = rect.center().x - total / 2.0;
+    steam_icons::download_square(ui.painter(), egui::pos2(left + 8.0, rect.center().y), 16.0, color, theme::BG_TOP);
+    ui.painter().galley_with_override_text_color(
+        egui::pos2(left + 24.0, rect.center().y - galley.size().y / 2.0),
+        galley,
+        color,
+    );
     resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
 }

@@ -174,7 +174,7 @@ impl StoreView {
 
         let w = ui.available_width();
         let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, 340.0), Sense::click());
-        widgets::gradient(ui, rect, theme::BG_SIDEBAR, theme::BG_MAIN);
+        ui.painter().rect_filled(rect, 0.0, theme::BG_SIDEBAR);
         let img_w = (rect.height() * 616.0 / 353.0).min(w * 0.62);
         let img = Rect::from_min_size(rect.min, Vec2::new(img_w, rect.height()));
 

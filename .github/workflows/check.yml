@@ -22,3 +22,15 @@ jobs:
           cargo test --workspace --no-fail-fast
       - name: Clippy
         run: cargo clippy --workspace --all-targets --keep-going --message-format short -- -D warnings
+      - name: Screenshots
+        if: always()
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb mesa-vulkan-drivers ffmpeg xdotool libxkbcommon-x11-0 libxcursor1 libxrandr2 libxi6 libvulkan1 >/dev/null
+          cargo build -p kettle
+          scripts/ci-screenshots.sh target/debug/kettle shots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshots
+          path: shots/

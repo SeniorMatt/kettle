@@ -519,6 +519,8 @@ pub struct Client {
     /// Newest store search; older answers are dropped.
     search_gen: u64,
     sections_at: Option<Instant>,
+    /// `KETTLE_DEMO_INSTALLED` is set (screenshots only).
+    demo_installed: bool,
 }
 
 impl Client {
@@ -576,6 +578,7 @@ impl Client {
             web_images: web_image::WebImageLoader::new(wake.clone()),
             search_gen: 0,
             sections_at: None,
+            demo_installed: std::env::var_os("KETTLE_DEMO_INSTALLED").is_some(),
             rt: std::mem::ManuallyDrop::new(rt),
             hub: None,
             local_only: HashSet::new(),
@@ -858,6 +861,10 @@ impl Client {
                     } else {
                         InstallState::Installed { size_bytes: a.size_on_disk, path }
                     }
+                }
+                // `KETTLE_DEMO_INSTALLED=1` (screenshots of Play): even app ids of the demo library look installed.
+                _ if self.demo_installed && g.app_id.0.is_multiple_of(2) => {
+                    InstallState::Installed { size_bytes: 3 << 30, path: "/demo/steamapps/common/Game".into() }
                 }
                 _ => InstallState::NotInstalled,
             };

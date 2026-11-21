@@ -85,14 +85,6 @@ impl LibraryView {
 
     pub fn show(&mut self, ui: &mut Ui, client: &mut Client, tex: &mut Textures, ov: &mut Overlays) {
         self.refresh_order(client);
-        // The soft blue glow behind the top of the page.
-        let page = ui.max_rect();
-        widgets::vgradient(
-            ui,
-            Rect::from_min_size(page.min, Vec2::new(page.width(), 340.0_f32.min(page.height()))),
-            theme::HOME_GLOW,
-            theme::BG_MAIN,
-        );
         if self.order.is_empty() {
             ui.add_space(40.0);
             ui.vertical_centered(|ui| {

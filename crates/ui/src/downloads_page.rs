@@ -158,7 +158,7 @@ fn active_card(
                 }
             },
         }
-        widgets::vgradient(ui, rect, Color32::TRANSPARENT, theme::BG_CARD);
+        ui.painter().rect_filled(rect, 0.0, Color32::from_black_alpha(110));
         let pad = 16.0;
         ui.painter().text(
             Pos2::new(rect.left() + pad, rect.bottom() - 42.0),

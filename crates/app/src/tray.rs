@@ -15,13 +15,9 @@ pub enum Msg {
     Library,
     Friends,
     Downloads,
-    Play(u32),
     Settings,
     Exit,
 }
-
-/// A recent game for the menu: app id and name.
-pub type Recent = (u32, String);
 
 pub struct Tray {
     rx: Receiver<Msg>,
@@ -59,16 +55,6 @@ impl Tray {
         self.rx.try_recv().ok()
     }
 
-    /// Replace the "recent games" part of the menu.
-    pub fn set_recent(&self, recent: Vec<Recent>) {
-        #[cfg(all(unix, not(target_os = "macos")))]
-        if let Some(h) = self.handle.get() {
-            h.update(|t| t.recent = recent);
-        }
-        #[cfg(not(all(unix, not(target_os = "macos"))))]
-        let _ = recent;
-    }
-
     /// Remove the icon (called when the setting is turned off or the app quits).
     pub fn stop(&self) {
         #[cfg(all(unix, not(target_os = "macos")))]
@@ -81,7 +67,7 @@ impl Tray {
 
 #[cfg(all(unix, not(target_os = "macos")))]
 mod imp {
-    use super::{Msg, Recent};
+    use super::Msg;
     use ksni::blocking::TrayMethods;
     use ksni::menu::StandardItem;
     use ksni::{Icon, MenuItem};
@@ -94,14 +80,22 @@ mod imp {
     pub struct KettleTray {
         tx: Sender<Msg>,
         wake: Arc<dyn Fn() + Send + Sync>,
-        pub recent: Vec<Recent>,
         icon: Vec<Icon>,
     }
 
     impl KettleTray {
         fn send(&self, m: Msg) {
+            let exit = m == Msg::Exit;
             let _ = self.tx.send(m);
             (self.wake)();
+            if exit {
+                // While the window is hidden to the tray, some desktops never let it draw again, so the window
+                // loop may not see the message: quit from here if it hasn't after a moment.
+                let _ = std::thread::Builder::new().name("tray-exit".into()).spawn(|| {
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                    std::process::exit(0);
+                });
+            }
         }
     }
 
@@ -133,23 +127,15 @@ mod imp {
         }
 
         fn menu(&self) -> Vec<MenuItem<Self>> {
-            let mut m = vec![
-                entry("Kettle", Msg::Show),
+            vec![
                 entry("Store", Msg::Store),
                 entry("Library", Msg::Library),
                 entry("Friends", Msg::Friends),
                 entry("Downloads", Msg::Downloads),
+                entry("Settings", Msg::Settings),
                 MenuItem::Separator,
-            ];
-            if !self.recent.is_empty() {
-                for (id, name) in &self.recent {
-                    m.push(entry(&format!("Play {name}"), Msg::Play(*id)));
-                }
-                m.push(MenuItem::Separator);
-            }
-            m.push(entry("Settings", Msg::Settings));
-            m.push(entry("Exit", Msg::Exit));
-            m
+                entry("Exit Kettle", Msg::Exit),
+            ]
         }
     }
 
@@ -167,7 +153,7 @@ mod imp {
         out: Arc<OnceLock<Handle>>,
     ) {
         let _ = std::thread::Builder::new().name("tray-start".into()).spawn(move || {
-            let tray = KettleTray { tx, wake, recent: Vec::new(), icon: to_argb(icon.0, icon.1, &icon.2) };
+            let tray = KettleTray { tx, wake, icon: to_argb(icon.0, icon.1, &icon.2) };
             // Fails (no tray host, no session bus) on desktops without a tray: then Kettle behaves as before.
             if let Ok(handle) = tray.spawn() {
                 let _ = out.set(handle);

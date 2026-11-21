@@ -159,7 +159,9 @@ mod imp {
                     None => {
                         let since = *self.waiting_since.get_or_insert_with(Instant::now);
                         if since.elapsed() > DISPLAY_LIMIT {
-                            eprintln!("[overlay] the game's Gamescope display never appeared; using the built-in overlay");
+                            eprintln!(
+                                "[overlay] the game's Gamescope display never appeared; using the built-in overlay"
+                            );
                             self.failed = true;
                         } else {
                             self.waiting = true;
@@ -205,11 +207,7 @@ mod imp {
                 // Inside Gamescope's X server: a normal window with the properties Gamescope draws on top.
                 cmd.arg("--gamescope").env("DISPLAY", d);
             }
-            let child = cmd
-                .env_remove("WAYLAND_DISPLAY")
-                .env("XDG_SESSION_TYPE", "x11")
-                .stdin(Stdio::null())
-                .spawn();
+            let child = cmd.env_remove("WAYLAND_DISPLAY").env("XDG_SESSION_TYPE", "x11").stdin(Stdio::null()).spawn();
             match child {
                 Ok(c) => self.child = Some((c, app)),
                 Err(e) => {

@@ -86,7 +86,7 @@ impl PropertiesView {
             .with_inner_size([860.0, 600.0])
             .with_min_inner_size([640.0, 440.0]);
         ctx.show_viewport_immediate(Self::viewport_id(), builder, |ui, _class| {
-            let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
+            let escape = chrome::escape_closes_window(ui);
             if escape || ui.input(|i| i.viewport().close_requested()) {
                 self.close(client);
                 return;

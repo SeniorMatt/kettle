@@ -12,30 +12,30 @@ pub const APP_ID: &str = "kettle";
 // ---- colors -------------------------------------------------------------
 
 /// Title bar, menu row and nav tabs.
-pub const BG_TOP: Color32 = Color32::from_rgb(0x17, 0x1a, 0x21); // estimate
+pub const BG_TOP: Color32 = Color32::from_rgb(0x17, 0x1d, 0x24); // title bar, nav row, bottom bar (measured)
 /// Library content area.
-pub const BG_MAIN: Color32 = Color32::from_rgb(0x1b, 0x1e, 0x25); // estimate
+pub const BG_MAIN: Color32 = Color32::from_rgb(0x24, 0x28, 0x30); // page and sidebar list (measured)
 /// Left game list.
-pub const BG_SIDEBAR: Color32 = Color32::from_rgb(0x23, 0x26, 0x2e); // palette #23262e
+pub const BG_SIDEBAR: Color32 = Color32::from_rgb(0x24, 0x28, 0x30); // sidebar list (measured)
 /// Bottom bar (downloads, friends).
-pub const BG_BOTTOM: Color32 = Color32::from_rgb(0x1e, 0x21, 0x28); // estimate
+pub const BG_BOTTOM: Color32 = Color32::from_rgb(0x17, 0x1d, 0x24); // bottom bar (measured)
 /// Text inputs (search).
-pub const BG_INPUT: Color32 = Color32::from_rgb(0x32, 0x35, 0x3c); // estimate
+pub const BG_INPUT: Color32 = Color32::from_rgb(0x25, 0x26, 0x2c); // sidebar search row (measured)
 /// Hovered and selected rows.
-pub const BG_ROW_HOVER: Color32 = Color32::from_rgb(0x32, 0x36, 0x40); // estimate
-pub const BG_ROW_SELECTED: Color32 = Color32::from_rgb(0x3d, 0x44, 0x50); // palette #3d4450
+pub const BG_ROW_HOVER: Color32 = Color32::from_rgb(0x31, 0x3a, 0x4a); // hover row: selection colour at half strength (derived)
+pub const BG_ROW_SELECTED: Color32 = Color32::from_rgb(0x3e, 0x4f, 0x69); // selected list row (measured)
 /// Placeholder behind a cover that hasn't loaded.
-pub const BG_CAPSULE: Color32 = Color32::from_rgb(0x2a, 0x2e, 0x37); // estimate
+pub const BG_CAPSULE: Color32 = Color32::from_rgb(0x2b, 0x31, 0x38); // measured
 /// Bar under the hero image on a game page.
-pub const BG_ACTION_BAR: Color32 = Color32::from_rgb(0x20, 0x24, 0x2c); // estimate
+pub const BG_ACTION_BAR: Color32 = Color32::from_rgb(0x28, 0x2b, 0x31); // game page play bar (measured)
 
-pub const TEXT: Color32 = Color32::from_rgb(0xdc, 0xde, 0xdf); // palette #dcdedf
-pub const TEXT_DIM: Color32 = Color32::from_rgb(0x8b, 0x92, 0x9a); // palette #8b929a
+pub const TEXT: Color32 = Color32::from_rgb(0xde, 0xe4, 0xe9); // nav tabs (measured)
+pub const TEXT_DIM: Color32 = Color32::from_rgb(0x8b, 0x92, 0x9a); // menu text (measured)
 /// Not-installed games in the list.
-pub const TEXT_UNINSTALLED: Color32 = Color32::from_rgb(0x6e, 0x75, 0x7e); // estimate
-pub const TEXT_HEADING: Color32 = Color32::from_rgb(0xb8, 0xbc, 0xbf); // palette #b8bcbf
+pub const TEXT_UNINSTALLED: Color32 = Color32::from_rgb(0x7d, 0x80, 0x87); // measured
+pub const TEXT_HEADING: Color32 = Color32::from_rgb(0xa1, 0xa0, 0xa3); // stat labels (measured)
 /// Hairline around the window (we draw our own frame).
-pub const WINDOW_BORDER: Color32 = Color32::from_rgb(0x2c, 0x31, 0x3b); // estimate
+pub const WINDOW_BORDER: Color32 = Color32::from_rgb(0x19, 0x1c, 0x24); // window edge line (measured)
 /// Close button hover.
 pub const CLOSE_HOVER: Color32 = Color32::from_rgb(0xe8, 0x11, 0x23); // estimate
 /// Store discount box (dark green with light green text, like the store).
@@ -43,24 +43,19 @@ pub const DISCOUNT_BG: Color32 = Color32::from_rgb(0x4c, 0x6b, 0x22); // estimat
 pub const DISCOUNT_TEXT: Color32 = Color32::from_rgb(0xbe, 0xee, 0x11); // estimate
 /// Price tag background next to a discount box.
 pub const PRICE_BG: Color32 = Color32::from_rgb(0x30, 0x3a, 0x44); // estimate
-/// Library home: the faint blue glow at the top of the page.
-pub const HOME_GLOW: Color32 = Color32::from_rgb(0x2a, 0x3a, 0x50); // estimate
-/// Selected game in the list: a blue gradient fading to the right.
-pub const ROW_SELECTED_A: Color32 = Color32::from_rgb(0x2f, 0x5f, 0x8e); // estimate
-pub const ROW_SELECTED_B: Color32 = Color32::from_rgb(0x23, 0x2e, 0x40); // estimate
 /// "Running" label in the game list.
-pub const RUNNING: Color32 = Color32::from_rgb(0x90, 0xba, 0x3c); // estimate
-pub const ACCENT: Color32 = Color32::from_rgb(0x1a, 0x9f, 0xff); // palette #1a9fff
+pub const RUNNING: Color32 = Color32::from_rgb(0x82, 0xc1, 0x2a); // running-game icon (measured)
+pub const ACCENT: Color32 = Color32::from_rgb(0x1a, 0x9f, 0xff); // selected nav tab, underline (measured #269aee-#2ba1f6)
 /// Destructive buttons (uninstall) and error text.
 pub const DANGER: Color32 = Color32::from_rgb(0xa8, 0x32, 0x32); // estimate
 pub const ERROR_TEXT: Color32 = Color32::from_rgb(0xe0, 0x6c, 0x5c); // estimate
 /// Download progress for verifying (hashing) instead of fetching.
 pub const VERIFY: Color32 = Color32::from_rgb(0x75, 0xb0, 0x22); // estimate
 /// A card on a page (download rows, settings groups).
-pub const BG_CARD: Color32 = Color32::from_rgb(0x23, 0x27, 0x30); // estimate
+pub const BG_CARD: Color32 = Color32::from_rgb(0x2e, 0x33, 0x3b); // tab box and cards (measured)
 
 // Menus, drop-down lists and tooltips: a flat slate panel; the hovered row is inverted, like the official client.
-pub const MENU_BG: Color32 = Color32::from_rgb(0x3d, 0x44, 0x50); // palette #3d4450
+pub const MENU_BG: Color32 = Color32::from_rgb(0x3d, 0x44, 0x50); // palette
 pub const MENU_BORDER: Color32 = Color32::from_rgb(0x2c, 0x31, 0x3a); // estimate
 pub const MENU_HOVER_BG: Color32 = Color32::from_rgb(0xdc, 0xde, 0xdf); // contextMenuItem:hover
 pub const MENU_HOVER_TEXT: Color32 = Color32::from_rgb(0x3d, 0x44, 0x50); // contextMenuItem:hover color
@@ -95,12 +90,12 @@ pub const BTN_PAD_X: f32 = 16.0;
 pub const BTN_FONT: f32 = 14.0;
 /// `.GenericConfirmDialog .DialogButton` min-width.
 pub const BTN_MIN_W_DIALOG: f32 = 120.0;
-/// DialogButton.Primary and the install button: gradient #47bfff -> #1a44c2 (stops 0 % and 60 %, sliding).
-pub const BTN_PRIMARY_A: Color32 = Color32::from_rgb(0x47, 0xbf, 0xff);
-pub const BTN_PRIMARY_B: Color32 = Color32::from_rgb(0x1a, 0x44, 0xc2);
-/// `button.deleteButton`: #b14040 -> #742a29.
-pub const BTN_DANGER_A: Color32 = Color32::from_rgb(0xb1, 0x40, 0x40);
-pub const BTN_DANGER_B: Color32 = Color32::from_rgb(0x74, 0x2a, 0x29);
+/// Blue button (the announcements button, Install, dialog primary): flat, measured #199aff.
+pub const BTN_PRIMARY_A: Color32 = Color32::from_rgb(0x19, 0x9a, 0xff);
+pub const BTN_PRIMARY_B: Color32 = Color32::from_rgb(0x19, 0x9a, 0xff);
+/// Destructive button: flat dark red.
+pub const BTN_DANGER_A: Color32 = Color32::from_rgb(0xa8, 0x3a, 0x3a);
+pub const BTN_DANGER_B: Color32 = Color32::from_rgb(0xa8, 0x3a, 0x3a);
 
 // _DialogInputContainer / DialogInput: rgba(59,63,72,.5) over the dialog, 3px radius, 14px text.
 pub const INPUT_BG: Color32 = Color32::from_rgb(0x30, 0x34, 0x3b); // estimate
@@ -122,13 +117,11 @@ pub const CHECK_BG: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 68);
 pub const CHECK_BG_HOVER: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 110); // estimate
 pub const CHECK_SIZE: f32 = 18.0;
 
-// DialogSlider: track #202226 in a 4px #2a2d33 border (10px high), value #00ccff -> #2d73ff, grabber 12px.
+// DialogSlider: dark track, flat blue value, light grabber.
 pub const SLIDER_TRACK: Color32 = Color32::from_rgb(0x20, 0x22, 0x26);
 pub const SLIDER_BORDER: Color32 = Color32::from_rgb(0x2a, 0x2d, 0x33);
-pub const SLIDER_FILL_A: Color32 = Color32::from_rgb(0x00, 0xcc, 0xff);
-pub const SLIDER_FILL_B: Color32 = Color32::from_rgb(0x2d, 0x73, 0xff);
-pub const SLIDER_GRAB_A: Color32 = Color32::from_rgb(0x89, 0xe7, 0xff);
-pub const SLIDER_GRAB_B: Color32 = Color32::from_rgb(0x80, 0xaa, 0xff);
+pub const SLIDER_FILL: Color32 = Color32::from_rgb(0x1a, 0x9f, 0xff);
+pub const SLIDER_GRAB: Color32 = Color32::from_rgb(0xdc, 0xde, 0xdf);
 
 // Scrollbar thumb: #434953, hover #58606d; 12px wide with 3px transparent borders (a 6px thumb).
 pub const SCROLL_THUMB: Color32 = Color32::from_rgb(0x43, 0x49, 0x53);
@@ -136,9 +129,6 @@ pub const SCROLL_THUMB_HOVER: Color32 = Color32::from_rgb(0x58, 0x60, 0x6d);
 
 // Modal dialogs (ModalPosition, DialogContent, DialogHeader, DialogLabel).
 pub const MODAL_BG: Color32 = Color32::from_rgb(0x25, 0x28, 0x2e);
-/// ModalPosition_TopBar: 1px gradient across the top.
-pub const MODAL_BAR_A: Color32 = Color32::from_rgb(0x00, 0xcc, 0xff);
-pub const MODAL_BAR_B: Color32 = Color32::from_rgb(0x33, 0x66, 0xff);
 pub const MODAL_PAD: i8 = 24; // estimate
 /// DialogHeader: 22px bold white. DialogControlsSectionHeader: 18px medium. DialogLabel: 13px, #acb2b8, caps.
 pub const DIALOG_HEADER_SIZE: f32 = 22.0;
@@ -147,12 +137,9 @@ pub const DIALOG_LABEL: Color32 = Color32::from_rgb(0xac, 0xb2, 0xb8);
 /// DialogToggle_Description / DialogLabelExplainer.
 pub const DIALOG_DESC: Color32 = Color32::from_rgb(0x99, 0x9c, 0x9f);
 
-/// Play button gradient: `button.GreenPlay` rgb(138,195,41) -> rgb(74,122,22).
-pub const PLAY_A: Color32 = Color32::from_rgb(138, 195, 41);
-pub const PLAY_B: Color32 = Color32::from_rgb(74, 122, 22);
-/// Install button gradient (same as the primary button).
-pub const INSTALL_A: Color32 = Color32::from_rgb(0x47, 0xbf, 0xff);
-pub const INSTALL_B: Color32 = Color32::from_rgb(0x1a, 0x44, 0xc2);
+/// Green button (Add to cart, dialogs): flat, the game page's PLAY green.
+pub const PLAY_A: Color32 = Color32::from_rgb(0x4d, 0xc6, 0x34);
+pub const PLAY_B: Color32 = Color32::from_rgb(0x4d, 0xc6, 0x34);
 
 /// Friend names by state, as in the official friends list.
 pub const FRIEND_INGAME: Color32 = Color32::from_rgb(0x90, 0xba, 0x3c); // estimate
@@ -169,12 +156,12 @@ pub const CHAT_THEIRS: Color32 = Color32::from_rgb(0x2f, 0x33, 0x3d); // estimat
 pub const CONTROL_SMALL: f32 = 28.0; // estimate
 pub const CONTROL_NORMAL: f32 = 36.0; // estimate
 pub const CONTROL_LARGE: f32 = 48.0; // estimate
-pub const MENU_BAR_H: f32 = 28.0; // estimate
-pub const NAV_BAR_H: f32 = 52.0; // estimate
-pub const BOTTOM_BAR_H: f32 = 40.0; // estimate
-pub const SIDEBAR_W: f32 = 300.0; // estimate
+pub const MENU_BAR_H: f32 = 34.0; // top 0-33 (measured: content starts at y 78 = 34 + 44)
+pub const NAV_BAR_H: f32 = 44.0;
+pub const BOTTOM_BAR_H: f32 = 49.0; // y 1030-1079 measured
+pub const SIDEBAR_W: f32 = 273.0; // x 936-1208 measured
 pub const FRIENDS_W: f32 = 320.0; // estimate
-pub const LIST_ROW_H: f32 = 28.0; // estimate
+pub const LIST_ROW_H: f32 = 26.0; // measured row pitch
 pub const CAPSULE_W: f32 = 150.0; // estimate
 pub const CAPSULE_H: f32 = 225.0; // estimate
 pub const GRID_GAP: f32 = 20.0; // estimate
@@ -190,22 +177,22 @@ pub const SHELF_TITLE_H: f32 = 34.0; // estimate
 pub const SHELF_BUCKET_H: f32 = 24.0; // estimate
 /// Height of the "ALL GAMES" bar above the grid.
 pub const ALL_BAR_H: f32 = 44.0; // estimate
-pub const NAV_TAB_FONT: f32 = 22.0; // estimate
-pub const WINDOW_BUTTON_W: f32 = 44.0; // estimate
+pub const NAV_TAB_FONT: f32 = 17.5; // matched to the reference text widths (STORE 57 px, LIBRARY 73 px)
+pub const WINDOW_BUTTON_W: f32 = 32.0;
 /// Invisible zone along each window edge that starts a resize.
 pub const RESIZE_EDGE: f32 = 6.0; // estimate
 pub const STORE_CARD_W: f32 = 230.0; // estimate
 pub const STORE_CARD_H: f32 = 107.0 + 30.0; // estimate
 pub const PAGE_SLIDE: f32 = 8.0; // estimate
 pub const PAGE_PAD: f32 = 24.0; // estimate
-pub const HERO_ASPECT: f32 = 1240.0 / 3840.0; // estimate
+pub const HERO_ASPECT: f32 = 220.0 / 662.0; // measured hero height 220 at the reference width
 /// Narrowest a menu gets, so short item lists do not look cramped.
 pub const MENU_MIN_W: f32 = 200.0; // estimate
 pub const SETTINGS_NAV_W: f32 = 260.0; // estimate
 pub const SETTINGS_TITLE_H: f32 = 32.0; // estimate
 pub const TOGGLE_W: f32 = 40.0; // estimate
 pub const TOGGLE_H: f32 = 22.0; // estimate
-pub const RADIUS: CornerRadius = CornerRadius::same(2); // estimate
+pub const RADIUS: CornerRadius = CornerRadius::same(3); // measured: list/boxes 2-4 px
 /// DialogButton radius.
 pub const BUTTON_RADIUS: CornerRadius = CornerRadius::same(2);
 
@@ -335,26 +322,77 @@ pub fn apply(ctx: &egui::Context) {
 // ---- pages (library, game page) ----
 /// Game page action bar: button height, min width of the Play / Stop / Install button, and the square
 /// icon buttons (gear, info, favourite) next to the stats.
-pub const PAGE_ACTION_H: f32 = 46.0; // ActionSection height 46
-pub const PAGE_PLAY_MIN_W: f32 = 164.0; // ClaimButtonContainer min-width 164
-pub const PAGE_ICON_BTN: f32 = 32.0; // MenuButton 32x32, radius 4
+pub const PAGE_ACTION_H: f32 = 33.0; // PLAY button height, measured y 308-340
+pub const PAGE_PLAY_MIN_W: f32 = 93.0; // measured 1229-1322
+pub const PAGE_ICON_BTN: f32 = 32.0; // measured 32x32, radius 4
 /// Fill of the icon buttons (MenuButton: radius 4, fades in 0.12 s).
-pub const PAGE_ICON_BTN_BG: Color32 = Color32::from_rgba_premultiplied(24, 25, 28, 36); // rgba(172,178,201,.141)
-pub const PAGE_ICON_BTN_BG_HOVER: Color32 = Color32::from_rgba_premultiplied(53, 55, 59, 66); // rgba(205,213,226,.26)
-/// Play button gradient (stops at 0 % and 60 %, slid like `DialogButton`) and the Stop / Install blue.
-pub const PAGE_PLAY_A: Color32 = Color32::from_rgb(0x70, 0xd6, 0x1d); // PlayBar green #70d61d -> #01a75b (stop 60 %)
-pub const PAGE_PLAY_B: Color32 = Color32::from_rgb(0x01, 0xa7, 0x5b);
-pub const PAGE_STOP_A: Color32 = Color32::from_rgb(0x47, 0xbf, 0xff); // estimate
-pub const PAGE_STOP_B: Color32 = Color32::from_rgb(0x1a, 0x44, 0xc2); // estimate
+pub const PAGE_ICON_BTN_BG: Color32 = Color32::from_rgb(0x3d, 0x3e, 0x44); // measured
+pub const PAGE_ICON_BTN_BG_HOVER: Color32 = Color32::from_rgb(0x4a, 0x4d, 0x54);
+/// PLAY button (measured): the main part, and the drop-down arrow segment next to it (a different, teal green).
+pub const PAGE_PLAY_A: Color32 = Color32::from_rgb(0x4d, 0xc6, 0x34);
+pub const PAGE_PLAY_B: Color32 = Color32::from_rgb(0x18, 0xb1, 0x4c);
+/// Stop / Install blue (flat).
+pub const PAGE_STOP_A: Color32 = Color32::from_rgb(0x19, 0x9a, 0xff);
+pub const PAGE_STOP_B: Color32 = Color32::from_rgb(0x19, 0x9a, 0xff);
 /// Stat columns (PlayBarLabel / PlayBarDetailLabel).
 pub const PAGE_STAT_LABEL: f32 = 14.0; // PlayBarLabel 14 px caps, letter-spacing 1, white 52 %
 pub const PAGE_STAT_VALUE: f32 = 13.0; // PlayBarDetailLabel 13 px, white 32 %
-pub const PAGE_STAT_LABEL_COLOR: Color32 = Color32::from_rgba_premultiplied(133, 133, 133, 133);
+pub const PAGE_STAT_LABEL_COLOR: Color32 = Color32::from_rgb(0xa1, 0xa0, 0xa3); // measured
+pub const PAGE_STAT_VALUE_COLOR: Color32 = Color32::from_rgb(0x75, 0x77, 0x7b); // measured
 /// Game page tab strip (Store Page, DLC, Community Hub ...).
-pub const PAGE_TAB_H: f32 = 40.0; // estimate
+pub const PAGE_TAB_H: f32 = 38.0; // tab box y 357-395, measured
 pub const PAGE_TAB_FONT: f32 = 14.0; // estimate
 /// Left sidebar header rows.
 pub const SIDE_HEADER_H: f32 = 32.0; // estimate
 pub const SIDE_ICON_BTN: f32 = 24.0; // estimate
 /// Sidebar game-list text.
 pub const SIDE_ROW_FONT: f32 = 14.0; // estimate
+
+// ---- new Steam surfaces (measured from the reference screenshot) ----
+/// Sidebar boxes: Home row, "Games and Software" drop-down, grid button.
+pub const SIDE_BOX: Color32 = Color32::from_rgb(0x26, 0x27, 0x2e);
+/// Sort button next to the drop-down.
+pub const SIDE_SORT_BTN: Color32 = Color32::from_rgb(0x34, 0x37, 0x3f);
+/// Grid button glyph.
+pub const SIDE_GRID_ICON: Color32 = Color32::from_rgb(0x4b, 0x4d, 0x51);
+/// Dim icons (search magnifier, sort icons) and the text of the drop-down.
+pub const SIDE_ICON: Color32 = Color32::from_rgb(0x87, 0x8b, 0x91);
+pub const SIDE_TEXT: Color32 = Color32::from_rgb(0xb3, 0xb5, 0xbb);
+/// Game rows: installed, and the text of a selected row.
+pub const ROW_TEXT: Color32 = Color32::from_rgb(0xf6, 0xfb, 0xff);
+/// Collection header text and count.
+pub const HEADER_TEXT: Color32 = Color32::from_rgb(0xdb, 0xe6, 0xf4);
+pub const HEADER_COUNT: Color32 = Color32::from_rgb(0x53, 0x5b, 0x66);
+/// Top bar: the announcements button, the bell button, the account pill (all measured).
+pub const TOP_BELL_BTN: Color32 = Color32::from_rgb(0x26, 0x2c, 0x35);
+pub const TOP_ACCOUNT: Color32 = Color32::from_rgb(0x29, 0x2e, 0x37);
+pub const TOP_ICON: Color32 = Color32::from_rgb(0x89, 0x91, 0x99);
+pub const TOP_WALLET: Color32 = Color32::from_rgb(0x83, 0x8b, 0x93);
+pub const TOP_NAME: Color32 = Color32::from_rgb(0xaf, 0xb4, 0xbd);
+/// Game page: tab box fill/border, panel (recommend box) fill.
+pub const TAB_BOX_BG: Color32 = Color32::from_rgb(0x2e, 0x33, 0x3b);
+pub const TAB_BOX_BORDER: Color32 = Color32::from_rgb(0x32, 0x38, 0x3f);
+pub const TAB_TEXT: Color32 = Color32::from_rgb(0x7d, 0x80, 0x87);
+pub const PANEL_BG: Color32 = Color32::from_rgb(0x43, 0x49, 0x52);
+/// Bottom bar text.
+pub const BOTTOM_TEXT: Color32 = Color32::from_rgb(0x8b, 0x92, 0x9a);
+/// Search row fill (measured).
+pub const SIDE_SEARCH_BG: Color32 = Color32::from_rgb(0x25, 0x26, 0x2c);
+/// Dark strip behind the Home row (measured).
+pub const SIDE_HOME_ZONE: Color32 = Color32::from_rgb(0x19, 0x1c, 0x24);
+/// Darker panels on the game page (post-game summary area, measured).
+pub const BG_PANEL_DARK: Color32 = Color32::from_rgb(0x20, 0x23, 0x29);
+/// Game page background: flat down to the middle, then darker towards the bottom (measured at x 1215, y 390-1000).
+pub const PAGE_BG_TOP: Color32 = Color32::from_rgb(0x28, 0x2c, 0x31);
+pub const PAGE_BG_BOTTOM: Color32 = Color32::from_rgb(0x1b, 0x1d, 0x1f);
+/// 2 px dark line between the sidebar and the page (measured #14181b at x 1207-1208).
+pub const DIVIDER: Color32 = Color32::from_rgb(0x14, 0x18, 0x1b);
+/// Grid button next to Home (measured).
+pub const SIDE_GRID_BG: Color32 = Color32::from_rgb(0x28, 0x2a, 0x2f);
+/// Collection header row (measured at (1100,597)).
+pub const HEADER_BG: Color32 = Color32::from_rgb(0x27, 0x2d, 0x36);
+/// Menu bar text (measured peak).
+pub const TOP_MENU_TEXT: Color32 = Color32::from_rgb(0x89, 0x8f, 0x96);
+/// Top of the sidebar below the Home strip is lighter and fades into the list colour over about 280 px (measured
+/// #2d3038 at y 124, #292e35 at y 200, #242830 from y 400).
+pub const SIDE_BG_TOP: Color32 = Color32::from_rgb(0x2c, 0x30, 0x37);

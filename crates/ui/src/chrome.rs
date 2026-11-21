@@ -4,7 +4,6 @@
 
 use crate::{anim, theme};
 use egui::{Context, CursorIcon, Id, Rect, Sense, Ui, Vec2, ViewportCommand, viewport::ResizeDirection};
-use egui_phosphor::regular as icon;
 
 fn is_maximized(ctx: &Context) -> bool {
     ctx.input(|i| i.viewport().maximized.unwrap_or(false) || i.viewport().fullscreen.unwrap_or(false))
@@ -26,40 +25,60 @@ pub fn drag_region(ui: &Ui) {
     }
 }
 
+/// Which glyph a window button draws.
+#[derive(Clone, Copy, PartialEq)]
+enum Glyph {
+    Minimize,
+    Maximize,
+    Restore,
+    Close,
+}
+
 /// Minimize, maximize/restore and close, right-aligned (call in a right-to-left layout).
 pub fn window_buttons(ui: &mut Ui) {
     let ctx = ui.ctx().clone();
     ui.spacing_mut().item_spacing.x = 0.0;
     let maximized = is_maximized(&ctx);
-    if window_button(ui, icon::X, true, theme::MENU_BAR_H).clicked() {
+    if window_button(ui, Glyph::Close, theme::MENU_BAR_H).clicked() {
         ctx.send_viewport_cmd(ViewportCommand::Close);
     }
-    if window_button(ui, if maximized { icon::COPY } else { icon::SQUARE }, false, theme::MENU_BAR_H).clicked() {
+    if window_button(ui, if maximized { Glyph::Restore } else { Glyph::Maximize }, theme::MENU_BAR_H).clicked() {
         toggle_maximize(&ctx);
     }
-    if window_button(ui, icon::MINUS, false, theme::MENU_BAR_H).clicked() {
+    if window_button(ui, Glyph::Minimize, theme::MENU_BAR_H).clicked() {
         ctx.send_viewport_cmd(ViewportCommand::Minimized(true));
     }
 }
 
 /// Just a close button, for secondary windows (the settings window). Call in a right-to-left layout.
 pub fn close_button(ui: &mut Ui, height: f32) {
-    if window_button(ui, icon::X, true, height).clicked() {
+    if window_button(ui, Glyph::Close, height).clicked() {
         ui.ctx().send_viewport_cmd(ViewportCommand::Close);
     }
 }
 
-fn window_button(ui: &mut Ui, glyph: &str, close: bool, height: f32) -> egui::Response {
+/// A window control: no box, the glyph just brightens on hover (as in the official client's title bar).
+fn window_button(ui: &mut Ui, glyph: Glyph, height: f32) -> egui::Response {
     let size = Vec2::new(theme::WINDOW_BUTTON_W, height);
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
     let t = anim::animate_bool(ui.ctx(), resp.id.with("hover"), resp.hovered(), anim::FAST);
-    if t > 0.0 {
-        let bg = if close { theme::CLOSE_HOVER } else { theme::BG_ROW_SELECTED };
-        ui.painter().rect_filled(rect, 0.0, bg.gamma_multiply(t));
+    let color = theme::TOP_ICON.lerp_to_gamma(egui::Color32::WHITE, t);
+    let c = rect.center();
+    let p = ui.painter();
+    match glyph {
+        Glyph::Minimize => crate::steam_icons::window_minimize(p, c, color),
+        Glyph::Maximize => crate::steam_icons::window_maximize(p, c, color),
+        Glyph::Restore => crate::steam_icons::window_restore(p, c, color, theme::BG_TOP),
+        Glyph::Close => crate::steam_icons::window_close(p, c, color),
     }
-    let color = theme::TEXT_HEADING.lerp_to_gamma(egui::Color32::WHITE, t);
-    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, glyph, theme::regular(15.0), color);
     resp
+}
+
+/// True when Escape was pressed to close the window itself: not while a drop-down, menu or other popup is open
+/// (Escape then closes only the popup) and not while a text field has the keyboard.
+pub fn escape_closes_window(ui: &Ui) -> bool {
+    let ctx = ui.ctx();
+    ui.input(|i| i.key_pressed(egui::Key::Escape)) && !egui::Popup::is_any_open(ctx) && !ctx.egui_wants_keyboard_input()
 }
 
 /// Alt + left-drag anywhere moves the window, like many Linux desktops do.

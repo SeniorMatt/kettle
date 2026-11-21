@@ -55,8 +55,8 @@ fn item_sc(ui: &mut Ui, label: &str, shortcut: &str) -> bool {
 
 /// One title in the bar and, while it is the open one, its menu.
 fn title(ui: &mut Ui, open: &mut Option<usize>, idx: usize, content: impl FnOnce(&mut Ui)) {
-    let galley = ui.painter().layout_no_wrap(TITLES[idx].to_string(), theme::regular(13.0), theme::TEXT_HEADING);
-    let size = Vec2::new(galley.size().x + 24.0, theme::MENU_BAR_H);
+    let galley = ui.painter().layout_no_wrap(TITLES[idx].to_string(), theme::regular(13.0), theme::TOP_MENU_TEXT);
+    let size = Vec2::new(galley.size().x + 16.0, theme::MENU_BAR_H);
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
     let is_open = *open == Some(idx);
     if resp.clicked() {
@@ -68,10 +68,8 @@ fn title(ui: &mut Ui, open: &mut Option<usize>, idx: usize, content: impl FnOnce
     let is_open = *open == Some(idx);
     if is_open {
         ui.painter().rect_filled(rect, 0.0, theme::MENU_BG);
-    } else if resp.hovered() {
-        ui.painter().rect_filled(rect, 0.0, theme::BG_ROW_SELECTED);
     }
-    let color = if is_open || resp.hovered() { theme::TEXT } else { theme::TEXT_HEADING };
+    let color = if is_open || resp.hovered() { theme::TEXT } else { theme::TOP_MENU_TEXT };
     ui.painter().galley_with_override_text_color(rect.center() - galley.size() / 2.0, galley, color);
     if !is_open {
         return;

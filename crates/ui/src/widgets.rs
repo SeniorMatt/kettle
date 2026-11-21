@@ -17,35 +17,26 @@ pub fn gradient(ui: &Ui, rect: Rect, left: Color32, right: Color32) {
     ui.painter().add(mesh);
 }
 
-/// Fill `rect` with a top-to-bottom gradient.
-pub fn vgradient(ui: &Ui, rect: Rect, top: Color32, bottom: Color32) {
-    let mut mesh = Mesh::default();
-    for (pos, c) in
-        [(rect.left_top(), top), (rect.right_top(), top), (rect.right_bottom(), bottom), (rect.left_bottom(), bottom)]
-    {
-        mesh.colored_vertex(pos, c);
-    }
-    mesh.add_triangle(0, 1, 2);
-    mesh.add_triangle(0, 2, 3);
-    ui.painter().add(mesh);
-}
-
-/// The big Play / Install button of the game page (`PlayButton`): gradient with stops at 0 % and 60 % that
-/// slides 25 % -> 0 % on hover and 40 % pressed, 20 px upper-case text, 2 px radius, 0.2 s fade.
+/// A flat coloured button with an icon and an upper-case label (store "Add to cart"): 2 px radius, no gradient.
 pub fn action_button(ui: &mut Ui, icon: &str, label: &str, colors: (Color32, Color32)) -> Response {
-    let font = theme::regular(20.0); // Steam uses weight 300 with 1 px letter-spacing; we have neither
+    let font = theme::regular(16.0);
     let text = format!("{icon}  {}", label.to_uppercase());
     let galley = ui.painter().layout_no_wrap(text, font, Color32::WHITE);
-    let size = Vec2::new((galley.size().x + 24.0).max(theme::PAGE_PLAY_MIN_W), theme::PAGE_ACTION_H);
+    let size = Vec2::new((galley.size().x + 32.0).max(theme::PAGE_PLAY_MIN_W), theme::PAGE_ACTION_H);
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
-    let hover = anim::animate_bool(ui.ctx(), resp.id.with("hover"), resp.hovered(), 0.2);
-    let press = anim::animate_bool(ui.ctx(), resp.id.with("press"), resp.is_pointer_button_down_on(), 0.04);
-    let pos = (0.25 - 0.25 * hover) * (1.0 - press) + 0.4 * press;
-    let (l, r) = slide(colors.0, colors.1, pos);
-    round_gradient(ui, rect, theme::BUTTON_RADIUS, l, r);
+    let hover = anim::animate_bool(ui.ctx(), resp.id.with("hover"), resp.hovered(), 0.12);
+    let press = resp.is_pointer_button_down_on();
+    let bg = shade(colors.0, hover, press);
+    ui.painter().rect_filled(rect, theme::BUTTON_RADIUS, bg);
     let at = rect.center() - galley.size() / 2.0;
     ui.painter().galley(at, galley, Color32::WHITE);
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// A flat colour brightened on hover and darkened while pressed.
+pub fn shade(base: Color32, hover: f32, press: bool) -> Color32 {
+    let c = base.lerp_to_gamma(Color32::WHITE, 0.12 * hover);
+    if press { c.gamma_multiply(0.85) } else { c }
 }
 
 /// A square icon button (gear, info, ...): `MenuButton`, radius 4, translucent fill that brightens on hover.
@@ -54,21 +45,9 @@ pub fn icon_button(ui: &mut Ui, icon: &str, size: f32, tooltip: &str) -> Respons
     let t = anim::animate_bool(ui.ctx(), resp.id.with("hover"), resp.hovered(), 0.12);
     let bg = theme::PAGE_ICON_BTN_BG.lerp_to_gamma(theme::PAGE_ICON_BTN_BG_HOVER, t);
     ui.painter().rect_filled(rect, 4.0, bg);
-    let color = Color32::from_white_alpha(128).lerp_to_gamma(Color32::WHITE, t);
+    let color = theme::SIDE_ICON.lerp_to_gamma(Color32::WHITE, t);
     ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, icon, theme::regular(size * 0.55), color);
     resp.on_hover_text(tooltip)
-}
-
-/// A text label that can be clicked, brightening on hover (nav tabs, links).
-/// The active-tab underline is drawn by the caller so it can slide.
-pub fn text_tab(ui: &mut Ui, text: &str, font: egui::FontId, active: bool) -> Response {
-    let galley = ui.painter().layout_no_wrap(text.to_string(), font, theme::TEXT);
-    let (rect, resp) = ui.allocate_exact_size(galley.size() + Vec2::new(0.0, 4.0), Sense::click());
-    let hover = anim::animate_bool(ui.ctx(), resp.id.with("hover"), resp.hovered() && !active, anim::FAST);
-    let on = anim::animate_bool(ui.ctx(), resp.id.with("on"), active, anim::NORMAL);
-    let color = theme::TEXT.lerp_to_gamma(Color32::WHITE, hover).lerp_to_gamma(theme::ACCENT, on);
-    ui.painter().galley_with_override_text_color(Pos2::new(rect.left(), rect.top() + 2.0), galley, color);
-    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 /// A soft light band sweeping over a loading placeholder. Repaints (about 20
@@ -131,27 +110,18 @@ pub fn image_fit_bottom_left(ui: &Ui, bounds: Rect, tex: &egui::TextureHandle, a
 /// Look of a [`button`].
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ButtonStyle {
-    /// Blue gradient, for the main action of a dialog (`DialogButton.Primary`).
+    /// Flat blue, for the main action of a dialog (`DialogButton.Primary`).
     Primary,
     /// Grey, for everything else (`DialogButton`).
     Secondary,
-    /// Red gradient, for destructive actions.
+    /// Flat red, for destructive actions.
     Danger,
-    /// Green gradient (`DialogButton.GreenPlay`).
+    /// Flat green.
     #[allow(dead_code)] // Kept with the other Steam button styles; nothing uses it yet.
     Green,
 }
 
-/// The two colours of a Steam gradient button. The official client paints a gradient that is 330 % of the
-/// button wide, with stops at 0 % and 60 %, and slides it: `pos` is the background position (25 % at rest,
-/// 0 % hovered, 40 % pressed). Returns the colours at the button's left and right edge.
-fn slide(a: Color32, b: Color32, pos: f32) -> (Color32, Color32) {
-    let offset = pos * (3.3 - 1.0);
-    let at = |x: f32| a.lerp_to_gamma(b, (x / 1.98).clamp(0.0, 1.0));
-    (at(offset), at(offset + 1.0))
-}
-
-/// A Steam `DialogButton`: 32 px high, 2 px radius, 14 px text, grey (blue / green / red gradient for the
+/// A Steam `DialogButton`: 32 px high, 2 px radius, 14 px text, grey (flat blue / green / red for the
 /// coloured ones) that fades to its hover colour in 0.2 s. `enabled == false` draws it dim and inert.
 pub fn button(ui: &mut Ui, label: &str, style: ButtonStyle, enabled: bool) -> Response {
     button_min(ui, label, style, enabled, 0.0)
@@ -170,21 +140,13 @@ pub fn button_min(ui: &mut Ui, label: &str, style: ButtonStyle, enabled: bool, m
     if !enabled {
         ui.painter().rect_filled(rect, radius, theme::BTN_DISABLED_BG);
         fg = theme::BTN_DISABLED_FG;
-    } else if let Some((a, b)) = match style {
-        ButtonStyle::Primary => Some((theme::BTN_PRIMARY_A, theme::BTN_PRIMARY_B)),
-        ButtonStyle::Green => Some((theme::PLAY_A, theme::PLAY_B)),
-        ButtonStyle::Danger => Some((theme::BTN_DANGER_A, theme::BTN_DANGER_B)),
+    } else if let Some(color) = match style {
+        ButtonStyle::Primary => Some(theme::BTN_PRIMARY_A),
+        ButtonStyle::Green => Some(theme::PLAY_A),
+        ButtonStyle::Danger => Some(theme::BTN_DANGER_A),
         ButtonStyle::Secondary => None,
     } {
-        // Rest 25 %, hover 0 %, pressed 40 % (the danger button has no slide; it brightens instead).
-        let pos = (0.25 - 0.25 * hover) * (1.0 - press) + 0.4 * press;
-        let (l, r) = if style == ButtonStyle::Danger {
-            let k = 1.0 + 0.12 * hover - 0.15 * press;
-            (a.gamma_multiply(k), b.gamma_multiply(k))
-        } else {
-            slide(a, b, pos)
-        };
-        round_gradient(ui, rect, radius, l, r);
+        ui.painter().rect_filled(rect, radius, shade(color, hover, press > 0.5));
     } else {
         let base = theme::BTN_FLAT.lerp_to_gamma(theme::BTN_FLAT_HOVER, hover);
         let bg = base.lerp_to_gamma(theme::BTN_FLAT_ACTIVE, press);
@@ -193,20 +155,6 @@ pub fn button_min(ui: &mut Ui, label: &str, style: ButtonStyle, enabled: bool, m
     }
     ui.painter().galley_with_override_text_color(rect.center() - galley.size() / 2.0, galley, fg);
     if enabled { resp.on_hover_cursor(egui::CursorIcon::PointingHand) } else { resp }
-}
-
-/// A left-to-right gradient with rounded corners: the ends are painted as small rounded rects in the edge
-/// colours, the middle as a gradient mesh (the corners are only 2 px, so this is invisible).
-fn round_gradient(ui: &Ui, rect: Rect, radius: egui::CornerRadius, left: Color32, right: Color32) {
-    let r = radius.nw as f32;
-    ui.painter().rect_filled(rect, radius, left.lerp_to_gamma(right, 0.5));
-    gradient(ui, rect.shrink2(Vec2::new(0.0, r.min(rect.height() / 2.0))), left, right);
-    // Re-cover the strip above and below with straight gradients, inset by the radius.
-    let inset = Rect::from_min_max(Pos2::new(rect.left() + r, rect.top()), Pos2::new(rect.right() - r, rect.top() + r));
-    let lerp = |x: f32| left.lerp_to_gamma(right, ((x - rect.left()) / rect.width()).clamp(0.0, 1.0));
-    gradient(ui, inset, lerp(inset.left()), lerp(inset.right()));
-    let inset = inset.translate(Vec2::new(0.0, rect.height() - r));
-    gradient(ui, inset, lerp(inset.left()), lerp(inset.right()));
 }
 
 /// The row of buttons at the bottom of a dialog: right-aligned, in Steam's order. Add the primary button
@@ -329,13 +277,7 @@ pub fn combo<R>(
             .icon(|ui, rect, visuals, _open| {
                 let lit = visuals.fg_stroke.color == Color32::WHITE;
                 let color = if lit { Color32::WHITE } else { theme::DROPDOWN_ARROW };
-                ui.painter().text(
-                    rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    egui_phosphor::regular::CARET_DOWN,
-                    theme::regular(12.0),
-                    color,
-                );
+                crate::steam_icons::chevron_down(ui.painter(), rect.center(), 10.0, color);
             })
             .show_ui(ui, list);
     });
@@ -424,11 +366,10 @@ pub fn slider<N: egui::emath::Numeric>(
     ui.painter().rect_filled(inner, 5.0, theme::SLIDER_TRACK);
     let x = rect.left() + 7.0 + span * f;
     let fill = Rect::from_min_max(inner.min, Pos2::new(x.max(inner.left() + 1.0), inner.max.y));
-    vgradient(ui, fill.shrink2(Vec2::new(0.0, 0.0)), theme::SLIDER_FILL_A, theme::SLIDER_FILL_B);
+    ui.painter().rect_filled(fill, 5.0, theme::SLIDER_FILL);
     let c = Pos2::new(x, rect.center().y);
     ui.painter().circle_filled(c, 7.5, Color32::from_black_alpha(50));
-    let grab =
-        theme::SLIDER_GRAB_A.lerp_to_gamma(theme::SLIDER_GRAB_B, 0.5).lerp_to_gamma(Color32::WHITE, 0.25 * hover);
+    let grab = theme::SLIDER_GRAB.lerp_to_gamma(Color32::WHITE, 0.5 * hover);
     ui.painter().circle_filled(c, 6.0, grab);
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }

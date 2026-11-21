@@ -68,6 +68,18 @@ pub fn manage(anchor: &Response, client: &mut Client, game: &Game, ov: &mut Over
     });
 }
 
+/// The drop-down arrow next to PLAY: the other ways to start the game, and its properties.
+pub fn play_menu(anchor: &Response, client: &mut Client, game: &Game, ov: &mut Overlays) {
+    widgets::popup_menu(anchor, |ui| {
+        if item(ui, "Launch via Steam client", game.install.is_installed()) {
+            client.send(Command::LaunchViaSteam(game.app_id));
+        }
+        if item(ui, "Properties...", true) {
+            ov.open_properties(game.app_id);
+        }
+    });
+}
+
 /// Play, Update, Stop or Install, whichever fits the game's state.
 fn primary(ui: &mut Ui, client: &mut Client, game: &Game, c: &Can, ov: &mut Overlays) {
     let app = game.app_id;

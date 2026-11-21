@@ -12,3 +12,6 @@ sr-client = { path = "../client" }
 sr-steam = { path = "../steam" }
 egui = { version = "=0.36.2", default-features = false, features = ["default_fonts"] }
 egui-phosphor = { version = "0.14", default-features = false, features = ["regular", "fill"] }
+
+[dev-dependencies]
+egui_kittest = { version = "=0.36.2" }
