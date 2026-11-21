@@ -64,3 +64,10 @@ Linux (KDE Plasma, Wayland first) is the main target. Windows is supported from 
 
 `cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test` has to pass before every commit.
 `cargo check --target x86_64-pc-windows-gnu --workspace` has to pass too. It needs `rustup target add x86_64-pc-windows-gnu` and the MinGW cross-compiler (`gcc-mingw-w64-x86-64`).
+
+## Steam Cloud saves
+
+- `sr_steam::cloud` is pure: reads the `ufs` section of appinfo (savefiles, rootoverrides), maps roots to folders (native Linux: `gameinstall`, `LinuxHome`, XDG dirs; Proton/umu: the Windows roots inside `compatdata/<app>/pfx/drive_c/users/steamuser`; `remote/` of `userdata/<account>/<app>` for `ISteamRemoteStorage`), scans local files (SHA-1), keeps a per-app `SyncState` (`<data dir>/cloud/<appid>.json`) and decides: download / upload / conflict. It never deletes anything.
+- `sr_steam::cloud_sync` runs the plan through a `Backend` trait: `before_launch` (download newer files, check SHA-1, copy replaced files to `cloud-backups/`, state saved only on success) and `after_exit` (upload changed files in one batch; nothing if the cloud changed too). `CmBackend` speaks `Cloud.GetAppFileChangelist`, `ClientFileDownload`, `BeginAppUploadBatch`, `ClientBeginFileUpload`, `ClientCommitFileUpload` and `CompleteAppUploadBatchBlocking` over the shared CM connection, and moves bytes over HTTPS to the hosts Steam names. Written against the real proto types, not yet tried on a real account.
+- `sr_client::cloud` wires it in: the sync before a launch runs on the launch worker (`play::launch`) before the game or the Steam client starts; a conflict emits `CloudEvent::Conflict` and stops the launch, `Command::CloudResolve` answers and starts it again. A failed sync still lets the game start but leaves no context, so nothing is uploaded after it. Settings: `Settings::cloud_sync` (default on) and `cloud_games.json` (per-game off). `KETTLE_CLOUD_DRYRUN=1` logs the plan only. Everything is written to the launch log.
+- UI hooks are in `crates/ui/src/cloud_ui.rs` (`conflict_dialog`, `settings_row`, `game_row`, `status`).

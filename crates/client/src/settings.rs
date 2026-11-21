@@ -46,6 +46,9 @@ pub struct Settings {
     /// Keep the sign-in token in the keyring so the next start needs no QR code.
     #[serde(default = "default_true")]
     pub keep_signed_in: bool,
+    /// Steam Cloud: download saves before a game starts and upload them after it (a game can opt out).
+    #[serde(default = "default_true")]
+    pub cloud_sync: bool,
 }
 
 fn default_true() -> bool {
@@ -70,6 +73,7 @@ impl Default for Settings {
             downloads: Default::default(),
             notifications: Default::default(),
             keep_signed_in: true,
+            cloud_sync: true,
         }
     }
 }

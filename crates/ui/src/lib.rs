@@ -5,6 +5,7 @@
 
 mod anim;
 mod chrome;
+mod cloud_ui;
 mod collections_ui;
 mod dialogs;
 mod downloads_page;

@@ -151,6 +151,8 @@ pub struct AppInfo {
     pub steam_deck: Option<u8>,
     /// Steam Play tool the developer recommends (`common/steam_play...` is rare; usually `None`).
     pub compat_hint: Option<String>,
+    /// The `ufs` section (Steam Cloud save locations), as it is; see [`crate::cloud::Ufs`].
+    pub ufs: Option<Kv>,
 }
 
 impl AppInfo {
@@ -181,6 +183,7 @@ impl AppInfo {
                 .and_then(Kv::as_int)
                 .and_then(|n| u8::try_from(n).ok()),
             compat_hint: common.and_then(|c| c.get_string("steam_play_tool")).filter(|s| !s.is_empty()),
+            ufs: root.get("ufs").cloned(),
         }
     }
 

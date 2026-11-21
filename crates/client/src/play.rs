@@ -4,6 +4,7 @@
 //! sees events. Play time is recorded here, in a small JSON file, because we don't report to Steam: it is
 //! added to the number Steam gave us when the library is shown.
 
+use super::cloud::{self, CloudMode, Gate};
 use super::{Client, Event, Waker};
 use serde::{Deserialize, Serialize};
 use sr_model::AppId;
@@ -83,7 +84,11 @@ impl Client {
         if self.update_gate(app) {
             return;
         }
-        if self.state.running.contains_key(&app) || self.state.starting_steam.contains(&app) {
+        if self.state.running.contains_key(&app)
+            || self.state.starting_steam.contains(&app)
+            || self.state.cloud.active.contains_key(&app)
+            || self.state.cloud.conflict.as_ref().is_some_and(|c| c.app == app)
+        {
             return;
         }
         let name = self.state.game(app).map(|g| g.name.clone()).unwrap_or_default();
@@ -97,7 +102,9 @@ impl Client {
             hud: self.state.settings.hud.clone(),
             proton_log: self.state.settings.proton_log,
             gamescope: self.gamescope_for(app).then(|| self.state.settings.gamescope.clone()),
+            cloud: self.cloud_mode(app),
         };
+
         self.rt.spawn_blocking(move || launch(app, name, installed, start_steam, options, tx, wake));
     }
 
@@ -120,6 +127,7 @@ impl Client {
     pub(crate) fn game_exited(&mut self, app: AppId, seconds: u64, success: bool) {
         self.state.running.remove(&app);
         self.apply_bandwidth();
+        self.cloud_after_exit(app);
         self.play_stats.add(app, seconds, super::downloads::now_unix());
         let _ = store::save_json(&PlayStats::path(), &self.play_stats);
         self.merge_installed();
@@ -135,6 +143,7 @@ impl Client {
     pub(crate) fn play_failed(&mut self, problem: PlayProblem) {
         self.state.starting_steam.retain(|a| *a != problem.app);
         self.steam_missing.remove(&problem.app);
+        self.cloud_launch_failed(problem.app);
         self.state.play_problem = Some(problem);
     }
 
@@ -160,6 +169,8 @@ struct LaunchText {
     proton_log: bool,
     /// Gamescope's settings when this game is to run in it (the global switch and the game's override resolved).
     gamescope: Option<sr_steam::gamescope::GamescopeSettings>,
+    /// What this launch does about Steam Cloud.
+    cloud: CloudMode,
 }
 
 /// Worker: prepare the plan from Steam's app data and start it.
@@ -172,7 +183,10 @@ fn launch(
     tx: mpsc::Sender<Event>,
     wake: Waker,
 ) {
-    let prepared = run::appinfo_for(app.0).and_then(|info| {
+    let info = run::appinfo_for(app.0);
+    // Steam Cloud's save rules come with the app data.
+    let ufs = info.as_ref().ok().and_then(|i| i.as_ref()).and_then(|i| i.ufs.clone());
+    let prepared = info.and_then(|info| {
         let info = info.ok_or_else(|| {
             anyhow::anyhow!(
                 "Steam's app data has no launch information for this game yet. Try \"Launch via Steam client\"."
@@ -211,13 +225,25 @@ fn launch(
         let _ = tx.blocking_send(ev);
         wake();
     };
+    // Steam Cloud: fetch newer saves first. A conflict stops the launch here; the dialog starts it again.
+    let mut preamble = String::new();
+    let prepared = match prepared {
+        Ok(p) => match cloud::pre_launch(app, &name, &p, ufs.as_ref(), &options.cloud, &send) {
+            Gate::Go(text) => {
+                preamble = text;
+                Ok(p)
+            }
+            Gate::Stop => return,
+        },
+        Err(e) => Err(e),
+    };
     let prepared = prepared.inspect(|p| {
         if start_steam {
             ensure_steam(app, &p.install_dir, &send);
         }
     });
     let (result, details) = match prepared {
-        Ok(p) => (start(&p.plan, &send).map(|pid| (pid, p.gamescope)), run::describe(&p.plan)),
+        Ok(p) => (start(&p.plan, &preamble, &send).map(|pid| (pid, p.gamescope)), run::describe(&p.plan)),
         Err(e) => (Err(e), String::new()),
     };
     match result {
@@ -284,10 +310,14 @@ fn ensure_steam(app: AppId, install_dir: &std::path::Path, send: &impl Fn(Event)
 }
 
 /// Spawn `plan`; the exit watcher reports through `send`. Split out so a test can run a fake plan.
-fn start(plan: &run::LaunchPlan, send: &(impl Fn(Event) + Clone + Send + 'static)) -> anyhow::Result<u32> {
+fn start(
+    plan: &run::LaunchPlan,
+    preamble: &str,
+    send: &(impl Fn(Event) + Clone + Send + 'static),
+) -> anyhow::Result<u32> {
     let app = AppId(plan.appid);
     let on_exit = send.clone();
-    run::spawn(plan, move |f| {
+    run::spawn_with_preamble(plan, preamble, move |f| {
         on_exit(Event::GameExited { app, seconds: f.played.as_secs(), success: f.success });
     })
 }
@@ -331,7 +361,7 @@ mod tests {
                 let _ = done_tx.lock().unwrap().send((app, success));
             }
         };
-        let pid = start(&plan, &send).expect("spawns");
+        let pid = start(&plan, "", &send).expect("spawns");
         assert!(pid > 0);
         let (got, success) = done_rx.recv_timeout(std::time::Duration::from_secs(10)).expect("exit event");
         assert_eq!((got, success), (AppId(app), true));
