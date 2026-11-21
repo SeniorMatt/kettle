@@ -174,8 +174,7 @@ impl SettingsView {
     fn target_choice(&mut self, ui: &mut Ui, info: Option<&Arc<CompatInfo>>) {
         ui.horizontal(|ui| {
             ui.label(RichText::new("Install into").color(theme::TEXT_DIM));
-            let ours = info
-                .map_or("steam-rust folder".to_string(), |i| format!("steam-rust folder ({})", i.our_dir.display()));
+            let ours = info.map_or("Kettle folder".to_string(), |i| format!("Kettle folder ({})", i.our_dir.display()));
             ui.radio_value(&mut self.target, ToolTarget::Ours, ours);
             if info.is_none_or(|i| i.steam_dir.is_some()) {
                 ui.radio_value(&mut self.target, ToolTarget::Steam, "Steam's folder (Steam sees it too)");

@@ -1,8 +1,8 @@
-# steam-rust (working name)
+# Kettle
 
 A fast, native Steam client written in Rust: egui + wgpu, with no Chromium and no web views.
 
-> **Unofficial.** This project is not affiliated with, endorsed by, or sponsored by Valve Corporation. "Steam" is a trademark of Valve Corporation. The working name will change before any public release.
+> **Unofficial.** This project is not affiliated with, endorsed by, or sponsored by Valve Corporation. "Steam" is a trademark of Valve Corporation.
 
 ## Status
 
@@ -26,15 +26,15 @@ Privacy: no telemetry, only Valve's servers. See [PRIVACY.md](PRIVACY.md) for ex
 
 ```
 cargo build --release
-target/release/steam-rust
+target/release/kettle
 ```
 
-`STEAM_RUST_DEMO=2400 target/release/steam-rust` opens a demo library (no sign-in) for trying the UI.
+`KETTLE_DEMO=2400 target/release/kettle` opens a demo library (no sign-in) for trying the UI.
 
 Portable AppImage (one file, runs on any recent x86_64 Linux):
 
 ```
-scripts/build-appimage.sh          # writes dist/steam-rust-x86_64.AppImage
+scripts/build-appimage.sh          # writes dist/kettle-x86_64.AppImage
 ```
 
 The script downloads `appimagetool` on first use; set `APPIMAGETOOL=/path/to/appimagetool` to use one you already have.
@@ -44,7 +44,7 @@ Developer CLI:
 | Command | What it does |
 |---|---|
 | `sr-cli local` | Lists games installed by an existing Steam install |
-| `sr-cli login` | Starts a QR login. The QR is written to `~/.cache/steam-rust/qr.svg` |
+| `sr-cli login` | Starts a QR login. The QR is written to `~/.cache/kettle/qr.svg` |
 | `sr-cli owned <account>` | Counts the account's owned games |
 | `sr-cli cm <account>` | Logs on to Steam's CM servers and shows the license count |
 | `sr-cli logout <account>` | Removes the stored token and revokes it on Steam's servers |

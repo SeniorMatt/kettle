@@ -1,4 +1,4 @@
-//! Plain data types shared by every steam-rust crate.
+//! Plain data types shared by every kettle crate.
 //!
 //! Architecture invariant: this crate does no I/O and depends only on serde.
 

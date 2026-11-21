@@ -87,8 +87,28 @@ pub fn is_running() -> bool {
     }
     #[cfg(not(windows))]
     {
-        is_running_with(&pid_files(), |pid| proc_name(pid).is_some_and(|n| looks_like_steam(&n)))
+        is_running_with(&pid_files(), |pid| proc_name(pid).is_some_and(|n| looks_like_steam(&n))) || any_steam_process()
     }
+}
+
+/// Look for a running `steam` process of ours in /proc. Needed for Flatpak
+/// Steam: its pid file holds a pid from inside the sandbox, which means
+/// nothing on the host, but the process itself is visible here. Only runs
+/// when the player presses Play, so the scan's cost doesn't matter.
+#[cfg(target_os = "linux")]
+fn any_steam_process() -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let Ok(me) = std::fs::metadata("/proc/self") else { return false };
+    let Ok(entries) = std::fs::read_dir("/proc") else { return false };
+    entries.flatten().any(|e| {
+        let Some(pid) = e.file_name().to_str().and_then(|n| n.parse::<u32>().ok()) else { return false };
+        e.metadata().is_ok_and(|m| m.uid() == me.uid()) && proc_name(pid).is_some_and(|n| looks_like_steam(&n))
+    })
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+fn any_steam_process() -> bool {
+    false
 }
 
 /// True when one of `pid_files` holds a pid that `is_steam` accepts. `is_steam` must be false for dead pids.

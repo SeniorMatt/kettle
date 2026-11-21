@@ -4,7 +4,10 @@
 
 use egui::{Color32, CornerRadius, FontFamily, FontId, Stroke, Visuals};
 
-pub const APP_NAME: &str = "steam-rust";
+/// Shown to people (title, menus).
+pub const APP_NAME: &str = "Kettle";
+/// Lowercase id for the window class, folders and the keyring.
+pub const APP_ID: &str = "kettle";
 
 // ---- colors -------------------------------------------------------------
 

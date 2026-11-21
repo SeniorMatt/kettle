@@ -1,6 +1,6 @@
 # Architecture
 
-steam-rust is a native Steam client. It talks to Steam's servers directly (CM protocol and Web API), shows the library in an egui + wgpu window, and later downloads and launches games itself. This file is the map. Details live in each crate's docs.
+Kettle is a native Steam client. It talks to Steam's servers directly (CM protocol and Web API), shows the library in an egui + wgpu window, and later downloads and launches games itself. This file is the map. Details live in each crate's docs.
 
 ## Bird's-eye view
 
@@ -22,7 +22,7 @@ steam-rust is a native Steam client. It talks to Steam's servers directly (CM pr
 | `sr-steam` | `crates/steam` | Everything that talks to Steam or the disk: `auth` (QR login), `cm` (CM servers via steam-vent), `webapi`, `local` (reads an existing official Steam install, read-only), `vdf` (text KeyValues parser), `secrets` (keyring), `cache` (our own XDG files), `art` (cover-art lookup), `friends` (friends list, presence and 1:1 chat over the CM connection; no GUI types), `steam_client` (does a game ship the Steamworks library, is the official client running, start it minimized with `-silent`). |
 | `sr-client` | `crates/client` | `State`, `Command`, `Event` and the reducer. Owns the tokio runtime and turns Commands into tasks. Modules: `downloads` (queue, one active download, progress events tagged with a job number), `play` (own launcher, running games, local play time; for Steamworks games it first starts the official client in the background when the setting allows, and never touches its files), `tools` (Proton manager), `manage` (uninstall, browse files), `settings`, `friends` (friends and chat state, the reconnecting session supervisor, demo friends; bounded: 2000 friends, 500 messages per chat). |
 | `sr-ui` | `crates/ui` | egui views and widgets. `theme` holds every color, size and font as named tokens. |
-| `steam-rust` | `crates/app` | The binary: eframe setup (wgpu), fonts, and wiring client and ui together. |
+| `kettle` | `crates/app` | The binary: eframe setup (wgpu), fonts, and wiring client and ui together. |
 | `sr-cli` | `crates/steam/src/bin` | A developer CLI that exercises `sr-steam` without a GUI. |
 
 ## Architecture invariants
@@ -42,7 +42,7 @@ steam-rust is a native Steam client. It talks to Steam's servers directly (CM pr
 - **Long lists are virtualized.** The library grid and list lay out only the visible rows (`ScrollArea::show_rows`).
 - **Images** are decoded and downscaled on worker threads, uploaded once, and kept in an LRU of textures. Art comes from the official client's `appcache/librarycache` when it's present, otherwise from Steam's CDN into our cache. It is never committed.
 - **Errors:** `anyhow` at the adapter level, plus typed enums wherever the UI has to react (for example `AuthExpired`). Every error is handled once, either propagated or shown.
-- **Measuring:** `sr-cli` and the app print timings (`STEAM_RUST_TIMINGS=1`). Changes that affect performance note their before and after numbers in the commit message.
+- **Measuring:** `sr-cli` and the app print timings (`KETTLE_TIMINGS=1`). Changes that affect performance note their before and after numbers in the commit message.
 
 ## Platforms
 

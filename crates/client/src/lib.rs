@@ -438,7 +438,7 @@ impl Client {
             generation: Arc::new(AtomicU64::new(0)),
         };
         c.spawn_local_scan();
-        match std::env::var("STEAM_RUST_DEMO").ok().and_then(|v| v.parse::<usize>().ok()) {
+        match std::env::var("KETTLE_DEMO").ok().and_then(|v| v.parse::<usize>().ok()) {
             Some(n) => {
                 c.start_demo(n);
                 c.demo_running();
@@ -813,9 +813,9 @@ impl Client {
         self.start_friends_demo();
     }
 
-    /// `STEAM_RUST_DEMO_RUNNING=<appid>`: show a demo game as running, without starting any process.
+    /// `KETTLE_DEMO_RUNNING=<appid>`: show a demo game as running, without starting any process.
     fn demo_running(&mut self) {
-        let app = std::env::var("STEAM_RUST_DEMO_RUNNING").ok().and_then(|v| v.parse::<u32>().ok());
+        let app = std::env::var("KETTLE_DEMO_RUNNING").ok().and_then(|v| v.parse::<u32>().ok());
         if let Some(app) = app {
             // pid 0 is never signalled (see `stop_game`).
             self.state.running.insert(AppId(app), RunningGame { pid: 0, started: Instant::now() });
@@ -857,7 +857,7 @@ impl Client {
                 wake();
             };
             let fail = |e: anyhow::Error| Event::LoginFailed { generation, error: format!("{e:#}") };
-            let mut session = match auth::begin_qr("steam-rust (Linux)") {
+            let mut session = match auth::begin_qr(auth::DEVICE_NAME) {
                 Ok(s) => s,
                 Err(e) => return send(fail(e)),
             };

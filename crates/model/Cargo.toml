@@ -1,6 +1,6 @@
 [package]
 name = "sr-model"
-description = "Plain data types shared by all steam-rust crates. No I/O."
+description = "Plain data types shared by all kettle crates. No I/O."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

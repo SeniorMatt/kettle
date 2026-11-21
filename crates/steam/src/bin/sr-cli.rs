@@ -1,6 +1,6 @@
 //! Developer CLI for the core crate (no GUI).
 //!   sr-cli local            installed games found in existing Steam installs
-//!   sr-cli login            QR login; writes the QR to ~/.cache/steam-rust/qr.svg
+//!   sr-cli login            QR login; writes the QR to ~/.cache/kettle/qr.svg
 //!   sr-cli owned <account>  owned games via Web API (token from keyring)
 //!   sr-cli cm <account>     CM logon + license count
 //!   sr-cli logout <account> revoke and remove the stored token
@@ -51,7 +51,7 @@ fn cmd_local() -> Result<()> {
 }
 
 fn cmd_login() -> Result<()> {
-    let mut s = auth::begin_qr("steam-rust (Linux)")?;
+    let mut s = auth::begin_qr(auth::DEVICE_NAME)?;
     let svg_path = store::cache_dir().join("qr.svg");
     let write_qr = |url: &str| -> Result<()> {
         store::write_private(&svg_path, auth::qr_svg(url)?.as_bytes())?;

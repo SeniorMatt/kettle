@@ -297,7 +297,7 @@ pub fn origin_label(o: ToolOrigin) -> &'static str {
         ToolOrigin::SteamLibrary => "Steam",
         ToolOrigin::SteamCustom => "Steam, custom",
         ToolOrigin::System => "System",
-        ToolOrigin::Ours => "steam-rust",
+        ToolOrigin::Ours => "Kettle",
     }
 }
 

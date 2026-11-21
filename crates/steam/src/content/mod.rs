@@ -44,10 +44,10 @@ impl CmLink for Connection {
     }
 }
 
-/// Where our own downloads go unless the caller says otherwise. `STEAM_RUST_LIBRARY` overrides it, so tests
+/// Where our own downloads go unless the caller says otherwise. `KETTLE_LIBRARY` overrides it, so tests
 /// and demos never touch the real data folder.
 pub fn default_library() -> PathBuf {
-    match std::env::var_os("STEAM_RUST_LIBRARY").filter(|v| !v.is_empty()) {
+    match std::env::var_os("KETTLE_LIBRARY").filter(|v| !v.is_empty()) {
         Some(dir) => PathBuf::from(dir),
         None => crate::store::data_dir().join("library"),
     }
@@ -515,10 +515,10 @@ impl Download {
 }
 
 /// Where the PICS data of an app we installed is kept:
-/// `<library>/steamapps/steam-rust/appinfo_<appid>.vdf` (a folder the official
+/// `<library>/steamapps/kettle/appinfo_<appid>.vdf` (a folder the official
 /// client ignores).
 pub fn appinfo_path(library: &Path, appid: u32) -> PathBuf {
-    library.join("steamapps").join("steam-rust").join(format!("appinfo_{appid}.vdf"))
+    library.join("steamapps").join("kettle").join(format!("appinfo_{appid}.vdf"))
 }
 
 fn save_appinfo(library: &Path, app: &AppInfo) -> Result<()> {

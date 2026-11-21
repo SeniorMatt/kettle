@@ -1,9 +1,9 @@
 [Desktop Entry]
 Type=Application
-Name=steam-rust
+Name=Kettle
 Comment=Fast native game library client (unofficial)
-Exec=steam-rust
-Icon=steam-rust
+Exec=kettle
+Icon=kettle
 Categories=Game;
 Terminal=false
-StartupWMClass=steam-rust
+StartupWMClass=kettle

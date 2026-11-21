@@ -1,4 +1,4 @@
-//! steam-rust desktop app: window setup and wiring only.
+//! kettle desktop app: window setup and wiring only.
 
 mod hotkey;
 
@@ -61,7 +61,7 @@ fn app_icon() -> egui::IconData {
 
 fn main() -> eframe::Result {
     let started = Instant::now();
-    let timings = std::env::var_os("STEAM_RUST_TIMINGS").is_some();
+    let timings = std::env::var_os("KETTLE_TIMINGS").is_some();
     let options = eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
         viewport: egui::ViewportBuilder::default()
@@ -69,7 +69,7 @@ fn main() -> eframe::Result {
             // We draw our own title bar and resize edges (see sr-ui's chrome).
             .with_decorations(false)
             .with_icon(app_icon())
-            .with_app_id(theme::APP_NAME)
+            .with_app_id(theme::APP_ID)
             .with_inner_size([1280.0, 800.0])
             .with_min_inner_size([900.0, 560.0]),
         ..Default::default()

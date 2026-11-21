@@ -547,7 +547,7 @@ impl Client {
 
     // ---- demo -----------------------------------------------------------------------------------
 
-    /// About 40 made-up friends and a bot that answers in chat (`STEAM_RUST_DEMO`).
+    /// About 40 made-up friends and a bot that answers in chat (`KETTLE_DEMO`).
     pub(crate) fn start_friends_demo(&mut self) {
         self.friends.demo = true;
         let now = now_secs();

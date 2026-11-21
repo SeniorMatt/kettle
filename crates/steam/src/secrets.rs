@@ -5,7 +5,7 @@
 use anyhow::{Context, Result};
 use std::sync::Once;
 
-const SERVICE: &str = "steam-rust";
+const SERVICE: &str = "kettle";
 
 fn init() {
     static ONCE: Once = Once::new();
@@ -56,7 +56,7 @@ mod tests {
     #[test]
     #[ignore]
     fn keyring_round_trip() {
-        let acct = "__steam_rust_selftest__";
+        let acct = "__kettle_selftest__";
         super::save_refresh_token(acct, "dummy-value").unwrap();
         assert_eq!(super::load_refresh_token(acct).unwrap().as_deref(), Some("dummy-value"));
         super::delete_refresh_token(acct).unwrap();

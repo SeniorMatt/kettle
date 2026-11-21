@@ -87,7 +87,7 @@ impl Client {
         let Some(g) = self.state.running.get(&app) else { return };
         let pid = g.pid;
         if pid == 0 {
-            return; // a simulated game (STEAM_RUST_DEMO_RUNNING)
+            return; // a simulated game (KETTLE_DEMO_RUNNING)
         }
         self.rt.spawn_blocking(move || terminate_group(pid));
     }

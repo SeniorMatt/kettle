@@ -1,6 +1,6 @@
-# Privacy and security
+# Kettle
 
-steam-rust has no telemetry, no analytics, no crash reporting and no servers of its own. It only talks to Valve's servers, the same ones the official client uses.
+Kettle has no telemetry, no analytics, no crash reporting and no servers of its own. It only talks to Valve's servers, the same ones the official client uses.
 
 ## Signing in
 
@@ -10,7 +10,7 @@ steam-rust has no telemetry, no analytics, no crash reporting and no servers of 
 - When a session ends, tokens are overwritten in memory.
 - **Sign out** does three things. It deletes the token from the keyring. It revokes the token on Steam's servers, so any copy anywhere stops working. And it deletes the cached library of that account.
 - **Error messages are scrubbed:** anything that looks like a token is replaced with `[redacted]` before it's shown.
-- The device name sent to Steam is just `steam-rust (Linux)`. It doesn't include your hostname or username.
+- The device name sent to Steam is just `Kettle (Linux)` (or `Kettle (Windows)`). It doesn't include your hostname or username.
 
 ## Files we write
 
@@ -18,16 +18,16 @@ All files are readable only by you: folders are mode `0700` and files `0600`.
 
 | Path | Contents |
 |---|---|
-| `~/.local/share/steam-rust/accounts.json` | Account names and SteamIDs you've signed in with (no secrets) |
-| `~/.cache/steam-rust/library-<steamid>.json` | Your owned-games list, for instant startup |
-| `~/.local/share/steam-rust/settings.json` | Your default download folder and the number of parallel downloads |
-| `~/.local/share/steam-rust/playtime.json` | Play time we measured ourselves, per game (never sent anywhere) |
-| `~/.local/share/steam-rust/compat_choices.json` | Which compatibility tool you picked per game |
-| `~/.local/share/steam-rust/logs/` | Output of the last run of each game we started |
-| `~/.local/share/steam-rust/compatibilitytools.d/` | Compatibility tools (Proton, ...) you installed from the app |
-| `~/.local/share/steam-rust/library/` | Games installed by the app, unless you pick another folder |
-| `~/.cache/steam-rust/art/` | Cover art downloaded from Steam's CDN |
-| `~/.cache/steam-rust/store/` | Public store answers and images, kept briefly to make the Store tab fast |
+| `~/.local/share/kettle/accounts.json` | Account names and SteamIDs you've signed in with (no secrets) |
+| `~/.cache/kettle/library-<steamid>.json` | Your owned-games list, for instant startup |
+| `~/.local/share/kettle/settings.json` | Your default download folder and the number of parallel downloads |
+| `~/.local/share/kettle/playtime.json` | Play time we measured ourselves, per game (never sent anywhere) |
+| `~/.local/share/kettle/compat_choices.json` | Which compatibility tool you picked per game |
+| `~/.local/share/kettle/logs/` | Output of the last run of each game we started |
+| `~/.local/share/kettle/compatibilitytools.d/` | Compatibility tools (Proton, ...) you installed from the app |
+| `~/.local/share/kettle/library/` | Games installed by the app, unless you pick another folder |
+| `~/.cache/kettle/art/` | Cover art downloaded from Steam's CDN |
+| `~/.cache/kettle/store/` | Public store answers and images, kept briefly to make the Store tab fast |
 
 If a game needs the Steam client (Settings, Games tab, on by default), we start the official client minimized with `-silent` before it. We only start the program and read its pid file; nothing is sent to it or to Valve by us for this.
 

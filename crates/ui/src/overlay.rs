@@ -90,7 +90,7 @@ impl OverlayView {
         let monitor = ctx.input(|i| i.viewport().monitor_size).unwrap_or(vec2(1920.0, 1080.0));
         let builder = ViewportBuilder::default()
             .with_title(format!("{} overlay", theme::APP_NAME))
-            .with_app_id(format!("{}-overlay", theme::APP_NAME))
+            .with_app_id(format!("{}-overlay", theme::APP_ID))
             .with_decorations(false)
             .with_transparent(true)
             .with_always_on_top()
@@ -101,7 +101,7 @@ impl OverlayView {
         let mut hide = false;
         let started = client.state().running.get(&game).map(|g| g.started);
         let name = client.state().game(game).map_or_else(|| format!("App {}", game.0), |g| g.name.clone());
-        ctx.show_viewport_immediate(ViewportId::from_hash_of("steam-rust-overlay"), builder, |ui, _class| {
+        ctx.show_viewport_immediate(ViewportId::from_hash_of("kettle-overlay"), builder, |ui, _class| {
             let ctx = ui.ctx().clone();
             let now = ctx.input(|i| i.time);
             let since = *self.since.get_or_insert(now);

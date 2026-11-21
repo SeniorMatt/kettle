@@ -1,4 +1,4 @@
-//! egui views for steam-rust.
+//! egui views for kettle.
 //!
 //! Architecture invariant: no I/O here. Views read `client.state()`, keep only
 //! view-local state (search text, scroll), and act through `client.send(..)`.

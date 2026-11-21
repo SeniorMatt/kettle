@@ -1,6 +1,6 @@
 [package]
-name = "steam-rust"
-description = "The steam-rust desktop app: window setup and wiring."
+name = "kettle"
+description = "The kettle desktop app: window setup and wiring."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

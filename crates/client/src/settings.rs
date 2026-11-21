@@ -75,8 +75,8 @@ pub fn library_choices(settings: &Settings) -> Vec<LibraryChoice> {
             out.push(LibraryChoice { path, label: label.to_string(), ours });
         }
     };
-    push(settings.default_library(), "steam-rust library", true);
-    push(content::default_library(), "steam-rust library", true);
+    push(settings.default_library(), "Kettle library", true);
+    push(content::default_library(), "Kettle library", true);
     for root in local::steam_roots() {
         for lib in local::library_folders(&root) {
             push(lib, "Steam library", false);

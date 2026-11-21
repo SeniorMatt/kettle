@@ -1,6 +1,6 @@
 //! Demo library for screenshots and performance tests without a login:
 //! every app id the official client has cached art for, plus installed games,
-//! repeated until there are `target` entries. Enabled by `STEAM_RUST_DEMO=<n>`.
+//! repeated until there are `target` entries. Enabled by `KETTLE_DEMO=<n>`.
 
 use sr_model::{AppId, Game};
 use sr_steam::local;

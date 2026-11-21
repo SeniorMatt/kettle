@@ -15,7 +15,7 @@ pub fn agent() -> &'static ureq::Agent {
         ureq::Agent::config_builder()
             .https_only(true)
             .max_redirects(5)
-            .user_agent("steam-rust")
+            .user_agent("Kettle")
             // No global timeout: a download of hundreds of MB is legitimately slow. Connecting and the
             // response headers must still arrive promptly.
             .timeout_global(None)

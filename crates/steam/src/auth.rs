@@ -145,6 +145,13 @@ impl std::fmt::Debug for Tokens {
     }
 }
 
+/// The device name Steam shows under "authorized devices". Deliberately
+/// generic: no hostname or user name.
+#[cfg(not(windows))]
+pub const DEVICE_NAME: &str = "Kettle (Linux)";
+#[cfg(windows)]
+pub const DEVICE_NAME: &str = "Kettle (Windows)";
+
 pub fn begin_qr(device_name: &str) -> Result<QrSession> {
     let req = BeginQrReq {
         device_friendly_name: device_name.into(),

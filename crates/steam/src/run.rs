@@ -448,10 +448,10 @@ mod tests {
         let pics = r#""appinfo" { "common" { "name" "Only Ours" "oslist" "linux" }
             "config" { "installdir" "Ours" "launch" { "0" { "executable" "run.sh" } } } }"#;
         std::fs::write(&path, pics).unwrap();
-        // SAFETY: tests in this module don't read STEAM_RUST_LIBRARY concurrently.
-        unsafe { std::env::set_var("STEAM_RUST_LIBRARY", &lib) };
+        // SAFETY: tests in this module don't read KETTLE_LIBRARY concurrently.
+        unsafe { std::env::set_var("KETTLE_LIBRARY", &lib) };
         let info = appinfo_for(appid).unwrap().expect("found in saved data");
-        unsafe { std::env::remove_var("STEAM_RUST_LIBRARY") };
+        unsafe { std::env::remove_var("KETTLE_LIBRARY") };
         std::fs::remove_dir_all(&lib).unwrap();
         assert_eq!(info.launch.len(), 1);
         assert_eq!(info.launch[0].executable, "run.sh");

@@ -9,7 +9,7 @@ use serde::{Serialize, de::DeserializeOwned};
 use std::path::{Path, PathBuf};
 
 pub fn dirs() -> directories::ProjectDirs {
-    directories::ProjectDirs::from("", "", "steam-rust").expect("no home directory")
+    directories::ProjectDirs::from("", "", "kettle").expect("no home directory")
 }
 
 pub fn cache_dir() -> PathBuf {
