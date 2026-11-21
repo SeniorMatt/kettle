@@ -25,6 +25,8 @@ All files are readable only by you: folders are mode `0700` and files `0600`.
 | `~/.local/share/kettle/collections.json` | Your favourites, hidden games and collections made in Kettle |
 | `~/.local/share/kettle/compat_choices.json` | Which compatibility tool you picked per game |
 | `~/.local/share/kettle/launch_options.json` | The launch options you typed per game (never sent anywhere) |
+| `~/.local/share/kettle/gamescope_games.json` | Which games always or never run in Gamescope (the global switch is in `settings.json`) |
+| `$XDG_RUNTIME_DIR/kettle-gamescope-<app id>.display` | While a game runs in Gamescope: the name of its private X display (`:1`), written by our launch shim, removed at the next launch |
 | `~/.local/share/kettle/logs/` | Output of the last run of each game we started |
 | `~/.local/share/kettle/compatibilitytools.d/` | Compatibility tools (Proton, ...) you installed from the app |
 | `~/.local/share/kettle/library/` | Games installed by the app, unless you pick another folder |
@@ -68,6 +70,10 @@ When you have not set launch options for a game, we show and use the ones the of
 The Shift+Tab shortcut is registered only while a game started here is running (and the setting is on); nothing is sent anywhere. Notes are saved per game in `notes.json` in our data folder.
 
 The overlay is drawn by a second process, `kettle --overlay`, started from the same program file while such a game runs and ended with it. It talks to the main app over a Unix socket in your runtime folder (`$XDG_RUNTIME_DIR/kettle-overlay-<pid>.sock`, readable only by you, removed when the game ends). Nothing leaves your computer through it. What goes over it: your friends' names and states, the open chats, the game's note and the performance overlay settings; and back: chat messages you type, note text and settings you change. The helper has no Steam sign-in or token.
+
+## Gamescope (optional)
+
+If you turn on "Run games in Gamescope" (off by default), the game is started as `gamescope <options> -- <the usual command>`. Gamescope is a separate program on your computer; nothing is sent anywhere. Kettle runs `gamescope --version` to show the version. For the overlay, a tiny `sh` shim in front of the game writes the name of Gamescope's private X display to a file in your runtime folder, and the overlay helper connects to that display (only a local socket).
 
 ## Performance overlay (MangoHud)
 

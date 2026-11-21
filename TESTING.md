@@ -68,6 +68,8 @@ Pick a small game you own (under 2 GB).
 
 - [ ] A native Linux game: PLAY → it starts and the button shows RUNNING. Quit the game: play time goes up.
 - [ ] A Windows game already installed by Steam: PLAY → it starts through Proton, with the same saves as in Steam.
+- [ ] Fallout 2 (38410) installed by Steam (also Fallout 3, Mafia, Magicka): PLAY starts it through Proton. `sr-cli launch 38410 --dry-run` shows `entry: id 0 ... fallout2launcher.exe`, `exe on disk: yes`, the prefix state and the container line; compare env and command with Steam's own (`ps`/`/proc/<pid>/environ` of the running game).
+- [ ] With Flatpak Steam only: PLAY a Proton game from the Flatpak library; saves are the ones Steam shows. If it fails, the dialog shows the reason, "Copy details" text and `~/.local/share/kettle/logs/launch-<appid>.log`.
 - [ ] Gear → Compatibility…: pick another Proton; the game uses it the next time.
 - [ ] If a game won't start, check the log path in the message (`~/.local/share/kettle/logs/`). Then try Gear → Launch via Steam client.
 - [ ] Steamworks games: with Settings → Games → "Start the Steam client in the background" on, PLAY on a game that ships `libsteam_api.so` / `steam_api64.dll` shows STARTING STEAM… and then starts the official client minimized (`-silent`) and the game. With it off, or without an installed client, the game starts anyway; if it exits within 10 s a notice says it needs the Steam client. `sr-cli launch <appid> --dry-run` prints "needs the Steam client: yes/no, running: yes/no" and starts nothing.
@@ -98,6 +100,22 @@ The overlay is a second process, `kettle --overlay <appid> --socket <path>`, an 
 - [ ] `ls -l $XDG_RUNTIME_DIR/kettle-overlay-*.sock` shows mode `srw-------` while a game runs and no file after it exits or the app is closed.
 - [ ] Top bar shows game, session time, clock, Friends, Settings, Return to game. Friends: online and in-game friends first, click opens a chat, a sent message appears. Notes, quick settings (overlay on/off, performance overlay on/off, preset) work. Controls are about 40 px high.
 - [ ] Settings > Interface > Animations = Off: the overlay appears without a fade.
+
+#### Gamescope (Settings > Run games in Gamescope; `sr-cli launch <appid> --dry-run --gamescope`)
+Needs `gamescope` installed (`sudo apt install gamescope`). Never tried in a real session yet; test on KDE Wayland first.
+- [ ] Not installed: the settings section shows the apt, pacman and dnf lines; with the switch on a game still starts normally and the terminal says `[gamescope] not installed`.
+- [ ] Installed: the section shows the version. `sr-cli launch <appid> --dry-run --gamescope` prints `gamescope: yes` and `command: gamescope -f -- /bin/sh -c '...' kettle-gamescope <run dir>/kettle-gamescope-<id>.display <usual command>`; the user's `gamemoderun` is right after the display file, the container / `proton` after it.
+- [ ] KDE Wayland, fullscreen: the game opens in a fullscreen Gamescope window on the monitor; Alt+Tab to another window and back does not minimize or un-fullscreen the game; other windows (notifications, the app) cannot cover it.
+- [ ] Window / Borderless / Windowed, game resolution lower than the window with FSR, NIS and Nearest: the picture is scaled. Sharpness changes the FSR look.
+- [ ] Frame rate limit: the game is capped (turn the performance overlay on to see it). With the cap only on the performance overlay, it still caps (through Gamescope) and does not cap twice.
+- [ ] Performance overlay on with `mangoapp` installed: one HUD, drawn by Gamescope; `MANGOHUD=1` is not in the command. Without `mangoapp`: the usual in-game HUD.
+- [ ] Overlay: `ls $XDG_RUNTIME_DIR/kettle-gamescope-*.display` shows `:N` a few seconds after the start. Shift+Tab draws the overlay over the game without changing the game's focus; keys type into chat; mouse clicks hit the buttons; closing returns input to the game. Repeat 20 times. If the overlay never shows, the terminal says `[overlay] the game's Gamescope display never appeared` after 90 s and the built-in window is used.
+- [ ] Mouse: a game that loses the mouse works with "Always grab the mouse" on. Note which games need it.
+- [ ] HDR only with the switch on and an HDR screen. Adaptive sync only with the switch on.
+- [ ] NVIDIA: Gamescope needs a recent driver and `nvidia-drm.modeset=1`; note any black window, missing cursor or crash and the driver version.
+- [ ] Per-game: Properties > Gamescope "Never" with the global switch on starts the game without it; "Always" with it off starts with it. The choice is in `gamescope_games.json`.
+- [ ] A game's own launch options `gamescope -f -- %command%` are respected: we add no second Gamescope.
+- [ ] Stop the game from the app: Gamescope and the game end together (`pgrep gamescope` empty).
 
 #### Performance overlay (MangoHud)
 - [ ] Without MangoHud installed: Settings > In Game > Performance overlay says so with apt, pacman and dnf commands; the overlay's Settings panel says so; games start normally.

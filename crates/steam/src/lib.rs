@@ -9,6 +9,7 @@ pub mod compat;
 pub mod compat_cli;
 pub mod content;
 pub mod friends;
+pub mod gamescope;
 pub mod http;
 pub mod http_dl;
 pub mod launch_opts;

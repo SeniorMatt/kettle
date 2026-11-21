@@ -26,15 +26,17 @@ pub enum SettingsTab {
 }
 
 impl SettingsTab {
+    /// The official client's order: Account, Notifications, Interface, Library, Downloads, Storage, In Game,
+    /// Compatibility (Privacy is ours and goes last).
     const ALL: [(SettingsTab, &'static str); 9] = [
         (SettingsTab::Account, "Account"),
+        (SettingsTab::Notifications, "Notifications"),
         (SettingsTab::Interface, "Interface"),
         (SettingsTab::Library, "Library"),
-        (SettingsTab::Storage, "Storage"),
         (SettingsTab::Downloads, "Downloads"),
-        (SettingsTab::Notifications, "Notifications"),
-        (SettingsTab::Compatibility, "Compatibility"),
+        (SettingsTab::Storage, "Storage"),
         (SettingsTab::InGame, "In Game"),
+        (SettingsTab::Compatibility, "Compatibility"),
         (SettingsTab::Privacy, "Privacy"),
     ];
 }
@@ -88,12 +90,12 @@ impl SettingsView {
             return;
         }
         let builder = ViewportBuilder::default()
-            .with_title(format!("{} Settings", theme::APP_NAME))
+            .with_title("Settings")
             .with_app_id(theme::APP_ID)
             // Our own title bar, like the main window.
             .with_decorations(false)
-            .with_inner_size([850.0, 620.0])
-            .with_min_inner_size([640.0, 440.0]);
+            .with_inner_size([1000.0, 700.0])
+            .with_min_inner_size([760.0, 500.0]);
         ctx.show_viewport_immediate(Self::viewport_id(), builder, |ui, _class| {
             let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
             if escape || ui.input(|i| i.viewport().close_requested()) {
@@ -105,6 +107,7 @@ impl SettingsView {
     }
 
     fn window(&mut self, ui: &mut Ui, client: &mut Client) {
+        theme::dialog_style(ui);
         let title =
             egui::Frame::new().fill(theme::BG_TOP).inner_margin(egui::Margin { left: 14, ..Default::default() });
         egui::Panel::top("settings-title")
@@ -114,14 +117,13 @@ impl SettingsView {
             .show(ui, |ui| {
                 chrome::drag_region(ui);
                 ui.horizontal_centered(|ui| {
-                    let name = format!("{} Settings", theme::APP_NAME);
-                    ui.label(RichText::new(name).font(theme::medium(13.0)).color(theme::TEXT_HEADING));
+                    ui.label(RichText::new("Settings").font(theme::medium(13.0)).color(theme::TEXT_HEADING));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         chrome::close_button(ui, theme::SETTINGS_TITLE_H)
                     });
                 });
             });
-        let nav = egui::Frame::new().fill(theme::SETTINGS_NAV_BG).inner_margin(egui::Margin::symmetric(0, 10));
+        let nav = egui::Frame::new().fill(theme::SETTINGS_NAV_BG).inner_margin(egui::Margin::symmetric(0, 8));
         egui::Panel::left("settings-nav")
             .exact_size(theme::SETTINGS_NAV_W)
             .resizable(false)
@@ -135,7 +137,7 @@ impl SettingsView {
                     }
                 }
             });
-        let page = egui::Frame::new().fill(theme::SETTINGS_BG).inner_margin(egui::Margin::symmetric(32, 22));
+        let page = egui::Frame::new().fill(theme::SETTINGS_BG).inner_margin(egui::Margin::symmetric(32, 24));
         egui::CentralPanel::default().frame(page).show(ui, |ui| {
             egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
                 let label = SettingsTab::ALL.iter().find(|(t, _)| *t == self.tab).map_or("", |(_, l)| l);
@@ -156,23 +158,24 @@ impl SettingsView {
         chrome::resize_zones(ui);
     }
 
-    /// One category in the left column: selected = lighter background and white text, hover = subtle.
+    /// One category in the left column (Steam's page list): 40 px rows, 16 px text; the selected one has the
+    /// grey button fill and white text, a hovered one a subtle fill.
     fn nav_item(&self, ui: &mut Ui, tab: SettingsTab, label: &str) -> bool {
-        let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 38.0), Sense::click());
-        let hover = anim::animate_bool(ui.ctx(), resp.id.with("hover"), resp.hovered(), anim::FAST);
+        let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 40.0), Sense::click());
+        let hover = anim::animate_bool(ui.ctx(), resp.id.with("hover"), resp.hovered(), 0.15);
         let selected = self.tab == tab;
         let bg = if selected {
-            theme::BG_ROW_SELECTED
+            theme::BTN_FLAT
         } else {
-            theme::SETTINGS_NAV_BG.lerp_to_gamma(theme::BG_ROW_HOVER, hover)
+            theme::SETTINGS_NAV_BG.lerp_to_gamma(theme::SETTINGS_NAV_HOVER, hover)
         };
         ui.painter().rect_filled(rect, 0.0, bg);
-        let color = if selected { Color32::WHITE } else { theme::TEXT.lerp_to_gamma(Color32::WHITE, hover) };
+        let color = if selected { Color32::WHITE } else { theme::BTN_TEXT.lerp_to_gamma(Color32::WHITE, hover) };
         ui.painter().text(
             Pos2::new(rect.left() + 24.0, rect.center().y),
             egui::Align2::LEFT_CENTER,
             label,
-            theme::regular(14.0),
+            theme::regular(16.0),
             color,
         );
         resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
@@ -188,6 +191,14 @@ impl SettingsView {
             );
             return;
         }
+        let mut log = client.state().settings.proton_log;
+        let desc = "Windows games start with PROTON_LOG=1; the logs go to Kettle's logs folder. Useful when a game \
+                    doesn't start. Leave it off otherwise: the logs grow quickly.";
+        widgets::setting_row(ui, "Write Proton logs", desc, |ui| {
+            if widgets::toggle(ui, &mut log).changed() {
+                client.send(Command::SetProtonLog(log));
+            }
+        });
         let compat = client.state().compat.clone();
         group_title(ui, "Installed");
         match &compat.info {
@@ -199,14 +210,11 @@ impl SettingsView {
                 ui.add(egui::Spinner::new());
             }
         }
-        ui.add_space(18.0);
-        ui.horizontal(|ui| {
-            group_title(ui, "Available");
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if widgets::link(ui, "Refresh").clicked() {
-                    client.send(Command::ProtonReleases(true));
-                }
-            });
+        group_title(ui, "Available");
+        widgets::setting_row(ui, "Release lists", "Fetch the newest releases from the sources below.", |ui| {
+            if widgets::button(ui, "Refresh", ButtonStyle::Secondary, true).clicked() {
+                client.send(Command::ProtonReleases(true));
+            }
         });
         self.target_choice(ui, compat.info.ready());
         if let Some(i) = &compat.install {
@@ -314,7 +322,7 @@ impl SettingsView {
 
 /// A small heading above a group of rows.
 fn group_title(ui: &mut Ui, text: &str) {
-    ui.label(RichText::new(text.to_uppercase()).font(theme::bold(12.0)).color(theme::TEXT_HEADING));
+    widgets::section_header(ui, text);
 }
 
 fn release_text(r: &ReleaseInfo, latest: bool) -> String {

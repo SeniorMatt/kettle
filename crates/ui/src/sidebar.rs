@@ -116,36 +116,45 @@ impl SidebarView {
 
     fn filter_row(&mut self, ui: &mut Ui) {
         ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            ui.add_space(16.0);
-            // A plain text drop-down: a box shows only on hover or while open.
-            ui.scope(|ui| {
-                let v = ui.visuals_mut();
-                v.widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
-                v.widgets.inactive.bg_stroke = egui::Stroke::NONE;
-                v.widgets.hovered.weak_bg_fill = theme::BG_ROW_HOVER;
-                v.widgets.open.weak_bg_fill = theme::MENU_BG;
-                let mut text = format!("GAMES {}", icon::CARET_DOWN);
+        ui.allocate_ui_with_layout(
+            Vec2::new(ui.available_width(), theme::SIDE_HEADER_H),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.add_space(16.0);
+                let mut text = "GAMES".to_string();
                 if self.filter != Filter::All {
-                    text = format!("GAMES: {} {}", self.filter.all_label(), icon::CARET_DOWN);
+                    text = format!("GAMES - {}", self.filter.all_label());
                 }
-                let text = RichText::new(text).font(theme::bold(12.0)).color(theme::TEXT_DIM);
-                widgets::menu_button(ui, text, |ui| {
-                    for (f, label) in [
-                        (Filter::All, "All games"),
-                        (Filter::Installed, "Installed only"),
-                        (Filter::Ready, "Ready to play"),
-                    ] {
-                        let mark = if self.filter == f { "\u{2713}  " } else { "     " };
-                        if ui.button(format!("{mark}{label}")).clicked() {
-                            self.filter = f;
-                            ui.close();
-                        }
-                    }
+                ui.label(RichText::new(text).font(theme::bold(12.0)).color(theme::TEXT_DIM));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.add_space(10.0);
+                    // The funnel: all / installed / ready to play.
+                    ui.scope(|ui| {
+                        let v = ui.visuals_mut();
+                        v.widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
+                        v.widgets.inactive.bg_stroke = egui::Stroke::NONE;
+                        v.widgets.hovered.weak_bg_fill = theme::BG_ROW_HOVER;
+                        v.widgets.open.weak_bg_fill = theme::MENU_BG;
+                        let tint = if self.filter == Filter::All { theme::TEXT_DIM } else { theme::ACCENT };
+                        let glyph = RichText::new(icon::FUNNEL).font(theme::regular(15.0)).color(tint);
+                        widgets::menu_button(ui, glyph, |ui| {
+                            for (f, label) in [
+                                (Filter::All, "All games"),
+                                (Filter::Installed, "Installed only"),
+                                (Filter::Ready, "Ready to play"),
+                            ] {
+                                let mark = if self.filter == f { "\u{2713}  " } else { "     " };
+                                if ui.button(format!("{mark}{label}")).clicked() {
+                                    self.filter = f;
+                                    ui.close();
+                                }
+                            }
+                        });
+                    });
                 });
-            });
-        });
-        ui.add_space(4.0);
+            },
+        );
+        ui.add_space(2.0);
     }
 
     fn search_box(&mut self, ui: &mut Ui) {
@@ -218,6 +227,7 @@ impl SidebarView {
 
     fn list(&mut self, ui: &mut Ui, client: &mut Client, tex: &mut Textures, ov: &mut Overlays) {
         let mut clicked = None;
+        let mut dbl = None;
         let mut toggled = None;
         let mut opened = None;
         // Rows whose right-click menu is open (or was just asked for); the menu needs `client` mutably, so it
@@ -304,33 +314,30 @@ impl SidebarView {
                             }
                         }
                     }
-                    let color =
-                        if selected || g.install.is_installed() { theme::TEXT } else { theme::TEXT_UNINSTALLED };
-                    let status = if state.running.contains_key(&g.app_id) {
-                        Some(("RUNNING", theme::RUNNING))
-                    } else if matches!(
-                        g.install,
-                        InstallState::Downloading { .. } | InstallState::UpdateRequired { .. }
-                    ) {
-                        Some(("UPDATING", theme::ACCENT))
+                    let running = state.running.contains_key(&g.app_id);
+                    let updating =
+                        matches!(g.install, InstallState::Downloading { .. } | InstallState::UpdateRequired { .. });
+                    let color = if running {
+                        theme::RUNNING
+                    } else if updating {
+                        theme::ACCENT
+                    } else if selected || g.install.is_installed() {
+                        theme::TEXT
                     } else {
-                        None
+                        theme::TEXT_UNINSTALLED
+                    };
+                    let label = if running {
+                        format!("{} - Running", g.name)
+                    } else if updating {
+                        format!("{} - Updating", g.name)
+                    } else {
+                        g.name.clone()
                     };
                     let text_rect = Rect::from_min_max(
                         Pos2::new(rect.left() + if icons { 44.0 } else { 28.0 }, rect.top()),
                         rect.right_bottom(),
                     );
-                    let galley = ui.painter().layout(g.name.clone(), theme::regular(14.0), color, f32::INFINITY);
-                    let name_w = galley.size().x;
-                    if let Some((label, c)) = status {
-                        ui.painter().with_clip_rect(text_rect).text(
-                            Pos2::new(text_rect.left() + name_w + 8.0, rect.center().y),
-                            egui::Align2::LEFT_CENTER,
-                            label,
-                            theme::bold(11.0),
-                            c,
-                        );
-                    }
+                    let galley = ui.painter().layout(label, theme::regular(theme::SIDE_ROW_FONT), color, f32::INFINITY);
                     ui.painter().with_clip_rect(text_rect).galley(
                         Pos2::new(text_rect.left(), rect.center().y - galley.size().y / 2.0),
                         galley,
@@ -338,6 +345,9 @@ impl SidebarView {
                     );
                     if resp.clicked() {
                         clicked = Some(g.app_id);
+                    }
+                    if resp.double_clicked() || (resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
+                        dbl = Some(g.app_id);
                     }
                     if resp.secondary_clicked() || resp.context_menu_opened() {
                         menus.push((resp, g.app_id));
@@ -368,6 +378,9 @@ impl SidebarView {
         }
         if let Some(app) = clicked {
             client.send(Command::Select(Some(app)));
+        }
+        if let Some(app) = dbl {
+            crate::game_page::activate(client, ov, app);
         }
     }
 }

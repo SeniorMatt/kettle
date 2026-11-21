@@ -243,6 +243,12 @@ impl AppInfoFile {
 
     /// Parse one app. `Ok(None)` when the app isn't in the file.
     pub fn get(&mut self, appid: u32) -> Result<Option<AppInfo>> {
+        Ok(self.get_kv(appid)?.map(|kv| AppInfo::from_kv(appid, &kv)))
+    }
+
+    /// The raw parsed `appinfo` tree of one app (for data [`AppInfo`] does not keep, such as Valve's
+    /// compatibility tool tables in app 891390).
+    pub fn get_kv(&mut self, appid: u32) -> Result<Option<Kv>> {
         let Some(&(off, size)) = self.index.get(&appid) else { return Ok(None) };
         let mut buf = vec![0u8; size as usize];
         self.file.seek(SeekFrom::Start(off))?;
@@ -250,8 +256,7 @@ impl AppInfoFile {
         // infostate(4) updated(4) token(8) sha1(20) change(4) [binary sha1(20) from v28]
         let skip = if self.version == MAGIC_V27 { 40 } else { 60 };
         ensure!(buf.len() >= skip, "entry {appid} is truncated");
-        let kv = parse_binary_kv(&buf[skip..], &self.strings)?;
-        Ok(Some(AppInfo::from_kv(appid, &kv)))
+        Ok(Some(parse_binary_kv(&buf[skip..], &self.strings)?))
     }
 }
 

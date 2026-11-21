@@ -88,9 +88,18 @@ Nothing here is a promise. The owner decides what comes next. Bugs found on real
 - [x] Play: start the official client in the background for Steamworks games
 - [ ] Play: tested on a real game on a real machine
 - [x] Play: launch options and command-line arguments per game
+- [x] Play: run games in Gamescope (option; unit-tested, not tried in a session yet)
 - [ ] Play: pre-launch checks (first-time setup, redistributables)
 - [ ] Play: play time synced with Steam's servers
-- [ ] Play: games run without the official client (own Steamworks service)
+- [x] Play: own steamclient core (exports, ISteamClient/User/Apps/Utils/UserStats/Friends tables, null objects, socket host; see docs/steamclient-design.md; built, tested by loading it like a game against a fake host)
+- [ ] Play: own steamclient checked against Valve's headers and a real Steamworks game on Linux
+- [ ] Play: own steamclient tickets (ownership and encrypted app tickets over the CM, built; auth session ticket framing and DRM-stub interface not yet)
+- [ ] Play: own steamclient stats and achievements synced with Steam (local file only so far; needs the stats schema)
+- [ ] Play: own steamclient 32-bit build (i686) for 32-bit games
+- [ ] Play: own steamclient Proton bridge install and Kettle-owned Steam root (only when the official client is not installed)
+- [ ] Play: own steamclient Cloud saves, rich presence, leaderboards
+- [ ] Play: own steamclient networking, matchmaking, lobbies
+- [ ] Play: own steamclient Steam Input, Workshop/UGC, overlay, voice
 - [ ] Play: Remote Play
 - [ ] Play: Steam Input (controller configuration)
 
@@ -140,6 +149,7 @@ Nothing here is a promise. The owner decides what comes next. Bugs found on real
 - [x] Overlay: friends, chat, notes, session time
 - [ ] Overlay: tested on KDE Wayland
 - [ ] Overlay: draws on top of exclusive-fullscreen games (Vulkan layer)
+- [ ] Overlay: overlay inside Gamescope (STEAM_OVERLAY window on Gamescope's X server; written, not tried in a session)
 - [ ] Overlay: web browser
 - [ ] Overlay: achievements and guides
 - [x] Overlay: FPS counter (MangoHud)

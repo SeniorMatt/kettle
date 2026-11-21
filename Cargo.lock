@@ -2208,7 +2208,7 @@ dependencies = [
 
 [[package]]
 name = "kettle"
-version = "0.1.0-alpha.4"
+version = "0.1.0-alpha.5"
 dependencies = [
  "ashpd",
  "async-io",
@@ -4207,7 +4207,7 @@ dependencies = [
 
 [[package]]
 name = "sr-client"
-version = "0.1.0-alpha.4"
+version = "0.1.0-alpha.5"
 dependencies = [
  "anyhow",
  "image",
@@ -4217,19 +4217,23 @@ dependencies = [
  "serde_json",
  "sr-model",
  "sr-steam",
+ "sr-steamclient",
+ "steam-vent",
+ "steam-vent-proto-common",
+ "steam-vent-proto-steam",
  "tokio",
 ]
 
 [[package]]
 name = "sr-model"
-version = "0.1.0-alpha.4"
+version = "0.1.0-alpha.5"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "sr-steam"
-version = "0.1.0-alpha.4"
+version = "0.1.0-alpha.5"
 dependencies = [
  "aes 0.8.4",
  "anyhow",
@@ -4262,8 +4266,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sr-steamclient"
+version = "0.1.0-alpha.5"
+dependencies = [
+ "libloading",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "sr-ui"
-version = "0.1.0-alpha.4"
+version = "0.1.0-alpha.5"
 dependencies = [
  "egui",
  "egui-phosphor",

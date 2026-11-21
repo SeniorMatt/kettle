@@ -463,12 +463,16 @@ pub fn settings_from_disk() -> HudSettings {
         .sanitized()
 }
 
+/// Do the user's own launch options already run MangoHud (a `mangohud` wrapper or a `MANGOHUD*` variable)?
+pub fn user_owns(user: &Parsed) -> bool {
+    user.wrapper.iter().any(|w| w.rsplit('/').next() == Some("mangohud"))
+        || user.env.iter().any(|(k, _)| k.starts_with("MANGOHUD"))
+}
+
 /// Add the HUD to a plan. The user's own launch options win: a `mangohud` wrapper or any `MANGOHUD*` variable
 /// there means we add nothing, and an existing variable is never overwritten.
 pub fn apply(plan: &mut LaunchPlan, hud: &Hud, user: &Parsed) {
-    let own = user.wrapper.iter().any(|w| w.rsplit('/').next() == Some("mangohud"))
-        || user.env.iter().any(|(k, _)| k.starts_with("MANGOHUD"));
-    if own {
+    if user_owns(user) {
         return;
     }
     for (k, v) in &hud.env {
@@ -667,10 +671,10 @@ mod tests {
         let (bin, lib, layers) = (root.join("bin"), root.join("lib/mangohud"), root.join("layers"));
         std::fs::create_dir_all(&bin).unwrap();
         std::fs::create_dir_all(&layers).unwrap();
-        let none = detect_in(&[bin.clone()], &[lib.clone()], &[layers.clone()]);
+        let none = detect_in(std::slice::from_ref(&bin), std::slice::from_ref(&lib), std::slice::from_ref(&layers));
         assert!(!none.installed());
         std::fs::write(bin.join("mangohud"), "#!/bin/sh\n").unwrap();
-        let d = detect_in(&[bin.clone()], &[lib.clone()], &[layers.clone()]);
+        let d = detect_in(std::slice::from_ref(&bin), std::slice::from_ref(&lib), std::slice::from_ref(&layers));
         assert_eq!(d.wrapper, Some(bin.join("mangohud")));
         assert!(d.installed());
         std::fs::write(layers.join("MangoHud.x86_64.json"), "{}").unwrap();

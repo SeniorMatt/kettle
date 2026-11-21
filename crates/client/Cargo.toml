@@ -13,11 +13,17 @@ anyhow = "1"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
+serde_json = "1"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
-# Desktop notifications over D-Bus (MIT OR Apache-2.0); Linux only.
 [target.'cfg(target_os = "linux")'.dependencies]
+# Kettle's own Steamworks service (see docs/steamclient-design.md)
+sr_steamclient = { package = "sr-steamclient", path = "../steamclient", default-features = false }
+steam-vent = "0.5"
+steam-vent-proto-steam = "0.5"
+steam-vent-proto-common = "0.5"
+# Desktop notifications over D-Bus (MIT OR Apache-2.0); Linux only.
 notify-rust = { version = "4", default-features = false, features = ["z"] }
 
 [dev-dependencies]

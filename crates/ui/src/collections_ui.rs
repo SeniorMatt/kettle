@@ -3,7 +3,7 @@
 
 use crate::theme;
 use crate::widgets::{self, ButtonStyle};
-use egui::{Context, Id, RichText, Ui};
+use egui::{Context, Id, Ui};
 use sr_client::{Client, CollCmd, Command};
 use sr_model::{AppId, Game};
 
@@ -28,17 +28,22 @@ fn send(client: &mut Client, cmd: CollCmd) {
     client.send(Command::Collections(cmd));
 }
 
-/// Favorite, hide and "Add to" items of the right-click menu.
+/// "Hide this game" (it lives in the Manage submenu, as in the official client).
+pub fn hide_item(ui: &mut Ui, client: &mut Client, game: &Game) {
+    let app = game.app_id;
+    let hidden = client.state().collections.is_hidden(app);
+    if ui.button(if hidden { "Unhide this game" } else { "Hide this game" }).clicked() {
+        send(client, CollCmd::SetHidden(app, !hidden));
+        ui.close();
+    }
+}
+
+/// Favorite and "Add to" items of the right-click menu.
 pub fn menu_items(ui: &mut Ui, client: &mut Client, game: &Game) {
     let app = game.app_id;
     let fav = client.state().collections.is_favorite(app);
-    let hidden = client.state().collections.is_hidden(app);
     if ui.button(if fav { "Remove from Favorites" } else { "Add to Favorites" }).clicked() {
         send(client, CollCmd::SetFavorite(app, !fav));
-        ui.close();
-    }
-    if ui.button(if hidden { "Unhide this game" } else { "Hide this game" }).clicked() {
-        send(client, CollCmd::SetHidden(app, !hidden));
         ui.close();
     }
     let mine: Vec<(String, String, bool)> = client
@@ -71,31 +76,26 @@ pub fn menu_items(ui: &mut Ui, client: &mut Client, game: &Game) {
 pub fn show_prompt(ctx: &Context, client: &mut Client) {
     let Some(mut p) = ctx.data(|d| d.get_temp::<Prompt>(prompt_id())) else { return };
     let frame = egui::Frame::new()
-        .fill(theme::BG_SIDEBAR)
-        .inner_margin(egui::Margin::same(20))
+        .fill(theme::MODAL_BG)
+        .inner_margin(egui::Margin::same(theme::MODAL_PAD))
         .corner_radius(theme::BUTTON_RADIUS)
         .stroke(egui::Stroke::new(1.0, theme::WINDOW_BORDER));
     let (mut create, mut cancel) = (false, false);
     let modal = egui::Modal::new(prompt_id()).frame(frame).show(ctx, |ui| {
         ui.set_width(340.0);
-        ui.label(RichText::new("New collection").font(theme::bold(18.0)).color(theme::TEXT));
-        ui.add_space(10.0);
-        let edit = egui::TextEdit::singleline(&mut p.name)
-            .hint_text("Name")
-            .font(theme::regular(14.0))
-            .desired_width(f32::INFINITY)
-            .margin(egui::Margin::symmetric(8, 6));
-        let resp = ui.add(edit);
+        theme::dialog_style(ui);
+        widgets::page_title(ui, "New collection");
+        ui.add_space(8.0);
+        let resp = widgets::text_input(ui, &mut p.name, f32::INFINITY, "Name");
         if p.focus {
             resp.request_focus();
             p.focus = false;
         }
         let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         ui.add_space(14.0);
-        ui.horizontal(|ui| {
+        widgets::button_row(ui, |ui| {
             let ok = !p.name.trim().is_empty();
             create = widgets::button(ui, "Create", ButtonStyle::Primary, ok).clicked() || (enter && ok);
-            ui.add_space(8.0);
             cancel = widgets::button(ui, "Cancel", ButtonStyle::Secondary, true).clicked();
         });
     });

@@ -155,7 +155,7 @@ mod imp {
 
     /// RGBA pixels to the ARGB32 (network byte order) the tray protocol wants.
     fn to_argb(w: u32, h: u32, rgba: &[u8]) -> Vec<Icon> {
-        let data = rgba.chunks_exact(4).flat_map(|p| [p[3], p[0], p[1], p[2]]).collect();
+        let data = rgba.as_chunks::<4>().0.iter().flat_map(|&[r, g, b, a]| [a, r, g, b]).collect();
         vec![Icon { width: w as i32, height: h as i32, data }]
     }
 

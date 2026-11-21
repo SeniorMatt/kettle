@@ -83,8 +83,8 @@ impl PropertiesView {
             .with_title(game.name.clone())
             .with_app_id(theme::APP_ID)
             .with_decorations(false)
-            .with_inner_size([700.0, 520.0])
-            .with_min_inner_size([560.0, 400.0]);
+            .with_inner_size([860.0, 600.0])
+            .with_min_inner_size([640.0, 440.0]);
         ctx.show_viewport_immediate(Self::viewport_id(), builder, |ui, _class| {
             let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
             if escape || ui.input(|i| i.viewport().close_requested()) {
@@ -96,6 +96,7 @@ impl PropertiesView {
     }
 
     fn window(&mut self, ui: &mut Ui, client: &mut Client, game: &Game, ov: &mut Overlays) {
+        theme::dialog_style(ui);
         let installed = game.install.is_installed();
         if self.tab == PropsTab::InstalledFiles && !installed {
             self.tab = PropsTab::General;
@@ -132,7 +133,7 @@ impl PropertiesView {
                     }
                 }
             });
-        let page = egui::Frame::new().fill(theme::SETTINGS_BG).inner_margin(egui::Margin::symmetric(32, 22));
+        let page = egui::Frame::new().fill(theme::SETTINGS_BG).inner_margin(egui::Margin::symmetric(32, 24));
         egui::CentralPanel::default().frame(page).show(ui, |ui| {
             egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
                 let label = PropsTab::ALL.iter().find(|(t, _)| *t == self.tab).map_or("", |(_, l)| l);
@@ -157,10 +158,8 @@ impl PropertiesView {
         }
         let desc = "Advanced users may enter changes to the way the game starts.";
         widgets::setting_block(ui, "Launch options", desc, |ui| {
-            let field = egui::TextEdit::singleline(&mut self.text)
-                .desired_width(f32::INFINITY)
-                .hint_text("for example -novid, or MANGOHUD=1 gamemoderun %command%");
-            let resp = ui.add(field);
+            let hint = "for example -novid, or MANGOHUD=1 gamemoderun %command%";
+            let resp = widgets::text_input(ui, &mut self.text, f32::INFINITY, hint);
             if resp.changed() {
                 self.dirty = true;
             }
@@ -238,22 +237,19 @@ fn value(ui: &mut Ui, text: &str) {
     ui.label(RichText::new(text).font(theme::medium(14.0)).color(theme::TEXT));
 }
 
-/// One category in the left column (same look as the settings window).
+/// One category in the left column (same look as the settings window's page list).
 fn nav_item(ui: &mut Ui, selected: bool, label: &str) -> bool {
-    let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 38.0), Sense::click());
-    let hover = anim::animate_bool(ui.ctx(), resp.id.with("hover"), resp.hovered(), anim::FAST);
-    let bg = if selected {
-        theme::BG_ROW_SELECTED
-    } else {
-        theme::SETTINGS_NAV_BG.lerp_to_gamma(theme::BG_ROW_HOVER, hover)
-    };
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 40.0), Sense::click());
+    let hover = anim::animate_bool(ui.ctx(), resp.id.with("hover"), resp.hovered(), 0.15);
+    let bg =
+        if selected { theme::BTN_FLAT } else { theme::SETTINGS_NAV_BG.lerp_to_gamma(theme::SETTINGS_NAV_HOVER, hover) };
     ui.painter().rect_filled(rect, 0.0, bg);
-    let color = if selected { Color32::WHITE } else { theme::TEXT.lerp_to_gamma(Color32::WHITE, hover) };
+    let color = if selected { Color32::WHITE } else { theme::BTN_TEXT.lerp_to_gamma(Color32::WHITE, hover) };
     ui.painter().text(
         Pos2::new(rect.left() + 24.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         label,
-        theme::regular(14.0),
+        theme::regular(16.0),
         color,
     );
     resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
@@ -319,6 +315,7 @@ fn compatibility(ui: &mut Ui, client: &mut Client, app: AppId, ov: &mut Overlays
         ui.add_space(8.0);
         ui.label(RichText::new("No compatibility tool is installed.").color(theme::ERROR_TEXT));
     }
+    crate::settings_gamescope::per_game(ui, client, app);
     ui.add_space(12.0);
     if widgets::link(ui, "Open Proton manager").clicked() {
         ov.goto = Some(Nav::Settings(SettingsTab::Compatibility));

@@ -1132,7 +1132,7 @@ mod tests {
 
     #[test]
     fn sorting_is_in_game_then_online_then_offline_by_last_online() {
-        let mut v = vec![
+        let mut v = [
             friend(1, "zed", PersonaState::Offline, false, 100),
             friend(2, "bob", PersonaState::Away, false, 0),
             friend(3, "amy", PersonaState::Offline, false, 900),
@@ -1178,8 +1178,8 @@ mod tests {
 
     #[test]
     fn group_member_names_fall_back_to_member() {
-        let mut s = FriendsState::default();
-        s.me = Me { id: sr_steam::friends::id_from_friend_code(7), name: "Me".into(), avatar_url: None };
+        let me = Me { id: sr_steam::friends::id_from_friend_code(7), name: "Me".into(), avatar_url: None };
+        let mut s = FriendsState { me, ..Default::default() };
         s.friends.push(friend(sr_steam::friends::id_from_friend_code(9), "Ann", PersonaState::Online, false, 0));
         s.reindex();
         assert_eq!(s.member_name(7), "Me");

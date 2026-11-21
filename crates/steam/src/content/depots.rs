@@ -122,8 +122,10 @@ mod tests {
 
     #[test]
     fn installed_os_follows_the_installed_depots() {
-        let mut app = AppInfo::default();
-        app.depots = vec![depot(1, &[], "", ""), depot(2, &["windows"], "", ""), depot(3, &["linux"], "64", "")];
+        let app = AppInfo {
+            depots: vec![depot(1, &[], "", ""), depot(2, &["windows"], "", ""), depot(3, &["linux"], "64", "")],
+            ..Default::default()
+        };
         assert_eq!(installed_os(&app, [1u32, 2].into_iter()), Some(Os::Windows));
         assert_eq!(installed_os(&app, [1u32, 3].into_iter()), Some(Os::Linux));
         assert_eq!(installed_os(&app, [1u32, 99].into_iter()), None);

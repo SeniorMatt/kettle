@@ -155,7 +155,10 @@ impl eframe::App for App {
                 .filter(|_| s.settings.overlay)
         };
         self.hotkey.set_active(game.is_some());
-        self.overlay_host.sync(game);
+        let in_gamescope = game.is_some_and(|g| self.client.state().running.get(&g).is_some_and(|r| r.gamescope));
+        if self.overlay_host.sync(game, in_gamescope) {
+            ctx.request_repaint_after(std::time::Duration::from_millis(500));
+        }
         self.ui.set_overlay_external(self.overlay_host.active());
         while self.toggles.try_recv().is_ok() {
             self.toggle_overlay();

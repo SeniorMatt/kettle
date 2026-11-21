@@ -140,8 +140,9 @@ pub fn show(ui: &mut Ui, client: &mut Client) {
     let mut workers = page.workers;
     let desc = "How many file pieces are fetched at once. More is faster on a fast line; fewer is gentler.";
     widgets::setting_row(ui, "Parallel downloads", desc, |ui| {
-        ui.spacing_mut().slider_width = 150.0;
-        let resp = ui.add(egui::Slider::new(&mut workers, MIN_WORKERS..=MAX_WORKERS).smallest_positive(1.0));
+        // Right to left: the number first (it ends up on the right), then the slider.
+        ui.label(RichText::new(workers.to_string()).font(theme::regular(14.0)).color(theme::TEXT));
+        let resp = widgets::slider(ui, &mut workers, MIN_WORKERS..=MAX_WORKERS, 180.0);
         if resp.drag_stopped() || (resp.changed() && !resp.dragged()) {
             client.send(Command::SetWorkers(workers));
         }
@@ -165,7 +166,7 @@ pub fn show(ui: &mut Ui, client: &mut Client) {
     widgets::setting_block(ui, "Default library folder", &desc, |ui| {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
-            ui.add(egui::TextEdit::singleline(&mut page.library_text).desired_width(300.0).hint_text(default));
+            widgets::text_input(ui, &mut page.library_text, 300.0, &default);
             if widgets::button(ui, "Apply", ButtonStyle::Primary, true).clicked() {
                 let text = page.library_text.trim();
                 let path = (!text.is_empty()).then(|| std::path::PathBuf::from(text));
@@ -195,8 +196,7 @@ pub fn show(ui: &mut Ui, client: &mut Client) {
 }
 
 fn group(ui: &mut Ui, text: &str) {
-    ui.add_space(14.0);
-    ui.label(RichText::new(text.to_uppercase()).font(theme::bold(12.0)).color(theme::TEXT_HEADING));
+    widgets::section_header(ui, text);
 }
 
 /// "Check now", the state of the last check, and the games that have an update.

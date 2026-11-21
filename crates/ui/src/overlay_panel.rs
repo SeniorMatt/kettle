@@ -366,13 +366,10 @@ impl OverlayPanel {
         let groups: [(&str, Vec<&sr_client::FriendRow>); 3] = [
             (
                 "IN-GAME",
-                snap.friends.iter().filter(|f| f.game.is_some() && state(*f) != PersonaState::Offline).collect(),
+                snap.friends.iter().filter(|f| f.game.is_some() && state(f) != PersonaState::Offline).collect(),
             ),
-            (
-                "ONLINE",
-                snap.friends.iter().filter(|f| f.game.is_none() && state(*f) != PersonaState::Offline).collect(),
-            ),
-            ("OFFLINE", snap.friends.iter().filter(|f| state(*f) == PersonaState::Offline).collect()),
+            ("ONLINE", snap.friends.iter().filter(|f| f.game.is_none() && state(f) != PersonaState::Offline).collect()),
+            ("OFFLINE", snap.friends.iter().filter(|f| state(f) == PersonaState::Offline).collect()),
         ];
         if snap.friends.is_empty() {
             ui.label(RichText::new("No friends to show.").color(theme::TEXT_DIM).font(theme::regular(15.0)));

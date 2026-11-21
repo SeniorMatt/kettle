@@ -10,7 +10,7 @@ use sr_model::AppId;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-const DIALOG_W: f32 = 440.0;
+const DIALOG_W: f32 = 500.0;
 
 struct InstallDialog {
     app: AppId,
@@ -57,11 +57,6 @@ impl Overlays {
 
     pub fn open_uninstall(&mut self, app: AppId) {
         self.uninstall = Some(app);
-    }
-
-    /// The old per-game compatibility dialog now lives in the Properties window.
-    pub fn open_compat(&mut self, app: AppId) {
-        self.properties = Some((app, PropsTab::Compatibility));
     }
 
     pub fn open_properties(&mut self, app: AppId) {
@@ -153,7 +148,7 @@ impl Overlays {
                         let mut on = d.dlc.contains(&c.appid);
                         let name = if c.name.is_empty() { format!("DLC {}", c.appid) } else { c.name.clone() };
                         let label = if c.bytes > 0 { format!("{name}  ({})", fmt::bytes(c.bytes)) } else { name };
-                        if ui.checkbox(&mut on, label).changed() {
+                        if widgets::checkbox(ui, &mut on, &label).changed() {
                             if on {
                                 d.dlc.insert(c.appid);
                             } else {
@@ -191,11 +186,10 @@ impl Overlays {
                 ui.label(RichText::new("There is not enough free space on this disk.").color(theme::ERROR_TEXT));
             }
             field(ui, "SHORTCUTS");
-            ui.checkbox(&mut d.desktop, "Create desktop shortcut");
-            ui.checkbox(&mut d.menu, "Create application menu shortcut");
+            widgets::checkbox(ui, &mut d.desktop, "Create desktop shortcut");
+            widgets::checkbox(ui, &mut d.menu, "Create application menu shortcut");
             ui.add_space(14.0);
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
+            widgets::button_row(ui, |ui| {
                 start = widgets::button(ui, "Install", ButtonStyle::Primary, !too_small).clicked();
                 if widgets::button(ui, "Cancel", ButtonStyle::Secondary, true).clicked() {
                     ui.close();
@@ -232,8 +226,7 @@ impl Overlays {
                     .small(),
             );
             ui.add_space(14.0);
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
+            widgets::button_row(ui, |ui| {
                 if widgets::button(ui, "Update now", ButtonStyle::Primary, true).clicked() {
                     action = Some(true);
                 }
@@ -289,8 +282,7 @@ impl Overlays {
                 .small(),
             );
             ui.add_space(14.0);
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
+            widgets::button_row(ui, |ui| {
                 if widgets::button(ui, "Update this time", ButtonStyle::Primary, true).clicked() {
                     answer = Some((P::Ask, true));
                 }
@@ -349,8 +341,7 @@ impl Overlays {
                     .small(),
             );
             ui.add_space(14.0);
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
+            widgets::button_row(ui, |ui| {
                 confirm = widgets::button(ui, "Uninstall", ButtonStyle::Danger, true).clicked();
                 if widgets::button(ui, "Cancel", ButtonStyle::Secondary, true).clicked() {
                     ui.close();
@@ -372,9 +363,12 @@ impl Overlays {
             ui.set_width(DIALOG_W);
             title(ui, &format!("Can't start {}", p.name));
             ui.label(RichText::new(&p.message).color(theme::TEXT));
+            if let Some(log) = &p.log {
+                ui.add_space(6.0);
+                ui.label(RichText::new(format!("Log: {}", log.display())).size(12.0).color(theme::TEXT_DIM));
+            }
             ui.add_space(14.0);
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
+            widgets::button_row(ui, |ui| {
                 if p.needs_compat_tool
                     && widgets::button(ui, "Open Proton manager", ButtonStyle::Primary, true).clicked()
                 {
@@ -383,6 +377,10 @@ impl Overlays {
                 if widgets::button(ui, "Launch via Steam client", ButtonStyle::Secondary, true).clicked() {
                     client.send(Command::LaunchViaSteam(p.app));
                     ui.close();
+                }
+                if !p.details.is_empty() && widgets::button(ui, "Copy details", ButtonStyle::Secondary, true).clicked()
+                {
+                    ui.ctx().copy_text(p.details.clone());
                 }
                 if widgets::button(ui, "Close", ButtonStyle::Secondary, true).clicked() {
                     ui.close();
@@ -399,24 +397,31 @@ impl Overlays {
 }
 
 /// A modal with our own frame: padded, themed, with a hairline border.
+/// Steam's modal: `DialogContent` background, 24 px padding, 2 px radius, and the 1 px blue gradient bar
+/// (`ModalPosition_TopBar`) across the top, drawn by [`bar`].
 fn modal(id: Id) -> egui::Modal {
     let frame = egui::Frame::new()
-        .fill(theme::BG_SIDEBAR)
-        .inner_margin(egui::Margin::same(20))
+        .fill(theme::MODAL_BG)
+        .inner_margin(egui::Margin::same(theme::MODAL_PAD))
         .corner_radius(theme::BUTTON_RADIUS)
         .stroke(egui::Stroke::new(1.0, theme::WINDOW_BORDER));
     egui::Modal::new(id).frame(frame)
 }
 
+/// Title of a dialog (`DialogHeader`, 22 px bold) and the blue bar over the dialog's top edge.
 fn title(ui: &mut Ui, text: &str) {
-    ui.label(RichText::new(text).font(theme::bold(18.0)).color(theme::TEXT));
-    ui.add_space(8.0);
+    theme::dialog_style(ui);
+    let r = ui.max_rect();
+    let top = egui::Rect::from_min_size(
+        egui::pos2(r.left() - f32::from(theme::MODAL_PAD), r.top() - f32::from(theme::MODAL_PAD)),
+        egui::vec2(r.width() + 2.0 * f32::from(theme::MODAL_PAD), 1.0),
+    );
+    widgets::gradient(ui, top, theme::MODAL_BAR_A, theme::MODAL_BAR_B);
+    widgets::page_title(ui, text);
 }
 
 fn field(ui: &mut Ui, text: &str) {
-    ui.add_space(10.0);
-    ui.label(RichText::new(text).font(theme::bold(11.0)).color(theme::TEXT_DIM));
-    ui.add_space(2.0);
+    widgets::field_label(ui, text);
 }
 
 pub fn origin_label(o: ToolOrigin) -> &'static str {

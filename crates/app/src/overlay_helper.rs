@@ -8,6 +8,12 @@
 //! it shows comes from the main app over the socket (see `sr_client::overlay_proto`), and what the user does goes
 //! back the same way. Drawing is `sr_ui::OverlayPanel`.
 //!
+//! Inside Gamescope (`--gamescope`, the game runs on Gamescope's private X server and `DISPLAY` points there)
+//! the window is a normal one instead, with the properties Gamescope looks for: `STEAM_OVERLAY` = 1 makes it
+//! the overlay layer drawn above the game, `STEAM_INPUT_FOCUS` = 1 while shown sends keyboard and mouse to it
+//! (0 when hidden), and `_NET_WM_WINDOW_OPACITY` is 0 while hidden (Gamescope skips an overlay with no opacity).
+//! They are set before the window is first mapped, so Gamescope never takes it for the game.
+//!
 //! Not done on purpose: the pointer is not grabbed. A game that has captured the mouse itself (relative mode)
 //! may keep it; clicks then do not reach the overlay until it is released.
 
@@ -35,9 +41,10 @@ mod imp {
     use x11rb::connection::Connection;
     use x11rb::protocol::randr::ConnectionExt as _;
     use x11rb::protocol::xproto::{
-        ConfigureWindowAux, ConnectionExt as _, GrabMode, GrabStatus, InputFocus, StackMode,
+        AtomEnum, ConfigureWindowAux, ConnectionExt as _, GrabMode, GrabStatus, PropMode, StackMode,
     };
     use x11rb::rust_connection::RustConnection;
+    use x11rb::wrapper::ConnectionExt as _;
 
     /// Frames spent hiding the window after startup (eframe maps it once after its first frame).
     const INIT_FRAMES: u32 = 4;
@@ -53,7 +60,7 @@ mod imp {
             eprintln!("usage: kettle --overlay <appid> --socket <path>");
             return Some(Ok(()));
         };
-        Some(run(socket))
+        Some(run(socket, args.iter().any(|a| a == "--gamescope")))
     }
 
     /// Position and size of the primary monitor in pixels (the whole screen when RandR does not say).
@@ -69,22 +76,36 @@ mod imp {
         Some(primary.unwrap_or(whole))
     }
 
-    fn run(socket: PathBuf) -> eframe::Result {
-        let geom = monitor_geometry().unwrap_or((0, 0, 1920, 1080));
-        let options = eframe::NativeOptions {
-            renderer: eframe::Renderer::Wgpu,
-            viewport: egui::ViewportBuilder::default()
-                .with_title("Kettle overlay")
-                .with_decorations(false)
-                .with_transparent(true)
-                .with_taskbar(false)
-                .with_override_redirect(true)
-                .with_window_type(egui::viewport::X11WindowType::Notification)
-                .with_position([geom.0 as f32, geom.1 as f32])
-                .with_inner_size([geom.2 as f32, geom.3 as f32])
-                .with_visible(false),
-            ..Default::default()
+    /// Set the properties Gamescope reads (see the module comment). `shown` = the overlay is up.
+    fn gamescope_props(conn: &RustConnection, win: u32, shown: bool) {
+        let atom = |name: &[u8]| conn.intern_atom(false, name).ok().and_then(|c| c.reply().ok()).map(|r| r.atom);
+        let set = |name: &[u8], value: u32| {
+            if let Some(a) = atom(name) {
+                let _ = conn.change_property32(PropMode::REPLACE, win, a, AtomEnum::CARDINAL, &[value]);
+            }
         };
+        set(b"STEAM_OVERLAY", 1);
+        set(b"STEAM_INPUT_FOCUS", u32::from(shown));
+        set(b"_NET_WM_WINDOW_OPACITY", if shown { u32::MAX } else { 0 });
+        let _ = conn.flush();
+    }
+
+    fn run(socket: PathBuf, gamescope: bool) -> eframe::Result {
+        let geom = monitor_geometry().unwrap_or((0, 0, 1920, 1080));
+        let mut viewport = egui::ViewportBuilder::default()
+            .with_title("Kettle overlay")
+            .with_decorations(false)
+            .with_transparent(true)
+            .with_taskbar(false)
+            .with_position([geom.0 as f32, geom.1 as f32])
+            .with_inner_size([geom.2 as f32, geom.3 as f32])
+            .with_visible(false);
+        if !gamescope {
+            // On the desktop: invisible to the window manager (no animation, no focus change, no minimizing).
+            viewport =
+                viewport.with_override_redirect(true).with_window_type(egui::viewport::X11WindowType::Notification);
+        }
+        let options = eframe::NativeOptions { renderer: eframe::Renderer::Wgpu, viewport, ..Default::default() };
         eframe::run_native(
             "Kettle overlay",
             options,
@@ -111,7 +132,13 @@ mod imp {
                     ctx.request_repaint();
                 })?;
                 let conn = RustConnection::connect(None).ok().map(|(c, _)| c);
+                let win = window_id(cc);
+                if gamescope && let (Some(conn), Some(win)) = (&conn, win) {
+                    gamescope_props(conn, win, false);
+                }
                 Ok(Box::new(Helper {
+                    gamescope,
+                    win,
                     panel: OverlayPanel::default(),
                     rx,
                     out,
@@ -128,6 +155,10 @@ mod imp {
     }
 
     struct Helper {
+        /// Running on Gamescope's X server.
+        gamescope: bool,
+        /// Our X window.
+        win: Option<u32>,
         panel: OverlayPanel,
         rx: mpsc::Receiver<ToHelper>,
         out: UnixStream,
@@ -142,7 +173,7 @@ mod imp {
     }
 
     /// The X window of the egui window.
-    fn window_id(frame: &eframe::Frame) -> Option<u32> {
+    fn window_id(frame: &impl HasWindowHandle) -> Option<u32> {
         match frame.window_handle().ok()?.as_raw() {
             RawWindowHandle::Xlib(h) => u32::try_from(h.window).ok(),
             RawWindowHandle::Xcb(h) => Some(h.window.get()),
@@ -160,6 +191,7 @@ mod imp {
             self.visible = true;
             self.placed = false;
             self.grab_tries = GRAB_TRIES;
+            self.gamescope_shown(true);
             ctx.send_viewport_cmd(ViewportCommand::Visible(true));
             ctx.request_repaint();
         }
@@ -174,7 +206,15 @@ mod imp {
                 let _ = conn.ungrab_keyboard(x11rb::CURRENT_TIME);
                 let _ = conn.flush();
             }
+            self.gamescope_shown(false);
             ctx.send_viewport_cmd(ViewportCommand::Visible(false));
+        }
+
+        /// Inside Gamescope: tell it the overlay is up (it takes the input) or gone.
+        fn gamescope_shown(&self, shown: bool) {
+            if let (true, Some(conn), Some(win)) = (self.gamescope, &self.conn, self.win) {
+                gamescope_props(conn, win, shown);
+            }
         }
 
         /// Cover the monitor exactly, stay on top, and take the keyboard. Retried until the window is mapped.
@@ -195,7 +235,9 @@ mod imp {
                 .and_then(|c| c.reply().ok())
                 .is_some_and(|r| r.status == GrabStatus::SUCCESS);
             if grabbed {
-                let _ = conn.set_input_focus(InputFocus::PARENT, win, x11rb::CURRENT_TIME);
+                // Keyboard grab only, never XSetInputFocus: a real focus change makes fullscreen games
+                // (SDL, Wine) minimize themselves; a grab gives them FocusOut with mode NotifyGrab, which they
+                // ignore, and the keys still reach us because the grab window gets every key event.
                 self.grab_tries = 0;
             } else {
                 self.grab_tries -= 1;
@@ -212,6 +254,9 @@ mod imp {
 
         fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
             let ctx = ui.ctx().clone();
+            if self.win.is_none() {
+                self.win = window_id(&*frame);
+            }
             while let Ok(msg) = self.rx.try_recv() {
                 match msg {
                     ToHelper::Show(s) => self.show(&ctx, s),

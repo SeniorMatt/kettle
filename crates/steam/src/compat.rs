@@ -9,6 +9,7 @@
 //! What the user picked in the official client is read from `config/config.vdf` (`CompatToolMapping`), so we
 //! default to the same tool Steam would use. Our own choices are kept in a small JSON in our data dir.
 
+use crate::appinfo::{AppInfoFile, Kv};
 use crate::{local, store, vdf};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -321,24 +322,48 @@ pub enum ChoiceSource {
     SteamApp,
     OurDefault,
     SteamDefault,
+    /// Valve's own per-game override (app 891390 `app_mappings`).
+    ValveApp,
+    /// Valve's default (the `proton-stable` alias of app 891390).
+    ValveDefault,
     /// Nothing was chosen anywhere; the newest installed Proton.
     Newest,
 }
 
-/// The tool to run `appid` with: our per-game choice, Steam's per-game choice, our default, Steam's global
-/// default, and finally the newest installed Proton. Choices naming a tool that isn't installed are skipped.
+/// The tool to run `appid` with, in the order the official client uses: our per-game choice, the user's per-game
+/// choice in Steam, Valve's per-game override, our default, the user's global default in Steam, Valve's default
+/// (`proton-stable`), and finally the newest installed Proton. Choices naming a tool that isn't installed are
+/// skipped (the official client would download it; we only use what is there).
 pub fn pick_tool<'a>(
     tools: &'a [CompatTool],
     appid: u32,
     ours: &Choices,
     steam: &HashMap<u32, String>,
 ) -> Option<(&'a CompatTool, ChoiceSource)> {
-    let find = |name: &str| tools.iter().find(|t| t.internal_name == name && t.kind != ToolKind::Runtime);
+    pick_tool_with(tools, appid, ours, steam, &SteamPlay::default())
+}
+
+/// [`pick_tool`] with Valve's tables ([`SteamPlay::load`]).
+pub fn pick_tool_with<'a>(
+    tools: &'a [CompatTool],
+    appid: u32,
+    ours: &Choices,
+    steam: &HashMap<u32, String>,
+    valve: &SteamPlay,
+) -> Option<(&'a CompatTool, ChoiceSource)> {
+    let find = |name: &str| {
+        let name = valve.resolve(name);
+        tools.iter().find(|t| t.internal_name == name && t.kind != ToolKind::Runtime)
+    };
+    let valve_app = valve.app_tool.get(&appid).filter(|n| !n.is_empty());
+    let valve_default = valve.default_tool();
     let candidates = [
         (ours.per_app.get(&appid.to_string()), ChoiceSource::OurApp),
         (steam.get(&appid), ChoiceSource::SteamApp),
+        (valve_app, ChoiceSource::ValveApp),
         (ours.default.as_ref(), ChoiceSource::OurDefault),
         (steam.get(&0), ChoiceSource::SteamDefault),
+        (valve_default.as_ref(), ChoiceSource::ValveDefault),
     ];
     for (name, src) in candidates {
         if let Some(t) = name.and_then(|n| find(n)) {
@@ -346,6 +371,106 @@ pub fn pick_tool<'a>(
         }
     }
     newest_proton(tools).map(|t| (t, ChoiceSource::Newest))
+}
+
+/// What Valve ships in `appinfo.vdf` app 891390 ("SteamPlay 2.0 Manifests"): which tool each game gets, the
+/// aliases of tool names (`proton-stable`), and the per-game Proton settings the official client passes on.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SteamPlay {
+    /// `internal name -> aliases` of `extended/compat_tools`.
+    pub aliases: Vec<(String, Vec<String>)>,
+    /// `appid -> tool name or alias` of `extended/app_mappings` (empty value: no tool).
+    pub app_tool: HashMap<u32, String>,
+    /// `appid -> settings` of `extended/app_compat_configs`.
+    pub app_config: HashMap<u32, AppCompatConfig>,
+}
+
+/// One `app_compat_configs` row.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct AppCompatConfig {
+    /// Comma separated switches (`oldglstr`, `noesync,nofsync`, `cmdlineappend:-changedir`...): the official client
+    /// hands them to Proton in `STEAM_COMPAT_CONFIG`.
+    pub config: String,
+    /// Extra variables for the game.
+    pub environment: Vec<(String, String)>,
+}
+
+impl SteamPlay {
+    pub fn from_kv(root: &Kv) -> SteamPlay {
+        let mut out = SteamPlay::default();
+        let Some(ext) = root.get("extended") else { return out };
+        for (name, t) in ext.get("compat_tools").map(Kv::children).unwrap_or_default() {
+            let list = t.get_string("aliases").unwrap_or_default();
+            out.aliases.push((name.clone(), list.split(',').map(|a| a.trim().to_string()).collect()));
+        }
+        for (id, m) in ext.get("app_mappings").map(Kv::children).unwrap_or_default() {
+            let (Ok(id), platform) = (id.parse::<u32>(), m.get_string("platform").unwrap_or_default()) else {
+                continue;
+            };
+            if platform.is_empty() || platform == "linux" {
+                out.app_tool.insert(id, m.get_string("tool").unwrap_or_default());
+            }
+        }
+        for (id, c) in ext.get("app_compat_configs").map(Kv::children).unwrap_or_default() {
+            let Ok(id) = id.parse::<u32>() else { continue };
+            let config = c.get_string("config").filter(|s| s != "none").unwrap_or_default();
+            let environment = parse_env_list(&c.get_string("environment").unwrap_or_default());
+            out.app_config.insert(id, AppCompatConfig { config, environment });
+        }
+        out
+    }
+
+    /// Read from the official client's `appinfo.vdf` in any Steam root. Empty when there is none.
+    pub fn load() -> SteamPlay {
+        for root in local::steam_roots() {
+            let path = AppInfoFile::path_in(&root);
+            if let Ok(mut f) = AppInfoFile::open(&path)
+                && let Ok(Some(kv)) = f.get_kv(891390)
+            {
+                return SteamPlay::from_kv(&kv);
+            }
+        }
+        SteamPlay::default()
+    }
+
+    /// An alias (`proton-stable`) as the internal tool name; other names unchanged.
+    pub fn resolve(&self, name: &str) -> String {
+        if self.aliases.iter().any(|(n, _)| n == name) {
+            return name.to_string();
+        }
+        self.aliases
+            .iter()
+            .find(|(_, al)| al.iter().any(|a| a == name))
+            .map(|(n, _)| n.clone())
+            .unwrap_or_else(|| name.to_string())
+    }
+
+    /// Valve's default tool: what `proton-stable` stands for.
+    pub fn default_tool(&self) -> Option<String> {
+        let n = self.resolve("proton-stable");
+        self.aliases.iter().any(|(k, _)| *k == n).then_some(n)
+    }
+}
+
+/// `A=1:B=2` as pairs (Valve's separator is a colon; a colon inside a value stays when what follows isn't `NAME=`).
+fn parse_env_list(s: &str) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    for part in s.split(':').filter(|p| !p.is_empty()) {
+        let pair = part.split_once('=').filter(|(k, _)| {
+            !k.is_empty()
+                && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                && !k.starts_with(|c: char| c.is_ascii_digit())
+        });
+        match (pair, out.last_mut()) {
+            (Some((k, v)), _) => out.push((k.to_string(), v.to_string())),
+            (None, Some(last)) => {
+                last.1.push(':');
+                last.1.push_str(part);
+            }
+            _ => {}
+        }
+    }
+    out
 }
 
 fn newest_proton(tools: &[CompatTool]) -> Option<&CompatTool> {
@@ -432,5 +557,57 @@ mod tests {
             name(pick_tool(&tools, 1, &ours, &HashMap::new())),
             Some(("GE-Proton9-20".into(), ChoiceSource::Newest))
         );
+    }
+
+    #[test]
+    fn valve_tables_decide_before_the_global_default() {
+        let root = crate::vdf::parse(
+            r#""appinfo" { "extended" {
+                "compat_tools" {
+                    "proton_11" { "aliases" "proton-stable,proton-11.0" }
+                    "proton_experimental" { "aliases" "proton-experimental" } }
+                "app_mappings" {
+                    "5" { "appid" "5" "platform" "linux" "tool" "proton-experimental" }
+                    "6" { "appid" "6" "platform" "linux" "tool" "" }
+                    "7" { "appid" "7" "platform" "windows" "tool" "proton_11" } }
+                "app_compat_configs" {
+                    "8" { "config" "noesync,nofsync" "environment" "A=1:B=x:y:C=3" }
+                    "9" { "config" "none" } } } }"#,
+        );
+        let sp = SteamPlay::from_kv(&Kv::from_vdf(root.get("appinfo").unwrap()));
+        assert_eq!(sp.default_tool().as_deref(), Some("proton_11"));
+        assert_eq!(sp.resolve("proton-experimental"), "proton_experimental");
+        assert_eq!(sp.resolve("GE-Proton9-20"), "GE-Proton9-20");
+        assert!(!sp.app_tool.contains_key(&7), "other platforms ignored");
+        assert_eq!(sp.app_config[&8].config, "noesync,nofsync");
+        assert_eq!(
+            sp.app_config[&8].environment,
+            [("A".into(), "1".into()), ("B".into(), "x:y".into()), ("C".into(), "3".into())]
+        );
+        assert_eq!(sp.app_config[&9].config, "");
+
+        let tools = vec![
+            tool("proton_11", ToolKind::Proton),
+            tool("proton_experimental", ToolKind::Proton),
+            tool("GE-Proton9-20", ToolKind::Proton),
+        ];
+        let name = |r: Option<(&CompatTool, ChoiceSource)>| r.map(|(t, s)| (t.internal_name.clone(), s));
+        let ours = Choices::default();
+        let none = HashMap::new();
+        // Valve's per-game override beats nothing else but the user's per-game choice.
+        assert_eq!(
+            name(pick_tool_with(&tools, 5, &ours, &none, &sp)),
+            Some(("proton_experimental".into(), ChoiceSource::ValveApp))
+        );
+        let steam = HashMap::from([(5, "GE-Proton9-20".to_string()), (0, "GE-Proton9-20".to_string())]);
+        assert_eq!(name(pick_tool_with(&tools, 5, &ours, &steam, &sp)).unwrap().1, ChoiceSource::SteamApp);
+        // The user's global default beats Valve's default; Valve's default is `proton-stable`.
+        assert_eq!(name(pick_tool_with(&tools, 1, &ours, &steam, &sp)).unwrap().1, ChoiceSource::SteamDefault);
+        assert_eq!(
+            name(pick_tool_with(&tools, 1, &ours, &none, &sp)),
+            Some(("proton_11".into(), ChoiceSource::ValveDefault))
+        );
+        // An empty Valve mapping means no override.
+        assert_eq!(name(pick_tool_with(&tools, 6, &ours, &none, &sp)).unwrap().1, ChoiceSource::ValveDefault);
     }
 }

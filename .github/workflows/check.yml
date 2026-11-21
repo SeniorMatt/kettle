@@ -1,0 +1,24 @@
+# Work-in-progress branches (wip-*): compile everything, list every error, then run the tests.
+name: Check
+
+on:
+  push:
+    branches: ["wip-*"]
+
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Check
+        run: cargo check --workspace --all-targets --keep-going --message-format short
+      - name: Test
+        run: |
+          cargo build -p sr-steamclient
+          cargo test --workspace --no-fail-fast
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --keep-going --message-format short -- -D warnings

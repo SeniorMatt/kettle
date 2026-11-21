@@ -70,6 +70,8 @@ pub struct LibraryView {
     order_key: Option<OrderKey>,
     /// The most recently played games (indices into `state.games`), newest first.
     recent: Vec<usize>,
+    /// A single click waits a moment so a second click can turn it into a double click (play).
+    pending: Option<(sr_model::AppId, f64)>,
 }
 
 /// How many games the "Recent games" shelf can hold.
@@ -121,13 +123,14 @@ impl LibraryView {
         };
         let top_h = shelf_h + pad.min(12.0) + theme::ALL_BAR_H;
         let mut clicked = None;
+        let mut dbl = None;
         let mut pick: Option<Option<String>> = None;
         egui::ScrollArea::vertical().auto_shrink(false).show_viewport(ui, |ui, viewport| {
             ui.spacing_mut().item_spacing = Vec2::ZERO;
             let total = top_h + rows as f32 * row_h + pad;
             let (full, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), total), Sense::hover());
             if shelf_h > 0.0 {
-                self.shelf(ui, client, tex, ov, full.min, full.width(), &mut clicked);
+                self.shelf(ui, client, tex, ov, full.min, full.width(), &mut clicked, &mut dbl);
             }
             // The "ALL GAMES" bar: collection drop-down on the left, sort and cover size on the right.
             let bar = Rect::from_min_size(
@@ -161,6 +164,9 @@ impl LibraryView {
                     if resp.clicked() {
                         clicked = Some(app);
                     }
+                    if resp.double_clicked() || (resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
+                        dbl = Some(app);
+                    }
                     crate::game_menu::context(&resp, client, app, ov);
                 }
             }
@@ -168,8 +174,21 @@ impl LibraryView {
         if let Some(sel) = pick {
             client.send(Command::Collections(CollCmd::Show(sel)));
         }
-        if let Some(app) = clicked {
-            client.send(Command::Select(Some(app)));
+        let now = ui.input(|i| i.time);
+        if let Some(app) = dbl {
+            self.pending = None;
+            crate::game_page::activate(client, ov, app);
+        } else if let Some(app) = clicked {
+            self.pending = Some((app, now));
+        }
+        if let Some((app, t)) = self.pending {
+            const WAIT: f64 = 0.3;
+            if now - t >= WAIT {
+                self.pending = None;
+                client.send(Command::Select(Some(app)));
+            } else {
+                ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(WAIT - (now - t) + 0.01));
+            }
         }
     }
 
@@ -184,6 +203,7 @@ impl LibraryView {
         origin: Pos2,
         width: f32,
         clicked: &mut Option<sr_model::AppId>,
+        dbl: &mut Option<sr_model::AppId>,
     ) {
         let pad = theme::PAGE_PAD;
         let mut y = origin.y + pad;
@@ -222,6 +242,9 @@ impl LibraryView {
             let resp = capsule(ui, client, tex, rect, game, id, ArtKind::Header);
             if resp.clicked() {
                 *clicked = Some(app);
+            }
+            if resp.double_clicked() || (resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
+                *dbl = Some(app);
             }
             crate::game_menu::context(&resp, client, app, ov);
             x += w + theme::GRID_GAP;

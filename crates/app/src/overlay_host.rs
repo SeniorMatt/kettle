@@ -26,7 +26,9 @@ mod stub {
         pub fn new(_wake: std::sync::Arc<dyn Fn() + Send + Sync>) -> Host {
             Host
         }
-        pub fn sync(&mut self, _want: Option<AppId>) {}
+        pub fn sync(&mut self, _want: Option<AppId>, _gamescope: bool) -> bool {
+            false
+        }
         pub fn active(&self) -> bool {
             false
         }
@@ -51,6 +53,8 @@ mod imp {
     use std::sync::{Arc, Mutex, mpsc};
     use std::time::{Duration, Instant};
 
+    /// How long a game in Gamescope has to report its display before the normal overlay is used instead.
+    const DISPLAY_LIMIT: Duration = Duration::from_secs(90);
     /// How long the helper has to connect before we give up on it.
     const CONNECT_LIMIT: Duration = Duration::from_secs(20);
     /// A toggle this soon after the user closed the overlay itself is the same key press seen twice
@@ -79,6 +83,10 @@ mod imp {
         last_sent: Instant,
         dirty: bool,
         detect: Option<(Instant, bool)>,
+        /// A game in Gamescope is running but has not reported its X display yet.
+        waiting: bool,
+        /// Since when the running game has been waited for.
+        waiting_since: Option<Instant>,
     }
 
     impl Host {
@@ -100,11 +108,17 @@ mod imp {
                 last_sent: Instant::now(),
                 dirty: false,
                 detect: None,
+                waiting: false,
+                waiting_since: None,
             }
         }
 
-        /// Keep the helper in step with the game: started for `want`, ended when there is none.
-        pub fn sync(&mut self, want: Option<AppId>) {
+        /// Keep the helper in step with the game: started for `want`, ended when there is none. `gamescope` says
+        /// the game runs inside Gamescope: the helper then joins Gamescope's own X server, whose name the game's
+        /// launcher reports in a file a moment after the start. Returns true while that is awaited, so the
+        /// caller asks for another frame soon.
+        pub fn sync(&mut self, want: Option<AppId>, gamescope: bool) -> bool {
+            self.waiting = false;
             let died = self.child.as_mut().is_some_and(|(c, _)| matches!(c.try_wait(), Ok(Some(_))));
             if died {
                 eprintln!("[overlay] the helper process ended; using the built-in overlay window");
@@ -117,29 +131,49 @@ mod imp {
                         self.stop();
                     }
                     self.failed = false;
+                    self.waiting_since = None;
                 }
                 (Some(app), Some(running)) if app != running => {
                     self.stop();
                     self.failed = false;
-                    self.start(app);
+                    self.waiting_since = None;
+                    self.start(app, gamescope);
                 }
-                (Some(app), None) if !self.failed => self.start(app),
+                (Some(app), None) if !self.failed => self.start(app, gamescope),
                 _ => {}
             }
+            self.waiting
         }
 
         /// Is the helper (started or still connecting) the one that shows the overlay?
         pub fn active(&self) -> bool {
-            self.child.is_some() && !self.failed
+            (self.child.is_some() && !self.failed) || self.waiting
         }
 
-        fn start(&mut self, app: AppId) {
+        fn start(&mut self, app: AppId, gamescope: bool) {
+            // A game in Gamescope lives on Gamescope's own X server; its name arrives from the launcher shim.
+            let mut display = None;
+            if gamescope {
+                match sr_client::gamescope_display(app) {
+                    Some(d) => display = Some(d),
+                    None => {
+                        let since = *self.waiting_since.get_or_insert_with(Instant::now);
+                        if since.elapsed() > DISPLAY_LIMIT {
+                            eprintln!("[overlay] the game's Gamescope display never appeared; using the built-in overlay");
+                            self.failed = true;
+                        } else {
+                            self.waiting = true;
+                        }
+                        return;
+                    }
+                }
+            }
             let Some(path) = overlay_ipc::socket_path(std::process::id()) else {
                 eprintln!("[overlay] no XDG_RUNTIME_DIR; using the built-in overlay window");
                 self.failed = true;
                 return;
             };
-            if std::env::var_os("DISPLAY").is_none_or(|d| d.is_empty()) {
+            if display.is_none() && std::env::var_os("DISPLAY").is_none_or(|d| d.is_empty()) {
                 eprintln!("[overlay] no X11 display (XWayland); using the built-in overlay window");
                 self.failed = true;
                 return;
@@ -165,11 +199,13 @@ mod imp {
                 }
             };
             // Wayland is hidden from the helper, so winit picks X11 (XWayland on a Wayland desktop).
-            let child = Process::new(exe)
-                .arg("--overlay")
-                .arg(app.0.to_string())
-                .arg("--socket")
-                .arg(&path)
+            let mut cmd = Process::new(exe);
+            cmd.arg("--overlay").arg(app.0.to_string()).arg("--socket").arg(&path);
+            if let Some(d) = &display {
+                // Inside Gamescope's X server: a normal window with the properties Gamescope draws on top.
+                cmd.arg("--gamescope").env("DISPLAY", d);
+            }
+            let child = cmd
                 .env_remove("WAYLAND_DISPLAY")
                 .env("XDG_SESSION_TYPE", "x11")
                 .stdin(Stdio::null())
@@ -287,6 +323,9 @@ mod imp {
         pub fn toggle(&mut self, client: &Client) -> bool {
             if !self.active() {
                 return false;
+            }
+            if self.child.is_none() {
+                return true; // the game's display is not known yet; the key press is dropped
             }
             if self.last_hidden.is_some_and(|t| t.elapsed() < DEBOUNCE) {
                 return true;

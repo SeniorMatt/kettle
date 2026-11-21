@@ -30,37 +30,31 @@ pub fn vgradient(ui: &Ui, rect: Rect, top: Color32, bottom: Color32) {
     ui.painter().add(mesh);
 }
 
-/// The big Play / Install button: gradient, icon + bold label.
+/// The big Play / Install button of the game page (`PlayButton`): gradient with stops at 0 % and 60 % that
+/// slides 25 % -> 0 % on hover and 40 % pressed, 20 px upper-case text, 2 px radius, 0.2 s fade.
 pub fn action_button(ui: &mut Ui, icon: &str, label: &str, colors: (Color32, Color32)) -> Response {
-    let font = theme::bold(16.0);
-    let text = format!("{icon}  {label}");
+    let font = theme::regular(20.0); // Steam uses weight 300 with 1 px letter-spacing; we have neither
+    let text = format!("{icon}  {}", label.to_uppercase());
     let galley = ui.painter().layout_no_wrap(text, font, Color32::WHITE);
-    let size = Vec2::new((galley.size().x + 56.0).max(150.0), theme::CONTROL_LARGE);
+    let size = Vec2::new((galley.size().x + 24.0).max(theme::PAGE_PLAY_MIN_W), theme::PAGE_ACTION_H);
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
-    // Brighten on hover, darken and shrink a little while pressed.
-    let lift = anim::animate_bool(ui.ctx(), resp.id.with("hover"), resp.hovered(), anim::FAST);
-    let press = anim::animate_bool(ui.ctx(), resp.id.with("press"), resp.is_pointer_button_down_on(), 0.08);
-    let k = 1.0 + 0.15 * lift - 0.18 * press;
-    let rect = rect.shrink(1.5 * press);
-    gradient(ui, rect, colors.0.gamma_multiply(k), colors.1.gamma_multiply(k));
-    let pos = rect.center() - galley.size() / 2.0;
-    ui.painter().galley(pos, galley, Color32::WHITE);
+    let hover = anim::animate_bool(ui.ctx(), resp.id.with("hover"), resp.hovered(), 0.2);
+    let press = anim::animate_bool(ui.ctx(), resp.id.with("press"), resp.is_pointer_button_down_on(), 0.04);
+    let pos = (0.25 - 0.25 * hover) * (1.0 - press) + 0.4 * press;
+    let (l, r) = slide(colors.0, colors.1, pos);
+    round_gradient(ui, rect, theme::BUTTON_RADIUS, l, r);
+    let at = rect.center() - galley.size() / 2.0;
+    ui.painter().galley(at, galley, Color32::WHITE);
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-/// A square icon button (gear, info, ...) that lightens on hover.
+/// A square icon button (gear, info, ...): `MenuButton`, radius 4, translucent fill that brightens on hover.
 pub fn icon_button(ui: &mut Ui, icon: &str, size: f32, tooltip: &str) -> Response {
     let (rect, resp) = ui.allocate_exact_size(Vec2::splat(size), Sense::click());
-    let t = anim::animate_bool(ui.ctx(), resp.id.with("hover"), resp.hovered(), anim::FAST);
-    let press = anim::animate_bool(ui.ctx(), resp.id.with("press"), resp.is_pointer_button_down_on(), 0.08);
-    if t > 0.0 {
-        ui.painter().rect_filled(
-            rect,
-            theme::BUTTON_RADIUS,
-            theme::BG_ROW_SELECTED.gamma_multiply(t * (1.0 - 0.3 * press)),
-        );
-    }
-    let color = theme::TEXT_DIM.lerp_to_gamma(theme::TEXT, t);
+    let t = anim::animate_bool(ui.ctx(), resp.id.with("hover"), resp.hovered(), 0.12);
+    let bg = theme::PAGE_ICON_BTN_BG.lerp_to_gamma(theme::PAGE_ICON_BTN_BG_HOVER, t);
+    ui.painter().rect_filled(rect, 4.0, bg);
+    let color = Color32::from_white_alpha(128).lerp_to_gamma(Color32::WHITE, t);
     ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, icon, theme::regular(size * 0.55), color);
     resp.on_hover_text(tooltip)
 }
@@ -137,45 +131,91 @@ pub fn image_fit_bottom_left(ui: &Ui, bounds: Rect, tex: &egui::TextureHandle, a
 /// Look of a [`button`].
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ButtonStyle {
-    /// Blue, for the main action of a dialog.
+    /// Blue gradient, for the main action of a dialog (`DialogButton.Primary`).
     Primary,
-    /// Grey, for everything else.
+    /// Grey, for everything else (`DialogButton`).
     Secondary,
-    /// Red, for destructive actions.
+    /// Red gradient, for destructive actions.
     Danger,
+    /// Green gradient (`DialogButton.GreenPlay`).
+    #[allow(dead_code)] // Kept with the other Steam button styles; nothing uses it yet.
+    Green,
 }
 
-/// A flat text button with a hover fade. Returns its response; `enabled == false` draws it dim and inert.
+/// The two colours of a Steam gradient button. The official client paints a gradient that is 330 % of the
+/// button wide, with stops at 0 % and 60 %, and slides it: `pos` is the background position (25 % at rest,
+/// 0 % hovered, 40 % pressed). Returns the colours at the button's left and right edge.
+fn slide(a: Color32, b: Color32, pos: f32) -> (Color32, Color32) {
+    let offset = pos * (3.3 - 1.0);
+    let at = |x: f32| a.lerp_to_gamma(b, (x / 1.98).clamp(0.0, 1.0));
+    (at(offset), at(offset + 1.0))
+}
+
+/// A Steam `DialogButton`: 32 px high, 2 px radius, 14 px text, grey (blue / green / red gradient for the
+/// coloured ones) that fades to its hover colour in 0.2 s. `enabled == false` draws it dim and inert.
 pub fn button(ui: &mut Ui, label: &str, style: ButtonStyle, enabled: bool) -> Response {
-    let galley = ui.painter().layout_no_wrap(label.to_string(), theme::medium(13.0), theme::TEXT);
-    let size = Vec2::new(galley.size().x + 28.0, 30.0);
+    button_min(ui, label, style, enabled, 0.0)
+}
+
+/// [`button`] with a minimum width (dialog footers use [`theme::BTN_MIN_W_DIALOG`]).
+pub fn button_min(ui: &mut Ui, label: &str, style: ButtonStyle, enabled: bool, min_w: f32) -> Response {
+    let galley = ui.painter().layout_no_wrap(label.to_string(), theme::regular(theme::BTN_FONT), theme::BTN_TEXT);
+    let size = Vec2::new((galley.size().x + 2.0 * theme::BTN_PAD_X).max(min_w), theme::BTN_H);
     let sense = if enabled { Sense::click() } else { Sense::hover() };
     let (rect, resp) = ui.allocate_exact_size(size, sense);
-    let hover = anim::animate_bool(ui.ctx(), resp.id.with("hover"), resp.hovered() && enabled, anim::FAST);
-    let press = anim::animate_bool(ui.ctx(), resp.id.with("press"), resp.is_pointer_button_down_on(), 0.08);
-    let primary = style == ButtonStyle::Primary && enabled;
-    let base = match style {
-        ButtonStyle::Primary => theme::BTN_PRIMARY_B,
-        ButtonStyle::Secondary => theme::BTN_FLAT,
-        ButtonStyle::Danger => theme::DANGER,
-    };
-    let lit =
-        if style == ButtonStyle::Secondary { theme::BTN_FLAT_HOVER } else { base.lerp_to_gamma(Color32::WHITE, 0.12) };
-    let mut bg = base.lerp_to_gamma(lit, hover).gamma_multiply(1.0 - 0.15 * press);
+    let hover = anim::animate_bool(ui.ctx(), resp.id.with("hover"), resp.hovered() && enabled, 0.2);
+    let press = anim::animate_bool(ui.ctx(), resp.id.with("press"), resp.is_pointer_button_down_on(), 0.04);
+    let radius = theme::BUTTON_RADIUS;
     let mut fg = Color32::WHITE;
     if !enabled {
-        bg = theme::BTN_FLAT.gamma_multiply(0.6);
-        fg = theme::TEXT_UNINSTALLED;
-    }
-    if primary {
-        // Steam's blue button: a left-to-right gradient that brightens on hover.
-        let k = (1.0 + 0.12 * hover) * (1.0 - 0.15 * press);
-        gradient(ui, rect, theme::BTN_PRIMARY_A.gamma_multiply(k), theme::BTN_PRIMARY_B.gamma_multiply(k));
+        ui.painter().rect_filled(rect, radius, theme::BTN_DISABLED_BG);
+        fg = theme::BTN_DISABLED_FG;
+    } else if let Some((a, b)) = match style {
+        ButtonStyle::Primary => Some((theme::BTN_PRIMARY_A, theme::BTN_PRIMARY_B)),
+        ButtonStyle::Green => Some((theme::PLAY_A, theme::PLAY_B)),
+        ButtonStyle::Danger => Some((theme::BTN_DANGER_A, theme::BTN_DANGER_B)),
+        ButtonStyle::Secondary => None,
+    } {
+        // Rest 25 %, hover 0 %, pressed 40 % (the danger button has no slide; it brightens instead).
+        let pos = (0.25 - 0.25 * hover) * (1.0 - press) + 0.4 * press;
+        let (l, r) = if style == ButtonStyle::Danger {
+            let k = 1.0 + 0.12 * hover - 0.15 * press;
+            (a.gamma_multiply(k), b.gamma_multiply(k))
+        } else {
+            slide(a, b, pos)
+        };
+        round_gradient(ui, rect, radius, l, r);
     } else {
-        ui.painter().rect_filled(rect, theme::BUTTON_RADIUS, bg);
+        let base = theme::BTN_FLAT.lerp_to_gamma(theme::BTN_FLAT_HOVER, hover);
+        let bg = base.lerp_to_gamma(theme::BTN_FLAT_ACTIVE, press);
+        ui.painter().rect_filled(rect, radius, bg);
+        fg = theme::BTN_TEXT.lerp_to_gamma(Color32::WHITE, hover);
     }
     ui.painter().galley_with_override_text_color(rect.center() - galley.size() / 2.0, galley, fg);
     if enabled { resp.on_hover_cursor(egui::CursorIcon::PointingHand) } else { resp }
+}
+
+/// A left-to-right gradient with rounded corners: the ends are painted as small rounded rects in the edge
+/// colours, the middle as a gradient mesh (the corners are only 2 px, so this is invisible).
+fn round_gradient(ui: &Ui, rect: Rect, radius: egui::CornerRadius, left: Color32, right: Color32) {
+    let r = radius.nw as f32;
+    ui.painter().rect_filled(rect, radius, left.lerp_to_gamma(right, 0.5));
+    gradient(ui, rect.shrink2(Vec2::new(0.0, r.min(rect.height() / 2.0))), left, right);
+    // Re-cover the strip above and below with straight gradients, inset by the radius.
+    let inset = Rect::from_min_max(Pos2::new(rect.left() + r, rect.top()), Pos2::new(rect.right() - r, rect.top() + r));
+    let lerp = |x: f32| left.lerp_to_gamma(right, ((x - rect.left()) / rect.width()).clamp(0.0, 1.0));
+    gradient(ui, inset, lerp(inset.left()), lerp(inset.right()));
+    let inset = inset.translate(Vec2::new(0.0, rect.height() - r));
+    gradient(ui, inset, lerp(inset.left()), lerp(inset.right()));
+}
+
+/// The row of buttons at the bottom of a dialog: right-aligned, in Steam's order. Add the primary button
+/// first (it lands on the right), then the others; each goes to the left of the previous one.
+pub fn button_row(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        ui.spacing_mut().item_spacing.x = 10.0;
+        add(ui);
+    });
 }
 
 /// A horizontal progress bar: dark track, accent fill. `fraction` is 0..1 and is drawn as given, so the
@@ -258,7 +298,8 @@ pub fn menu_label(ui: &mut Ui, text: &str, dim: bool) {
     ui.add_space(padding.y);
 }
 
-/// A drop-down field with a list that looks like a menu: dark field, small chevron on the right.
+/// A Steam `DialogDropDown`: dark field with 3 px radius, 14 px text, a small arrow on the right that
+/// turns lighter on hover; the list opens as a menu in the shared menu style.
 pub fn combo<R>(
     ui: &mut Ui,
     id: impl std::hash::Hash + std::fmt::Debug,
@@ -268,21 +309,36 @@ pub fn combo<R>(
 ) {
     // Never wider than the space it is given (settings rows leave the control about a third of the row).
     let width = width.min((ui.available_width() - 32.0).max(60.0));
-    egui::ComboBox::from_id_salt(id)
-        .width(width)
-        .selected_text(selected)
-        .popup_style(egui::style::StyleModifier::from(theme::menu_style))
-        .icon(|ui, rect, visuals, _open| {
-            let color = visuals.fg_stroke.color;
-            ui.painter().text(
-                rect.center(),
-                egui::Align2::CENTER_CENTER,
-                egui_phosphor::regular::CARET_DOWN,
-                theme::regular(12.0),
-                color,
-            );
-        })
-        .show_ui(ui, list);
+    ui.scope(|ui| {
+        let s = ui.style_mut();
+        s.spacing.button_padding = Vec2::new(14.0, 0.0);
+        s.spacing.interact_size.y = s.spacing.interact_size.y.max(theme::BTN_H);
+        for (w, fill) in [
+            (&mut s.visuals.widgets.inactive, theme::INPUT_BG),
+            (&mut s.visuals.widgets.hovered, theme::DROPDOWN_HOVER),
+            (&mut s.visuals.widgets.active, theme::DROPDOWN_HOVER),
+            (&mut s.visuals.widgets.open, theme::DROPDOWN_HOVER),
+        ] {
+            w.weak_bg_fill = fill;
+            w.corner_radius = theme::INPUT_RADIUS;
+        }
+        egui::ComboBox::from_id_salt(id)
+            .width(width)
+            .selected_text(selected)
+            .popup_style(egui::style::StyleModifier::from(theme::menu_style))
+            .icon(|ui, rect, visuals, _open| {
+                let lit = visuals.fg_stroke.color == Color32::WHITE;
+                let color = if lit { Color32::WHITE } else { theme::DROPDOWN_ARROW };
+                ui.painter().text(
+                    rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    egui_phosphor::regular::CARET_DOWN,
+                    theme::regular(12.0),
+                    color,
+                );
+            })
+            .show_ui(ui, list);
+    });
 }
 
 // ---- settings controls ------------------------------------------------------
@@ -297,16 +353,102 @@ pub fn toggle(ui: &mut Ui, on: &mut bool) -> Response {
     }
     let t = anim::animate_bool(ui.ctx(), resp.id.with("on"), *on, 0.12);
     let hover = anim::animate_bool(ui.ctx(), resp.id.with("hover"), resp.hovered(), anim::FAST);
-    let track = theme::TOGGLE_OFF.lerp_to_gamma(theme::ACCENT, t).lerp_to_gamma(Color32::WHITE, 0.08 * hover);
+    let track = theme::TOGGLE_OFF.lerp_to_gamma(theme::TOGGLE_ON, t).lerp_to_gamma(Color32::WHITE, 0.08 * hover);
     ui.painter().rect_filled(rect, theme::TOGGLE_H / 2.0, track);
-    let r = theme::TOGGLE_H / 2.0 - 2.0;
+    let r = theme::TOGGLE_H / 2.0 - 3.0;
     let x = rect.left() + theme::TOGGLE_H / 2.0 + (theme::TOGGLE_W - theme::TOGGLE_H) * t;
     ui.painter().circle_filled(Pos2::new(x, rect.center().y), r, Color32::WHITE);
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-/// Vertical room above and below each settings row.
-const ROW_PAD: f32 = 14.0;
+/// A Steam `DialogCheckbox` with its label: an 18 px dark box with a white tick. The whole row is clickable.
+pub fn checkbox(ui: &mut Ui, on: &mut bool, label: &str) -> Response {
+    let galley = ui.painter().layout_no_wrap(label.to_string(), theme::regular(theme::BTN_FONT), theme::BTN_TEXT);
+    let box_size = theme::CHECK_SIZE;
+    let size = Vec2::new(box_size + 8.0 + galley.size().x, box_size.max(galley.size().y).max(24.0));
+    let (rect, mut resp) = ui.allocate_exact_size(size, Sense::click());
+    if resp.clicked() {
+        *on = !*on;
+        resp.mark_changed();
+    }
+    let hover = anim::animate_bool(ui.ctx(), resp.id.with("hover"), resp.hovered(), 0.16);
+    let t = anim::animate_bool(ui.ctx(), resp.id.with("on"), *on, 0.16);
+    let b = Rect::from_min_size(Pos2::new(rect.left(), rect.center().y - box_size / 2.0), Vec2::splat(box_size));
+    ui.painter().rect_filled(b, theme::RADIUS, theme::CHECK_BG.lerp_to_gamma(theme::CHECK_BG_HOVER, hover));
+    if t > 0.01 {
+        let p = |x: f32, y: f32| Pos2::new(b.left() + x * box_size, b.top() + y * box_size);
+        let color = Color32::WHITE.gamma_multiply(t);
+        ui.painter()
+            .add(egui::Shape::line(vec![p(0.24, 0.52), p(0.43, 0.70), p(0.78, 0.30)], egui::Stroke::new(2.0, color)));
+    }
+    let color = theme::BTN_TEXT.lerp_to_gamma(Color32::WHITE, hover);
+    ui.painter().galley_with_override_text_color(
+        Pos2::new(b.right() + 8.0, rect.center().y - galley.size().y / 2.0),
+        galley,
+        color,
+    );
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// A Steam `DialogSlider`: a dark track with a blue fill and a round grabber. `width` is the track length.
+/// The value is changed in place (rounded for integers); the response reports `changed()` and drag state
+/// like any egui widget.
+pub fn slider<N: egui::emath::Numeric>(
+    ui: &mut Ui,
+    value: &mut N,
+    range: std::ops::RangeInclusive<N>,
+    width: f32,
+) -> Response {
+    let (lo, hi) = (range.start().to_f64(), range.end().to_f64());
+    let (rect, mut resp) = ui.allocate_exact_size(Vec2::new(width, 18.0), Sense::click_and_drag());
+    let span = (rect.width() - 14.0).max(1.0);
+    if (resp.dragged() || resp.clicked() || resp.is_pointer_button_down_on())
+        && let Some(pos) = resp.interact_pointer_pos()
+    {
+        let f = ((pos.x - rect.left() - 7.0) / span).clamp(0.0, 1.0) as f64;
+        let mut v = lo + (hi - lo) * f;
+        if N::INTEGRAL {
+            v = v.round();
+        }
+        let new = N::from_f64(v);
+        if new != *value {
+            *value = new;
+            resp.mark_changed();
+        }
+    }
+    let f = if hi > lo { ((value.to_f64() - lo) / (hi - lo)).clamp(0.0, 1.0) as f32 } else { 0.0 };
+    let hover = anim::animate_bool(ui.ctx(), resp.id.with("hover"), resp.hovered() || resp.dragged(), anim::FAST);
+    // Track: 4 px border, 10 px inside.
+    ui.painter().rect_filled(rect, 9.0, theme::SLIDER_BORDER);
+    let inner = rect.shrink(4.0);
+    ui.painter().rect_filled(inner, 5.0, theme::SLIDER_TRACK);
+    let x = rect.left() + 7.0 + span * f;
+    let fill = Rect::from_min_max(inner.min, Pos2::new(x.max(inner.left() + 1.0), inner.max.y));
+    vgradient(ui, fill.shrink2(Vec2::new(0.0, 0.0)), theme::SLIDER_FILL_A, theme::SLIDER_FILL_B);
+    let c = Pos2::new(x, rect.center().y);
+    ui.painter().circle_filled(c, 7.5, Color32::from_black_alpha(50));
+    let grab =
+        theme::SLIDER_GRAB_A.lerp_to_gamma(theme::SLIDER_GRAB_B, 0.5).lerp_to_gamma(Color32::WHITE, 0.25 * hover);
+    ui.painter().circle_filled(c, 6.0, grab);
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// A single-line text field in Steam's `DialogInput` look: dark fill, 32 px high, 8 px padding, a blue
+/// outline while focused. `width` is the full width of the field.
+pub fn text_input(ui: &mut Ui, text: &mut String, width: f32, hint: &str) -> Response {
+    ui.add(
+        egui::TextEdit::singleline(text)
+            .desired_width(width)
+            .hint_text(hint)
+            .margin(egui::Margin::symmetric(theme::INPUT_PAD as i8, 6))
+            .font(theme::regular(theme::BTN_FONT)),
+    )
+}
+
+/// Vertical room above and below each settings row (Steam spaces fields about 12 px apart).
+const ROW_PAD: f32 = 9.0;
+/// Where the control column of a settings row starts, as a share of the row (labels get the rest).
+const LABEL_SHARE: f32 = 0.58;
 
 /// Text of a settings row: label (white) over an optional description (grey), wrapped to `width`.
 fn row_text(
@@ -315,56 +457,69 @@ fn row_text(
     desc: &str,
     width: f32,
 ) -> (std::sync::Arc<egui::Galley>, Option<std::sync::Arc<egui::Galley>>) {
-    let name = ui.painter().layout(label.to_string(), theme::regular(14.0), Color32::WHITE, width);
-    let note =
-        (!desc.is_empty()).then(|| ui.painter().layout(desc.to_string(), theme::regular(12.5), theme::TEXT_DIM, width));
+    let name = ui.painter().layout(label.to_string(), theme::regular(14.0), theme::BTN_TEXT, width);
+    let note = (!desc.is_empty())
+        .then(|| ui.painter().layout(desc.to_string(), theme::regular(13.0), theme::DIALOG_DESC, width));
     (name, note)
 }
 
 /// A settings row: label and description on the left, the control on the right (right-aligned, vertically
-/// centred), a hairline underneath.
+/// centred). Rows have no lines between them; groups are separated by [`section_header`].
 pub fn setting_row(ui: &mut Ui, label: &str, desc: &str, control: impl FnOnce(&mut Ui)) {
     let width = ui.available_width();
-    let text_w = (width * 0.62).max(160.0);
+    let text_w = (width * LABEL_SHARE).max(160.0);
     let (name, note) = row_text(ui, label, desc, text_w);
     let text_h = name.size().y + note.as_ref().map_or(0.0, |n| n.size().y + 3.0);
-    let row_h = text_h.max(30.0) + 2.0 * ROW_PAD;
+    let row_h = text_h.max(theme::BTN_H) + 2.0 * ROW_PAD;
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, row_h), Sense::hover());
     let top = rect.top() + (row_h - text_h) / 2.0;
-    ui.painter().galley(Pos2::new(rect.left(), top), name.clone(), Color32::WHITE);
+    ui.painter().galley(Pos2::new(rect.left(), top), name.clone(), theme::BTN_TEXT);
     if let Some(n) = note {
-        ui.painter().galley(Pos2::new(rect.left(), top + name.size().y + 3.0), n, theme::TEXT_DIM);
+        ui.painter().galley(Pos2::new(rect.left(), top + name.size().y + 3.0), n, theme::DIALOG_DESC);
     }
     let control_rect = Rect::from_min_max(Pos2::new(rect.left() + text_w + 12.0, rect.top()), rect.right_bottom());
     let mut child = ui.new_child(
         egui::UiBuilder::new().max_rect(control_rect).layout(egui::Layout::right_to_left(egui::Align::Center)),
     );
     control(&mut child);
-    row_line(ui, rect);
 }
 
 /// A settings row whose control is wide (a text field, a list): label and description on top, the control
 /// below at full width.
 pub fn setting_block(ui: &mut Ui, label: &str, desc: &str, control: impl FnOnce(&mut Ui)) {
     ui.add_space(ROW_PAD);
-    ui.label(egui::RichText::new(label).font(theme::regular(14.0)).color(Color32::WHITE));
+    ui.label(egui::RichText::new(label).font(theme::regular(14.0)).color(theme::BTN_TEXT));
     if !desc.is_empty() {
         ui.add_space(3.0);
-        ui.label(egui::RichText::new(desc).font(theme::regular(12.5)).color(theme::TEXT_DIM));
+        ui.label(egui::RichText::new(desc).font(theme::regular(13.0)).color(theme::DIALOG_DESC));
     }
     ui.add_space(10.0);
     control(ui);
     ui.add_space(ROW_PAD);
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 0.0), Sense::hover());
-    row_line(ui, rect);
 }
 
-fn row_line(ui: &Ui, rect: Rect) {
+/// A group heading inside a settings page (`DialogControlsSectionHeader`): 18 px medium white text with a
+/// hairline underneath and 24 px of room above.
+pub fn section_header(ui: &mut Ui, text: &str) {
+    ui.add_space(24.0);
+    let galley =
+        ui.painter().layout_no_wrap(text.to_string(), theme::medium(theme::SECTION_HEADER_SIZE), Color32::WHITE);
+    let h = galley.size().y + 24.0;
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h), Sense::hover());
+    ui.painter().galley(Pos2::new(rect.left(), rect.top() + 12.0), galley, Color32::WHITE);
     ui.painter().hline(rect.x_range(), rect.bottom().round() - 0.5, egui::Stroke::new(1.0, theme::SETTINGS_SEP));
+    ui.add_space(4.0);
 }
 
-/// The big white title at the top of a settings page.
+/// A small upper-case caption above a field in a dialog (`DialogLabel`: 13 px, #acb2b8).
+pub fn field_label(ui: &mut Ui, text: &str) {
+    ui.add_space(12.0);
+    ui.label(egui::RichText::new(text.to_uppercase()).font(theme::regular(13.0)).color(theme::DIALOG_LABEL));
+    ui.add_space(4.0);
+}
+
+/// The big white title at the top of a settings page or dialog (`DialogHeader`: 22 px bold).
 pub fn page_title(ui: &mut Ui, text: &str) {
-    ui.label(egui::RichText::new(text).font(theme::bold(26.0)).color(Color32::WHITE));
-    ui.add_space(10.0);
+    ui.label(egui::RichText::new(text).font(theme::bold(theme::DIALOG_HEADER_SIZE)).color(Color32::WHITE));
+    ui.add_space(6.0);
 }

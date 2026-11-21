@@ -22,6 +22,9 @@ pub struct Settings {
     /// Start the official Steam client in the background for games that need it.
     #[serde(default = "default_true")]
     pub start_steam: bool,
+    /// Ask Proton to write its log (`PROTON_LOG=1`) for Windows games.
+    #[serde(default)]
+    pub proton_log: bool,
     /// The Shift+Tab in-game overlay (the shortcut is registered only while a game we started runs).
     #[serde(default = "default_true")]
     pub overlay: bool,
@@ -31,6 +34,9 @@ pub struct Settings {
     /// The performance overlay (MangoHud): preset, items, position, FPS limit.
     #[serde(default)]
     pub hud: crate::HudSettings,
+    /// Run games in Gamescope (off by default) and its options.
+    #[serde(default)]
+    pub gamescope: crate::GamescopeSettings,
     /// Updates, speed limit, schedule, added library folders.
     #[serde(default)]
     pub downloads: crate::DownloadSettings,
@@ -56,9 +62,11 @@ impl Default for Settings {
             library: None,
             workers: DEFAULT_WORKERS,
             start_steam: true,
+            proton_log: false,
             overlay: true,
             interface: Default::default(),
             hud: Default::default(),
+            gamescope: Default::default(),
             downloads: Default::default(),
             notifications: Default::default(),
             keep_signed_in: true,
@@ -135,6 +143,11 @@ impl Client {
         self.save_settings();
     }
 
+    pub(crate) fn set_proton_log(&mut self, on: bool) {
+        self.state.settings.proton_log = on;
+        self.save_settings();
+    }
+
     pub(crate) fn set_overlay(&mut self, on: bool) {
         self.state.settings.overlay = on;
         self.save_settings();
@@ -174,6 +187,7 @@ pub(crate) fn handle(client: &mut Client, cmd: Command) {
         Command::SetLibrary(p) => client.set_library(p),
         Command::SetWorkers(n) => client.set_workers(n),
         Command::SetStartSteam(on) => client.set_start_steam(on),
+        Command::SetProtonLog(on) => client.set_proton_log(on),
         Command::SetOverlay(on) => client.set_overlay(on),
         Command::SetInterface(i) => client.set_interface(i),
         _ => {}
@@ -215,6 +229,9 @@ mod tests {
         assert!(s.keep_signed_in);
         assert!(s.downloads.auto_update);
         assert_eq!(s.downloads.limit_kbps, 0);
+        // Gamescope arrived later: old files get it off, with every option at its default.
+        assert_eq!(s.gamescope, crate::GamescopeSettings::default());
+        assert!(!s.gamescope.enabled);
         // An empty file and a partly filled new section work too.
         let s: Settings = serde_json::from_str("{}").unwrap();
         assert_eq!(s.workers, 8);

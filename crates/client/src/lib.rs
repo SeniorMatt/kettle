@@ -16,6 +16,7 @@ mod download_settings;
 mod downloads;
 mod extras;
 mod friends;
+mod gamescope_settings;
 mod hud_settings;
 mod interface_settings;
 mod launch;
@@ -29,6 +30,8 @@ mod play;
 mod profile;
 mod settings;
 mod shortcuts;
+#[cfg(target_os = "linux")]
+mod steamworks_host;
 mod storage;
 mod sysinfo;
 mod tools;
@@ -50,6 +53,12 @@ pub use friends::{
     Chat, Delivery, Friend, FriendAction, FriendsState, FriendsStatus, GamePlayed, GroupChat, GroupInfo, GroupMessage,
     GroupsState, HistoryState, LOADING as NAME_LOADING, MAX_GROUP_MESSAGES, MAX_TEXT, Me, Message, PersonaState,
     RoomInfo, Toast, local_utc_offset, sort_key as friend_sort_key,
+};
+pub use gamescope_settings::{
+    Detection as GamescopeDetection, GamescopeGames, GamescopeSettings, INSTALL_HINTS as GAMESCOPE_INSTALL_HINTS,
+    INSTALL_URL as GAMESCOPE_INSTALL_URL, MAX_SHARPNESS as GAMESCOPE_MAX_SHARPNESS, Override as GamescopeOverride,
+    RESOLUTIONS as GAMESCOPE_RESOLUTIONS, Upscaler as GamescopeUpscaler, WindowMode as GamescopeWindow,
+    detect as detect_gamescope, gamescope_display,
 };
 pub use hud_settings::{
     DEFAULT_TOGGLE_KEY, Detection as HudDetection, FPS_LIMIT_CHOICES, FontSize as HudFontSize, HudSettings,
@@ -144,6 +153,8 @@ pub struct State {
     pub starting_steam: Vec<AppId>,
     pub compat: CompatState,
     pub launch_options: LaunchOptionsState,
+    /// Per-game "Run in Gamescope" choices (games that follow the global setting are not listed).
+    pub gamescope_games: GamescopeGames,
     pub settings: Settings,
     /// Places a game can be installed into.
     pub libraries: Vec<LibraryChoice>,
@@ -288,6 +299,9 @@ pub enum Command {
     SetWorkers(usize),
     /// Start the official Steam client in the background for games that need it.
     SetStartSteam(bool),
+    /// "Write Proton logs": Windows games started with `PROTON_LOG=1` (log files in the data dir's `logs`).
+    /// The toggle is in Settings > Compatibility.
+    SetProtonLog(bool),
     /// Turn the Shift+Tab in-game overlay on or off.
     SetOverlay(bool),
     /// Save the interface settings (animations, scale, start page, tray).
@@ -298,6 +312,10 @@ pub enum Command {
     SetNote(AppId, String),
     /// Save the performance overlay (MangoHud) settings; they apply from the next game launch.
     SetHud(HudSettings),
+    /// Save the "Run games in Gamescope" settings; they apply from the next game launch.
+    SetGamescope(GamescopeSettings),
+    /// A game's own choice: follow the global setting, always, or never.
+    SetGameGamescope(AppId, GamescopeOverride),
     /// Favourites, hidden games and collections.
     Collections(CollCmd),
     /// Load the featured rows (no-op while loading or fresh).
@@ -381,6 +399,8 @@ enum Event {
     GameStarted {
         app: AppId,
         pid: u32,
+        /// Running inside Gamescope (the overlay then joins its X server).
+        gamescope: bool,
     },
     GameExited {
         app: AppId,
@@ -528,6 +548,7 @@ impl Client {
                     ours: sr_steam::launch_opts::LaunchOptions::load().apps,
                     ..Default::default()
                 },
+                gamescope_games: GamescopeGames::load(),
                 libraries: settings::library_choices(&settings),
                 settings,
                 free_space: Vec::new(),
@@ -617,11 +638,14 @@ impl Client {
             c @ (Command::SetLibrary(_)
             | Command::SetWorkers(_)
             | Command::SetStartSteam(_)
+            | Command::SetProtonLog(_)
             | Command::SetOverlay(_)
             | Command::SetInterface(_)) => settings::handle(self, c),
             Command::OpenUrl(u) => self.notice_on_err(open::url(&u)),
             Command::SetNote(app, text) => self.set_note(app, text),
             Command::SetHud(h) => self.set_hud(h),
+            Command::SetGamescope(g) => self.set_gamescope(g),
+            Command::SetGameGamescope(app, o) => self.set_game_gamescope(app, o),
             Command::Collections(c) => self.collections_cmd(c),
             Command::StoreLoad => self.store_load(),
             Command::StoreSearch(q) => self.store_search(q),
@@ -747,7 +771,7 @@ impl Client {
             Event::DlProgress { job, progress } => self.dl_progress(job, progress),
             Event::DlDone { job, result } => self.dl_done(job, result),
             Event::Extra(e) => self.apply_extra(e),
-            Event::GameStarted { app, pid } => self.game_started(app, pid),
+            Event::GameStarted { app, pid, gamescope } => self.game_started(app, pid, gamescope),
             Event::GameExited { app, seconds, success } => self.game_exited(app, seconds, success),
             Event::PlayFailed(problem) => self.play_failed(problem),
             Event::SteamStarting { app } => self.steam_starting(app),
@@ -1014,7 +1038,7 @@ impl Client {
         let app = std::env::var("KETTLE_DEMO_RUNNING").ok().and_then(|v| v.parse::<u32>().ok());
         if let Some(app) = app {
             // pid 0 is never signalled (see `stop_game`).
-            self.state.running.insert(AppId(app), RunningGame { pid: 0, started: Instant::now() });
+            self.state.running.insert(AppId(app), RunningGame { pid: 0, started: Instant::now(), gamescope: false });
         }
     }
 

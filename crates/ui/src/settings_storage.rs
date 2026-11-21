@@ -79,11 +79,7 @@ pub fn folders(ui: &mut Ui, client: &mut Client) {
         |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
-                ui.add(
-                    egui::TextEdit::singleline(&mut page.new_path)
-                        .desired_width(300.0)
-                        .hint_text("/mnt/games/KettleLibrary"),
-                );
+                widgets::text_input(ui, &mut page.new_path, 300.0, "/mnt/games/KettleLibrary");
                 let text = page.new_path.trim().to_string();
                 if widgets::button(ui, "Add folder", ButtonStyle::Primary, !text.is_empty()).clicked() {
                     client.send(Command::Manage(ManageCmd::AddLibrary(PathBuf::from(text))));

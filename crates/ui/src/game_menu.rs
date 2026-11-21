@@ -1,10 +1,9 @@
 //! Menus about one game: the right-click menu on covers and list rows, and the gear ("Manage") menu on the
 //! game page. Only items that are built are shown; items that do not apply right now are dimmed.
 
-use crate::Nav;
 use crate::dialogs::Overlays;
 use crate::{theme, widgets};
-use egui::{Response, RichText, Ui};
+use egui::{Response, Ui};
 use sr_client::{Client, Command, DownloadStatus};
 use sr_model::{AppId, Game, InstallState};
 
@@ -39,11 +38,13 @@ pub fn context(target: &Response, client: &mut Client, app: AppId, ov: &mut Over
         let c = can(client, &game);
         primary(ui, client, &game, &c, ov);
         widgets::menu_separator(ui);
+        // Add to Favorites, Add to >, Manage >: as in the official client's menu.
         crate::collections_ui::menu_items(ui, client, &game);
-        widgets::menu_separator(ui);
         // Inside a menu this is a submenu button (arrow on the right) that inherits the menu style.
-        ui.menu_button("Manage", |ui| manage_items(ui, client, &game, &c, ov));
-        // Last, as in the official client's menu.
+        ui.menu_button("Manage", |ui| {
+            ui.set_min_width(theme::MENU_MIN_W);
+            manage_items(ui, client, &game, &c, ov)
+        });
         widgets::menu_separator(ui);
         if item(ui, "Properties...", true) {
             ov.open_properties(app);
@@ -96,21 +97,15 @@ fn primary(ui: &mut Ui, client: &mut Client, game: &Game, c: &Can, ov: &mut Over
     }
 }
 
+/// The Manage submenu: Browse local files, Hide this game, Uninstall.
 fn manage_items(ui: &mut Ui, client: &mut Client, game: &Game, c: &Can, ov: &mut Overlays) {
     let app = game.app_id;
     if item(ui, "Browse local files", c.installed) {
         client.send(Command::BrowseFiles(app));
     }
-    if item(ui, "Verify installed files", c.installed && c.idle) {
-        client.send(Command::Verify(app));
-        ov.goto = Some(Nav::Downloads);
-    }
-    if item(ui, "Compatibility...", true) {
-        ov.open_compat(app);
-    }
+    crate::collections_ui::hide_item(ui, client, game);
     widgets::menu_separator(ui);
-    let uninstall = egui::Button::new(RichText::new("Uninstall...").color(theme::ERROR_TEXT));
-    if ui.add_enabled(c.installed && c.idle, uninstall).clicked() {
+    if item(ui, "Uninstall...", c.installed && c.idle) {
         ov.open_uninstall(app);
     }
 }

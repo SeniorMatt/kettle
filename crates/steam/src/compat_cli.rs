@@ -6,7 +6,7 @@
 //!   sr-cli proton install <source> <tag|latest> --dir D
 //!   sr-cli proton remove <name> --dir D
 //!   sr-cli appinfo <appid>                             launch entries from Steam's appinfo.vdf
-//!   sr-cli launch <appid> [--dry-run] [--windows] [--tool NAME] [--hud off|fps|graph|full] [-- args...]
+//!   sr-cli launch <appid> [--dry-run] [--windows] [--tool NAME] [--hud off|fps|graph|full] [--proton-log] [--gamescope|--no-gamescope] [-- args...]
 
 use crate::compat::{self, ToolOrigin};
 use crate::proton_releases::{self as rel, Phase, Source};
@@ -155,6 +155,26 @@ fn cli_hud(appid: u32, preset: Option<String>) -> Option<crate::mangohud::Hud> {
     mangohud::prepare(&s, appid).ok().flatten()
 }
 
+/// Gamescope for a dry run: the saved decision (global switch and the game's override), or `--gamescope` /
+/// `--no-gamescope` to force it. The program is shown even when it is not installed.
+fn cli_gamescope(appid: u32, flags: &[String]) -> Option<crate::gamescope::Launch> {
+    use crate::gamescope::{self, GamescopeGames};
+    let settings = gamescope::settings_from_disk();
+    let on = if flags.iter().any(|a| a == "--gamescope") {
+        true
+    } else if flags.iter().any(|a| a == "--no-gamescope") {
+        false
+    } else {
+        GamescopeGames::load().get(appid).resolve(settings.enabled)
+    };
+    let hud = crate::mangohud::settings_from_disk();
+    let det = gamescope::detect();
+    if on && !det.installed() {
+        eprintln!("note: gamescope is not installed; showing the command with plain `gamescope`");
+    }
+    gamescope::plan_launch(on, &settings, &hud, appid, &det, true)
+}
+
 fn cmd_launch(args: &[String]) -> Result<()> {
     let appid = appid_arg(args)?;
     let split = args.iter().position(|a| a == "--").unwrap_or(args.len());
@@ -168,10 +188,19 @@ fn cmd_launch(args: &[String]) -> Result<()> {
             launch_opts::effective(appid, ours.get(appid), None)
         }),
         hud: cli_hud(appid, flag_value(&args[..split], "--hud")),
+        proton_log: args[..split].iter().any(|a| a == "--proton-log"),
+        gamescope: cli_gamescope(appid, &args[..split]),
     };
     let p = run::prepare(appid, &opts)?;
     println!("{} ({appid}){}", p.name, if p.installed { "" } else { "  [not installed: path is where it would go]" });
-    println!("entry:   {} {}", p.entry.executable, p.entry.arguments);
+    println!(
+        "entry:   id {} {} {}  (oslist {:?}, arch {:?})",
+        p.entry.id, p.entry.executable, p.entry.arguments, p.entry.oslist, p.entry.osarch
+    );
+    println!("install: {}", p.install_dir.display());
+    if p.gamescope {
+        println!("gamescope: yes (the whole command below runs inside it)");
+    }
     if let Some((name, why)) = &p.tool {
         println!("tool:    {name} ({why:?})");
     }
@@ -187,9 +216,30 @@ fn cmd_launch(args: &[String]) -> Result<()> {
     }
     let shown: Vec<_> = p.plan.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
     println!("command: {}", launch_opts::command_line(&p.plan, &shown));
+    // What the launch checks before it starts anything.
+    let yn = |b: bool| if b { "yes" } else { "no" };
+    let exe = run::resolve_case(&p.install_dir, std::path::Path::new(&p.entry.executable.replace('\\', "/")));
+    println!("exe on disk: {} ({})", yn(exe.exists()), exe.display());
+    println!("cwd exists:  {}", yn(p.plan.cwd.is_dir()));
+    if let Some(d) = p.plan.env.get("STEAM_COMPAT_DATA_PATH") {
+        let pfx = std::path::Path::new(d).join("pfx");
+        let state = if !pfx.is_dir() {
+            "not created yet (the tool makes it)"
+        } else if pfx.join("system.reg").is_file() {
+            "ready"
+        } else {
+            "INCOMPLETE (no system.reg); a launch moves it aside if it holds no files"
+        };
+        println!("prefix:      {d}: {state}");
+    }
+    if let Some(id) = p.tool.as_ref().and_then(|(n, _)| compat::discover().into_iter().find(|t| &t.internal_name == n))
+        && let Some(need) = id.require_tool_appid
+    {
+        let used = p.plan.env.get("STEAM_COMPAT_TOOL_PATHS").is_some_and(|v| v.contains("SteamLinuxRuntime"));
+        println!("container:   {} ({})", run::runtime_name(need), if used { "used" } else { "NOT found/used" });
+    }
     // Only looks; the client is never started from here.
     let needs = crate::steam_client::uses_steamworks(&p.install_dir);
-    let yn = |b: bool| if b { "yes" } else { "no" };
     println!("needs the Steam client: {}, running: {}", yn(needs), yn(crate::steam_client::is_running()));
     if args.iter().any(|a| a == "--dry-run") {
         return Ok(());

@@ -21,6 +21,8 @@ pub struct RunningGame {
     pub pid: u32,
     /// When it started (for the session time in the overlay).
     pub started: std::time::Instant,
+    /// Started inside Gamescope: the overlay helper joins Gamescope's X server.
+    pub gamescope: bool,
 }
 
 /// Why a game could not be started, in words for the user.
@@ -31,6 +33,11 @@ pub struct PlayProblem {
     pub message: String,
     /// A missing or unusable compatibility tool: the UI offers the Proton manager.
     pub needs_compat_tool: bool,
+    /// What a bug report needs: the command, the variables we set and the end of the game's log (home folder
+    /// shown as `~`, secrets hidden). Empty when nothing was started. The UI's "Copy details" copies this.
+    pub details: String,
+    /// The launch log (`<data dir>/logs/launch-<appid>.log`), when one was written.
+    pub log: Option<PathBuf>,
 }
 
 /// Play time we measured ourselves.
@@ -84,7 +91,13 @@ impl Client {
         let (tx, wake) = (self.tx.clone(), self.wake.clone());
         let start_steam = self.state.settings.start_steam;
         let (ours, account) = self.launch_options_for(app);
-        let options = LaunchText { ours, account, hud: self.state.settings.hud.clone() };
+        let options = LaunchText {
+            ours,
+            account,
+            hud: self.state.settings.hud.clone(),
+            proton_log: self.state.settings.proton_log,
+            gamescope: self.gamescope_for(app).then(|| self.state.settings.gamescope.clone()),
+        };
         self.rt.spawn_blocking(move || launch(app, name, installed, start_steam, options, tx, wake));
     }
 
@@ -98,9 +111,9 @@ impl Client {
         self.rt.spawn_blocking(move || terminate_group(pid));
     }
 
-    pub(crate) fn game_started(&mut self, app: AppId, pid: u32) {
+    pub(crate) fn game_started(&mut self, app: AppId, pid: u32, gamescope: bool) {
         self.state.starting_steam.retain(|a| *a != app);
-        self.state.running.insert(app, RunningGame { pid, started: std::time::Instant::now() });
+        self.state.running.insert(app, RunningGame { pid, started: std::time::Instant::now(), gamescope });
         self.apply_bandwidth();
     }
 
@@ -114,8 +127,8 @@ impl Client {
         if let Some(message) = missing.filter(|_| seconds < EARLY_EXIT_SECS) {
             self.state.notice = Some(message);
         } else if !success && seconds < 5 {
-            let log = run::log_path(app.0);
-            self.state.notice = Some(format!("The game ended right away. See {}", log.display()));
+            let name = self.state.game(app).map(|g| g.name.clone()).unwrap_or_else(|| format!("App {}", app.0));
+            self.state.play_problem = Some(early_exit_problem(app, name));
         }
     }
 
@@ -143,6 +156,10 @@ struct LaunchText {
     account: Option<u32>,
     /// The performance overlay setting at the time of the launch.
     hud: sr_steam::mangohud::HudSettings,
+    /// "Write Proton logs" (Settings): `PROTON_LOG=1` for Windows games.
+    proton_log: bool,
+    /// Gamescope's settings when this game is to run in it (the global switch and the game's override resolved).
+    gamescope: Option<sr_steam::gamescope::GamescopeSettings>,
 }
 
 /// Worker: prepare the plan from Steam's app data and start it.
@@ -166,12 +183,29 @@ fn launch(
             Some(_) => sr_steam::launch_opts::effective(app.0, options.ours.as_deref(), options.account),
             None => options.ours.clone(),
         };
+        // Gamescope: only when asked for and installed; otherwise the game starts as usual.
+        let det = sr_steam::gamescope::detect();
+        let gamescope = options.gamescope.as_ref().and_then(|g| {
+            let l = sr_steam::gamescope::plan_launch(true, g, &options.hud, app.0, &det, false);
+            if l.is_none() {
+                eprintln!("[gamescope] not installed; starting the game without it");
+            }
+            l
+        });
+        // The frame cap goes to Gamescope then, so the HUD must not cap a second time.
+        let hud_settings = sr_steam::gamescope::hud_for(&options.hud, gamescope.is_some());
+        // The old display report would make the overlay join the last session's display.
+        sr_steam::gamescope::clear_display(app.0);
         // MangoHud: writes the game's config file; a problem here only means no HUD, never a failed launch.
-        let hud = sr_steam::mangohud::prepare(&options.hud, app.0).unwrap_or_else(|e| {
+        let hud = sr_steam::mangohud::prepare(&hud_settings, app.0).unwrap_or_else(|e| {
             eprintln!("[hud] not applied: {e:#}");
             None
         });
-        run::prepare_with(&info, installed.as_ref(), &run::PrepareOpts { launch_options, hud, ..Default::default() })
+        run::prepare_with(
+            &info,
+            installed.as_ref(),
+            &run::PrepareOpts { launch_options, hud, proton_log: options.proton_log, gamescope, ..Default::default() },
+        )
     });
     let send = move |ev: Event| {
         let _ = tx.blocking_send(ev);
@@ -182,13 +216,51 @@ fn launch(
             ensure_steam(app, &p.install_dir, &send);
         }
     });
-    match prepared.and_then(|p| start(&p.plan, &send)) {
-        Ok(pid) => send(Event::GameStarted { app, pid }),
+    let (result, details) = match prepared {
+        Ok(p) => (start(&p.plan, &send).map(|pid| (pid, p.gamescope)), run::describe(&p.plan)),
+        Err(e) => (Err(e), String::new()),
+    };
+    match result {
+        Ok((pid, gamescope)) => send(Event::GameStarted { app, pid, gamescope }),
         Err(e) => {
             let message = format!("{e:#}");
             let needs_compat_tool = is_compat_problem(&message);
-            send(Event::PlayFailed(PlayProblem { app, name, message, needs_compat_tool }));
+            let details = format!("{name} ({})\n{details}\nerror: {message}\n", app.0);
+            let log = Some(run::log_path(app.0)).filter(|p| p.is_file());
+            send(Event::PlayFailed(PlayProblem { app, name, message, needs_compat_tool, details, log }));
         }
+    }
+}
+
+/// A game that ended within seconds with an error: say why when the log tells, and carry the log's end.
+fn early_exit_problem(app: AppId, name: String) -> PlayProblem {
+    let tail = run::log_tail(app.0, 60);
+    let log = run::log_path(app.0);
+    let reason = explain_log(&tail).unwrap_or("The game ended right away.");
+    PlayProblem {
+        app,
+        message: format!("{reason}\nThe full log is {}", log.display()),
+        needs_compat_tool: false,
+        details: format!("{name} ({})\n{tail}\n", app.0),
+        log: Some(log).filter(|p| p.is_file()),
+        name,
+    }
+}
+
+/// A plain-words reason for the failures the logs show most often.
+fn explain_log(tail: &str) -> Option<&'static str> {
+    let has = |s: &str| tail.contains(s);
+    if (has("C:\\windows") && (has("failed") || has("not found"))) || has("C:\\\\windows") {
+        Some(
+            "Proton could not set up the Windows environment (the \"C:\\windows ... failed\" error). The game's prefix \
+             may be damaged or the compatibility tool cannot run here; try another tool for this game.",
+        )
+    } else if has("bwrap:") || (has("pressure-vessel") && has("error")) {
+        Some("The Steam Linux Runtime container could not start (see the log for the bwrap / pressure-vessel line).")
+    } else if has("No such file or directory") {
+        Some("A file the game or Proton needs is missing (\"No such file or directory\" in the log).")
+    } else {
+        None
     }
 }
 
@@ -273,6 +345,15 @@ mod tests {
         s.add(AppId(7), 30, 2000);
         assert_eq!(s.get(AppId(7)), (120, 2000));
         assert_eq!(s.get(AppId(8)), (0, 0));
+    }
+
+    #[test]
+    fn log_reasons() {
+        assert!(
+            explain_log("wine: could not load C:\\windows\\system32\\kernel32.dll, status c0000135 failed").is_some()
+        );
+        assert!(explain_log("bwrap: Can't create file").is_some());
+        assert!(explain_log("fine").is_none());
     }
 
     #[test]

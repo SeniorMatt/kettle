@@ -410,7 +410,7 @@ impl Client {
     /// Pause the running download and everything that waits.
     pub(crate) fn dl_pause_all(&mut self) {
         let d = &mut self.state.downloads;
-        let waiting: Vec<DownloadItem> = d.queue.drain(..).collect();
+        let waiting: Vec<DownloadItem> = std::mem::take(&mut d.queue);
         d.paused.extend(waiting.into_iter().map(|item| PausedDownload { item, done_bytes: 0, total_bytes: 0 }));
         if let Some(app) = d.active.as_ref().map(|a| a.item.request.app) {
             self.dl_stop_active(app, StopKind::Pause);

@@ -1,0 +1,24 @@
+[package]
+name = "sr-steamclient"
+description = "Kettle's own steamclient.so: the library games load instead of Valve's, answering from Kettle over a Unix socket."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+# `steamclient` so the cdylib is libsteamclient.so (installed under the name games expect: steamclient.so).
+name = "steamclient"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["exports"]
+# The C exports (`CreateInterface`, `Steam_*`). The host side depends on this crate without them.
+exports = []
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+libloading = "0.8"

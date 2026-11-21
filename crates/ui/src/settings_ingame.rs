@@ -61,9 +61,10 @@ pub fn show(ui: &mut Ui, client: &mut Client) {
     if toggle_row(ui, "Start the Steam client for games that need it", desc, &mut start) {
         client.send(Command::SetStartSteam(start));
     }
-    ui.add_space(18.0);
-    widgets::section_title(ui, "PERFORMANCE OVERLAY");
+    widgets::section_header(ui, "Performance overlay");
     performance(ui, client);
+    widgets::section_header(ui, "Gamescope");
+    crate::settings_gamescope::show(ui, client);
 }
 
 fn performance(ui: &mut Ui, client: &mut Client) {
@@ -116,7 +117,8 @@ fn performance(ui: &mut Ui, client: &mut Client) {
             });
         });
         widgets::setting_row(ui, "Background opacity", "", |ui| {
-            ui.add(egui::Slider::new(&mut h.opacity, 0..=100).suffix("%"));
+            ui.label(RichText::new(format!("{}%", h.opacity)).font(theme::regular(14.0)).color(theme::TEXT));
+            widgets::slider(ui, &mut h.opacity, 0..=100, 180.0);
         });
         widgets::setting_row(ui, "Show / hide key", "Pressed while playing. Handled by MangoHud.", |ui| {
             let current =
