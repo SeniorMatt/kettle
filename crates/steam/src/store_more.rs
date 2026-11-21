@@ -149,7 +149,7 @@ pub fn thousands(n: u32) -> String {
     let s = n.to_string();
     let mut out = String::new();
     for (i, c) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i) % 3 == 0 {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(c);
@@ -311,7 +311,7 @@ pub(crate) fn parse_tags(v: &Value) -> Vec<Tag> {
             Some(Tag { id: u32::try_from(t["tagid"].as_u64()?).ok()?, name: clean_text(t["name"].as_str()?) })
         })
         .collect();
-    tags.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    tags.sort_by_key(|t| t.name.to_lowercase());
     tags
 }
 
