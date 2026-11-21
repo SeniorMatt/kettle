@@ -49,6 +49,9 @@ pub struct Settings {
     /// Steam Cloud: download saves before a game starts and upload them after it (a game can opt out).
     #[serde(default = "default_true")]
     pub cloud_sync: bool,
+    /// Look for a newer Kettle (GitHub) at start and every 6 hours; only acts when Kettle runs as an AppImage.
+    #[serde(default = "default_true")]
+    pub check_kettle_updates: bool,
 }
 
 fn default_true() -> bool {
@@ -74,6 +77,7 @@ impl Default for Settings {
             notifications: Default::default(),
             keep_signed_in: true,
             cloud_sync: true,
+            check_kettle_updates: true,
         }
     }
 }
@@ -160,6 +164,7 @@ impl Client {
     pub(crate) fn set_interface(&mut self, i: crate::InterfaceSettings) {
         self.state.settings.interface = i.clamped();
         self.save_settings();
+        self.refresh_autostart();
     }
 
     pub(crate) fn save_settings(&mut self) {
@@ -231,6 +236,7 @@ mod tests {
         assert_eq!(s.downloads, crate::DownloadSettings::default());
         assert_eq!(s.notifications, crate::NotifySettings::default());
         assert!(s.keep_signed_in);
+        assert!(s.check_kettle_updates);
         assert!(s.downloads.auto_update);
         assert_eq!(s.downloads.limit_kbps, 0);
         // Gamescope arrived later: old files get it off, with every option at its default.

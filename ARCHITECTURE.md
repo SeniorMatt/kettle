@@ -37,6 +37,23 @@ Kettle is a native Steam client. It talks to Steam's servers directly (CM protoc
 - **Every async request carries a generation number.** The reducer drops results whose generation is stale, for example after logout or after switching accounts.
 - **Every cache is bounded** by count and bytes: textures, decoded images and the HTTP art cache.
 
+## Quality-of-life features (alpha 6)
+
+Each lives in one `crates/client/src` file with its pure logic unit-tested, and one UI file in `crates/ui/src` that only draws and sends `Command`s.
+
+| Feature | Client file | UI file | Command / state |
+|---|---|---|---|
+| Kettle updates itself | `kettle_update.rs` | `kettle_update_ui.rs` | `Command::KettleUpdate`, `State::kettle_update`, `Settings::check_kettle_updates` |
+| Start with the computer | `autostart.rs` | `settings_extra.rs` | `Command::SetAutostart`, `State::autostart` (the file `~/.config/autostart/kettle.desktop` is the truth) |
+| Friend notifications | `friend_notify.rs` (rate limits) + `friends.rs` | existing Settings > Notifications | `NotifySettings::{friend_online, friend_game}` |
+| ProtonDB rating | `protondb.rs` | `protondb_badge.rs` | `Command::ProtonDb`, `State::protondb` |
+| Per-game environment | `game_env.rs` (applied in `play.rs`) | `game_env_ui.rs` | `Command::SetGameEnv`, `State::game_env`; file `game_env.json` |
+| Non-Steam games | `non_steam.rs`, `sr_steam::run::prepare_exe` | `add_game_ui.rs` | `Command::NonSteam`, `State::non_steam`; file `non_steam.json` |
+
+- **Self-update** only acts when `$APPIMAGE` is set. It reads GitHub's release list (pre-releases included, a 404 is silent), picks exactly `kettle-x86_64.AppImage` from `github.com/SeniorMatt/kettle/releases/download/`, downloads to `<AppImage>.update.tmp` in the same folder, checks size and the ELF header, `chmod +x`, and renames over the running file (atomic). The user clicks "Update now" first and "Restart now" after.
+- **Non-Steam games** get ids with the top bit set (Steam's own shortcut formula, CRC-32 of the quoted program and the name), so they never clash with app ids. They are merged into `State::games` by `merge_installed` and use the normal play-time bookkeeping. `play.rs` hands them to `non_steam::play_non_steam`, which asks `run::prepare_exe` for a plan: a Linux program as it is, a Windows one through the default Proton tool with a prefix in `<data dir>/compatdata/<id>`. Steam's `shortcuts.vdf` is parsed read-only for the import.
+- **Environment variables** are validated (`[A-Za-z_][A-Za-z0-9_]*`, no line breaks or NUL, at most 64 per game) and added to the launch plan after everything else, so they win. The launch log lists them.
+
 ## Cross-cutting concerns
 
 - **Idle CPU ≈ 0.** egui repaints only on input. Background tasks call `request_repaint()` once per batch of events, and animations use `request_repaint_after`.

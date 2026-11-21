@@ -165,7 +165,7 @@ impl Default for NotifySettings {
             download_done: true,
             friend_online: false,
             chat_message: true,
-            friend_game: false,
+            friend_game: true,
             sound: false,
         }
     }

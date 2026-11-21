@@ -117,6 +117,13 @@ fn manage_items(ui: &mut Ui, client: &mut Client, game: &Game, c: &Can, ov: &mut
     }
     crate::collections_ui::hide_item(ui, client, game);
     widgets::menu_separator(ui);
+    if crate::add_game_ui::is_non_steam(client, app) {
+        // As in the official client: the program stays on disk, only the library entry goes.
+        if item(ui, "Remove non-Steam game from your library", c.idle) {
+            crate::add_game_ui::remove(client, app);
+        }
+        return;
+    }
     if item(ui, "Uninstall...", c.installed && c.idle) {
         ov.open_uninstall(app);
     }

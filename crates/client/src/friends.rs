@@ -281,6 +281,8 @@ pub struct FriendsInner {
     state_loaded: bool,
     next_local: u64,
     toast_seq: u64,
+    /// When friend notifications may show (quiet at sign-in, rate limits).
+    notify_gate: crate::friend_notify::Gate,
     /// Chat counter for the "touched" order.
     clock: u64,
     demo: bool,
@@ -550,6 +552,7 @@ impl Client {
         let my_state = self.state.friends.my_state;
         self.friends.rels = None;
         self.friends.people.clear();
+        self.friends.notify_gate = Default::default();
         self.friends.demo = false;
         self.state.friends = FriendsState { my_state, ..Default::default() };
     }
@@ -678,7 +681,8 @@ impl Client {
 
     fn apply_personas(&mut self, ups: Vec<PersonaUpdate>) {
         let f = &mut self.state.friends;
-        let mut came_online: Vec<(String, Option<String>)> = Vec::new();
+        let mut came_online: Vec<(u64, String, Option<String>)> = Vec::new();
+        self.friends.notify_gate.touch(std::time::Instant::now());
         for u in ups {
             if u.id == f.me.id && u.id != 0 {
                 if let Some(n) = &u.name {
@@ -699,14 +703,17 @@ impl Client {
                 let online = !matches!(entry.state, PersonaState::Offline | PersonaState::Invisible);
                 if known && entry.has_name() && f.window_unfocused {
                     if was_offline && online {
-                        came_online.push((entry.name.clone(), None));
+                        came_online.push((u.id, entry.name.clone(), None));
                     } else if !was_playing && let Some(g) = &entry.game {
-                        came_online.push((entry.name.clone(), Some(g.name.clone())));
+                        came_online.push((u.id, entry.name.clone(), Some(g.name.clone())));
                     }
                 }
             }
         }
-        for (name, game) in came_online {
+        for (id, name, game) in came_online {
+            if !self.friends.notify_gate.allow(std::time::Instant::now(), id) {
+                continue;
+            }
             match game {
                 None => self.notify(crate::NotifyKind::FriendOnline, &name, "is now online"),
                 Some(g) => self.notify(crate::NotifyKind::FriendGame, &name, &format!("started playing {g}")),

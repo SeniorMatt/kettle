@@ -365,11 +365,10 @@ impl Server {
             }
             std::fs::remove_file(path)?;
         }
-        // SAFETY: umask only changes the mode of files this process creates next; restored right after the bind.
-        let old = unsafe { libc::umask(0o177) };
-        let listener = UnixListener::bind(path);
-        unsafe { libc::umask(old) };
-        let listener = listener?;
+        // No umask change here: umask is process-wide, so other threads creating files at the same moment would
+        // get mode 0600 directories. The socket lives in $XDG_RUNTIME_DIR (0700, only this user), and its mode is
+        // narrowed right after the bind.
+        let listener = UnixListener::bind(path)?;
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
         let stop = Arc::new(AtomicBool::new(false));
         let (stop2, active) = (stop.clone(), Arc::new(AtomicUsize::new(0)));

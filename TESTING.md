@@ -210,3 +210,32 @@ Use a small game that has Steam Cloud and starts under Kettle. Open the launch l
 - [ ] Failure: disconnect the network just before Play (or sign out of the hub): the game still starts, a notice says Cloud could not sync, and nothing is uploaded after the session.
 - [ ] No save file is ever deleted by Kettle; a file deleted in the cloud stays on disk.
 - [ ] With the official Steam client installed: a game that keeps its saves in `userdata/<account>/<app>/remote` is not synced for that folder; the launch log says `Cloud: remote/ belongs to the Steam client, skipped` and the game page shows it. Nothing under the Steam folder changes (check modification times). Saves in the game folder, home or the Proton prefix still sync.
+
+## Alpha 6: quality-of-life features (owner steps)
+
+These are unit-tested but not tried on the desktop yet.
+
+### Kettle updates itself (run the AppImage, not `cargo run`)
+- [ ] Settings shows "Check for Kettle updates" on. With a newer release on GitHub (a pre-release counts), a notice "Update available: Kettle X" appears once and the banner / settings row offers "Update now" and "Later".
+- [ ] "Update now" shows the download progress, then "Restart now". Restart: the window comes back as the new version (Settings shows its version). The old file was replaced in place (`ls -l` the AppImage); no `.update.tmp` file is left next to it.
+- [ ] Turn the setting off and restart: no request is made. With no network, or a private repository, nothing is shown (no error).
+- [ ] Run Kettle from `cargo run`: "Check now" says updating itself needs the AppImage version.
+
+### Start with the computer
+- [ ] Turn it on: `~/.config/autostart/kettle.desktop` exists and its `Exec=` is the AppImage path. Turn on "Start minimized": the line ends with `--minimized`. Log out and in: Kettle starts hidden in the tray.
+- [ ] Turn it off: the file is gone. Restart Kettle with the file present: the switch shows on.
+
+### Friend notifications
+- [ ] Settings > Notifications: "A friend joins a game" is on, "A friend comes online" is off. With the Kettle window unfocused, a friend starting a game shows a notification; a friend coming online shows one only after you turn that on.
+- [ ] Right after sign-in (first 30 seconds) no notifications appear; the same friend does not notify again within 5 minutes; you never get one about yourself.
+
+### ProtonDB rating
+- [ ] Open a Windows-only game's page: "ProtonDB: Gold" (or the right tier) appears; hovering shows the number of reports; clicking opens protondb.com. A game with a native Linux build shows nothing. `~/.cache/kettle/protondb/<id>.json` exists; opening the game again within a day makes no request.
+
+### Per-game environment variables
+- [ ] Game properties > Compatibility: turn on "Show the DXVK frame rate", type `FOO=bar`, Apply. Start the game: the launch log (`~/.local/share/kettle/logs/launch-<id>.log`) lists `env: DXVK_HUD=fps` and `env: FOO=bar`. A bad line (`1X=y`) shows an error and is not saved. With GameMode installed, "Use GameMode" makes the command start with `gamemoderun`.
+
+### Non-Steam games
+- [ ] Add a Game: type the full path of a Linux program (or pick an installed app: name, program and icon fill in). It appears in the library; Play starts it; the play time grows after it exits.
+- [ ] Add a `.exe`: it starts through Proton (default tool) with a prefix in `~/.local/share/kettle/compatdata/<id>`.
+- [ ] "Import from Steam" adds the shortcuts of the official client; Steam's `shortcuts.vdf` is unchanged (compare its modification time). "Remove from library" takes a game off the list and leaves its files.

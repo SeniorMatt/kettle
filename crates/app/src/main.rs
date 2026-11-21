@@ -76,7 +76,7 @@ impl App {
         if !self.start_checked {
             if tray.active() {
                 self.start_checked = true;
-                if iface.start_minimized {
+                if iface.start_minimized || std::env::args().any(|a| a == sr_client::MINIMIZED_ARG) {
                     hide_window(ctx);
                 }
             } else if self.started.elapsed().as_secs() >= 6 {

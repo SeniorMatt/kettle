@@ -317,6 +317,7 @@ fn compatibility(ui: &mut Ui, client: &mut Client, app: AppId, ov: &mut Overlays
         ui.label(RichText::new("No compatibility tool is installed.").color(theme::ERROR_TEXT));
     }
     crate::settings_gamescope::per_game(ui, client, app);
+    crate::game_env_ui::section(ui, client, app);
     ui.add_space(12.0);
     if widgets::link(ui, "Open Proton manager").clicked() {
         ov.goto = Some(Nav::Settings(SettingsTab::Compatibility));

@@ -91,6 +91,9 @@ impl Client {
         {
             return;
         }
+        if let Some(g) = self.state.non_steam.get(app).cloned() {
+            return self.play_non_steam(g);
+        }
         let name = self.state.game(app).map(|g| g.name.clone()).unwrap_or_default();
         let installed = self.installed.get(&app.0).cloned();
         let (tx, wake) = (self.tx.clone(), self.wake.clone());
@@ -103,6 +106,7 @@ impl Client {
             proton_log: self.state.settings.proton_log,
             gamescope: self.gamescope_for(app).then(|| self.state.settings.gamescope.clone()),
             cloud: self.cloud_mode(app),
+            env: self.state.game_env.get(app),
         };
 
         self.rt.spawn_blocking(move || launch(app, name, installed, start_steam, options, tx, wake));
@@ -171,6 +175,8 @@ struct LaunchText {
     gamescope: Option<sr_steam::gamescope::GamescopeSettings>,
     /// What this launch does about Steam Cloud.
     cloud: CloudMode,
+    /// The game's own environment variables and switches (see `game_env`).
+    env: crate::GameEnv,
 }
 
 /// Worker: prepare the plan from Steam's app data and start it.
@@ -220,6 +226,11 @@ fn launch(
             installed.as_ref(),
             &run::PrepareOpts { launch_options, hud, proton_log: options.proton_log, gamescope, ..Default::default() },
         )
+        .map(|mut p| {
+            // The game's own variables go last, so they win over everything we set.
+            options.env.apply(&mut p.plan, super::game_env::find_gamemoderun());
+            p
+        })
     });
     let send = move |ev: Event| {
         let _ = tx.blocking_send(ev);
@@ -310,7 +321,7 @@ fn ensure_steam(app: AppId, install_dir: &std::path::Path, send: &impl Fn(Event)
 }
 
 /// Spawn `plan`; the exit watcher reports through `send`. Split out so a test can run a fake plan.
-fn start(
+pub(crate) fn start(
     plan: &run::LaunchPlan,
     preamble: &str,
     send: &(impl Fn(Event) + Clone + Send + 'static),

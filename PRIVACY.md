@@ -25,6 +25,10 @@ All files are readable only by you: folders are mode `0700` and files `0600`.
 | `~/.local/share/kettle/collections.json` | Your favourites, hidden games and collections made in Kettle |
 | `~/.local/share/kettle/compat_choices.json` | Which compatibility tool you picked per game |
 | `~/.local/share/kettle/launch_options.json` | The launch options you typed per game (never sent anywhere) |
+| `~/.local/share/kettle/game_env.json` | The environment variables and switches you set per game (never sent anywhere) |
+| `~/.local/share/kettle/non_steam.json` | The non-Steam games you added or imported (names, program paths, arguments) |
+| `~/.cache/kettle/protondb/<app id>.json` | The ProtonDB rating of a game, kept one day |
+| `~/.config/autostart/kettle.desktop` | Only if you turn on "Start with the computer" |
 | `~/.local/share/kettle/gamescope_games.json` | Which games always or never run in Gamescope (the global switch is in `settings.json`) |
 | `$XDG_RUNTIME_DIR/kettle-gamescope-<app id>.display` | While a game runs in Gamescope: the name of its private X display (`:1`), written by our launch shim, removed at the next launch |
 | `~/.local/share/kettle/logs/` | Output of the last run of each game we started |
@@ -47,6 +51,9 @@ We **never write** to the official Steam client's files. We only read its `steam
 | `media.steampowered.com` | Small game icons |
 | `store.steampowered.com` | Public store data for the Store tab: featured lists, search and app details. No login or cookies; only the country and language are sent (`cc=` and `l=`), plus the search text, app ID, tag ID and list offset you look at. The country is the one Steam reported when you signed in (from your IP address); before that, or if it is missing, no country is sent and Steam picks one from your IP address. The language is the one in Settings > Downloads (English by default). Store pages also request the app's user reviews (`/appreviews/<app id>`) and Browse uses `/search/results/?json=1`. Kettle never adds or removes wishlist entries, buys anything or sends cookies |
 | `*.steamstatic.com` | Store screenshots and capsules (only the image URL is requested). Trailers are not played in the app: a click hands the video address (on `video.*.steamstatic.com`) to your system's video player or browser |
+| `api.github.com` | Kettle's own update check (only when Kettle runs as an AppImage and "Check for Kettle updates" is on): `GET /repos/SeniorMatt/kettle/releases` at start and every 6 hours. No account, no token, no cookies; only a generic `Kettle` User-Agent and your IP address are visible to GitHub |
+| `github.com` and GitHub's download servers | The new AppImage, only after you click "Update now" |
+| `www.protondb.com` | The rating of a game without a native Linux build: `GET /api/v1/reports/summaries/<app id>.json`. Only that app id is sent (plus your IP address); answers are cached for one day |
 | `avatars.steamstatic.com` | Friends' profile pictures for the Friends & Chat panel (only the picture's hash is in the URL; kept in the same image cache) |
 
 All HTTPS uses rustls with certificate verification.
@@ -86,6 +93,8 @@ Checking for updates asks Steam, over the shared connection, for the public buil
 Desktop notifications are local: a message from Kettle to your desktop's notification service on D-Bus (`org.freedesktop.Notifications`), made by the `notify-rust` library. They are off for friends by default and can be switched off completely. The optional sound is a name from your sound theme; Kettle ships no sounds.
 
 Shortcuts are plain `.desktop` files, written only when you ask for them (install dialog, or Properties > General): `~/.local/share/applications/kettle-game-<id>.desktop` and `<your Desktop folder>/kettle-game-<id>.desktop`. They contain the game's name and the command `kettle --play <id>`. Uninstalling the game deletes them.
+
+Non-Steam games are started by Kettle itself. Their list is kept in `non_steam.json`; Kettle only reads the official client's `userdata/<account>/config/shortcuts.vdf` when you press "Import from Steam" and never writes to it.
 
 Moving a game copies its folder (and its Proton prefix, so saves stay with it) into another library you chose, then deletes the old copy. "Clear cache" and "Delete local data" delete our cache folder only. Download settings (speed limit, schedule, update policy, added library folders) are in `settings.json` in our data folder.
 

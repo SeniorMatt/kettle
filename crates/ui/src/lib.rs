@@ -3,6 +3,7 @@
 //! Architecture invariant: no I/O here. Views read `client.state()`, keep only
 //! view-local state (search text, scroll), and act through `client.send(..)`.
 
+mod add_game_ui;
 mod anim;
 mod chrome;
 mod cloud_ui;
@@ -12,8 +13,10 @@ mod downloads_page;
 mod fmt;
 mod fonts;
 mod friends;
+mod game_env_ui;
 mod game_menu;
 mod game_page;
+mod kettle_update_ui;
 mod library;
 mod login;
 mod menubar;
@@ -22,7 +25,9 @@ mod overlay;
 mod overlay_panel;
 mod profile;
 mod properties;
+pub mod protondb_badge;
 mod settings_downloads;
+mod settings_extra;
 mod settings_gamescope;
 mod settings_ingame;
 mod settings_interface;
@@ -32,9 +37,9 @@ mod settings_storage;
 mod sidebar;
 mod steam_icons;
 mod store;
-mod textures;
 #[cfg(test)]
 mod tests;
+mod textures;
 pub mod theme;
 mod widgets;
 
@@ -87,6 +92,8 @@ pub struct AppUi {
     settings: settings_page::SettingsView,
     properties: properties::PropertiesView,
     overlays: dialogs::Overlays,
+    /// The "Add a Non-Steam Game" dialog while it is open.
+    add_game: Option<add_game_ui::AddGameDialog>,
     friends: friends::FriendsView,
     profile: profile::ProfileView,
     /// The last `nav_seq` of the profile page we reacted to.
@@ -252,6 +259,7 @@ impl AppUi {
             if anim::movement(ui.ctx()) {
                 ui.add_space(theme::PAGE_SLIDE * (1.0 - enter));
             }
+            kettle_update_ui::banner(ui, client);
             match (self.tab, selected) {
                 (Tab::Library, Some(app)) => {
                     game_page::show(ui, client, &mut self.textures, app, &mut self.overlays);
@@ -270,6 +278,11 @@ impl AppUi {
         });
         self.overlays.show(ui.ctx(), client);
         cloud_ui::conflict_dialog(ui.ctx(), client);
+        if let Some(d) = &mut self.add_game
+            && !d.show(ui.ctx(), client)
+        {
+            self.add_game = None;
+        }
         collections_ui::show_prompt(ui.ctx(), client);
         if let Some((app, tab)) = self.overlays.properties.take() {
             self.properties.open(app, tab, client, ui.ctx());
@@ -668,7 +681,12 @@ impl AppUi {
                     theme::regular(13.0),
                     color,
                 );
+                let add_game = &mut self.add_game;
                 widgets::popup_menu(&resp.on_hover_cursor(egui::CursorIcon::PointingHand), |ui| {
+                    if ui.button("Add a Non-Steam Game...").clicked() {
+                        *add_game = Some(add_game_ui::AddGameDialog::default());
+                        ui.close();
+                    }
                     if ui.button("Activate a product on Steam...").clicked() {
                         client.send(Command::OpenUrl("https://store.steampowered.com/account/registerkey".to_string()));
                         ui.close();

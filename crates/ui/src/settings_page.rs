@@ -146,7 +146,10 @@ impl SettingsView {
                 widgets::page_title(ui, label);
                 match self.tab {
                     SettingsTab::Account => crate::settings_notify::account(ui, client),
-                    SettingsTab::Interface => crate::settings_interface::show(ui, client),
+                    SettingsTab::Interface => {
+                        crate::settings_interface::show(ui, client);
+                        crate::settings_extra::general_rows(ui, client);
+                    }
                     SettingsTab::Library => crate::settings_storage::folders(ui, client),
                     SettingsTab::Storage => crate::settings_storage::storage(ui, client),
                     SettingsTab::Cloud => crate::cloud_ui::settings_row(ui, client),

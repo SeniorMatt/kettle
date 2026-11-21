@@ -6,10 +6,11 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 /// Only Valve's store is opened from the UI; anything else is refused.
-const ALLOWED_PREFIXES: [&str; 8] = [
+const ALLOWED_PREFIXES: [&str; 9] = [
     "https://store.steampowered.com/",
     "https://help.steampowered.com/",
     "https://github.com/SeniorMatt/kettle",
+    "https://www.protondb.com/app/",
     // Trailers (mp4/webm) from Steam's video CDN, opened in the system player.
     "https://video.fastly.steamstatic.com/store_trailers/",
     "https://video.akamai.steamstatic.com/store_trailers/",
