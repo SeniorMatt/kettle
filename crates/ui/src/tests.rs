@@ -78,7 +78,8 @@ fn clicking_a_list_row_selects_the_game() {
     // The list starts with section headers; one of the first rows is a game.
     let mut hit = false;
     for i in 0..12 {
-        press(&mut h, row(i));
+        // The left edge is a header's fold square and part of a game row.
+        press(&mut h, pos2(14.0, row(i).y));
         if h.state().1.state().selected.is_some() {
             hit = true;
             break;
