@@ -4,7 +4,7 @@
 
 use super::{AppUi, Tab};
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, pos2, vec2};
-use egui_kittest::Harness;
+use egui_kittest::{Harness, kittest::Queryable};
 use sr_client::Client;
 use std::sync::{Arc, Once};
 
