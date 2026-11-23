@@ -113,6 +113,23 @@ impl ArtSource {
     /// Raw encoded bytes (JPEG/PNG) of the art, or `Ok(None)` if Steam has none.
     /// `icon_hash` is used for [`ArtKind::Icon`] (empty: ask the store for it) and ignored otherwise.
     pub fn fetch(&self, app: AppId, kind: ArtKind, icon_hash: &str) -> Result<Option<Vec<u8>>> {
+        if app.0 & 0x8000_0000 != 0 {
+            // A non-Steam shortcut: the store knows nothing about it; use the custom art the official client
+            // keeps in `userdata/<id>/config/grid` (read only), else none (the UI draws a generated tile).
+            let suffix = match kind {
+                ArtKind::Capsule => "p",
+                ArtKind::Header => "",
+                ArtKind::Hero => "_hero",
+                ArtKind::Logo => "_logo",
+                ArtKind::Icon => "_icon",
+            };
+            for root in &self.steam_roots {
+                if let Some(p) = local::grid_art(root, app.0, suffix) {
+                    return Ok(Some(std::fs::read(p)?));
+                }
+            }
+            return Ok(None);
+        }
         let mut hash = icon_hash.to_string();
         if kind == ArtKind::Icon && hash.is_empty() {
             // The official client keeps the icon as `<hash>.jpg` next to the covers: use it before asking the

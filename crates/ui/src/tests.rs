@@ -4,7 +4,7 @@
 
 use super::{AppUi, Tab};
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, pos2, vec2};
-use egui_kittest::Harness;
+use egui_kittest::{Harness, kittest::Queryable};
 use sr_client::Client;
 use std::sync::{Arc, Once};
 
@@ -181,4 +181,25 @@ fn collection_page_shows_the_games_of_the_clicked_section() {
         assert_eq!(got, want, "the page for {id} differs from its sidebar section");
         press(&mut h, pos2(23.0, 46.0));
     }
+}
+
+#[test]
+fn game_page_asks_for_a_recommendation_after_enough_play_time() {
+    let mut h = harness();
+    for i in 0..12 {
+        press(&mut h, pos2(14.0, row(i).y));
+        if let Some(app) = h.state().1.state().selected {
+            let g = h.state().1.state().game(app).cloned().expect("selected game");
+            let due = g.playtime_minutes >= 120 && g.app_id.0 & 0x8000_0000 == 0;
+            assert_eq!(
+                h.query_by_label_contains("Would you recommend this game").is_some(),
+                due,
+                "{} ({} min)",
+                g.name,
+                g.playtime_minutes
+            );
+            return;
+        }
+    }
+    panic!("no click selected a game");
 }
