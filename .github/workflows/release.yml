@@ -28,7 +28,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: 32-bit C runtime (links the i686 overlay library)
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq gcc-multilib
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libsdl2-2.0-0 gcc-multilib
 
       - name: Test
         run: |
