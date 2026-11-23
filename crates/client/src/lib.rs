@@ -35,6 +35,7 @@ mod open;
 pub use open::url as open_url;
 mod overlay_proto;
 mod play;
+mod post_game;
 mod profile;
 mod protondb;
 mod settings;
@@ -73,6 +74,7 @@ pub use game_env::{
     parse_text as parse_env_text, to_text as env_to_text, valid_key as valid_env_key, valid_value as valid_env_value,
 };
 pub use gamepage::{DlcEntry, GamePageState};
+pub use post_game::PostGame;
 pub use gamescope_settings::{
     Detection as GamescopeDetection, GamescopeGames, GamescopeSettings, INSTALL_HINTS as GAMESCOPE_INSTALL_HINTS,
     INSTALL_URL as GAMESCOPE_INSTALL_URL, MAX_SHARPNESS as GAMESCOPE_MAX_SHARPNESS, Override as GamescopeOverride,
@@ -361,6 +363,12 @@ pub enum Command {
     SetInterface(InterfaceSettings),
     /// Open a web page in the browser (only a short list of addresses is allowed, see `open`).
     OpenUrl(String),
+    /// Close the post-game summary of the game's last session.
+    ClosePostGame(AppId),
+    /// Hide the "Would you recommend" box: for good (`true`, after Yes or No) or for 30 days (Maybe Later).
+    HideRecommend(AppId, bool),
+    /// Open the folder with the game's screenshots in the file manager.
+    OpenScreenshots(AppId),
     /// Save a game's overlay note (an empty text deletes it).
     SetNote(AppId, String),
     /// Save the performance overlay (MangoHud) settings; they apply from the next game launch.
@@ -767,6 +775,9 @@ impl Client {
             | Command::SetOverlay(_)
             | Command::SetInterface(_)) => settings::handle(self, c),
             Command::OpenUrl(u) => self.notice_on_err(open::url(&u)),
+            Command::ClosePostGame(app) => self.close_post_game(app),
+            Command::HideRecommend(app, forever) => self.hide_recommend(app, forever),
+            Command::OpenScreenshots(app) => self.open_screenshots(app),
             Command::SetNote(app, text) => self.set_note(app, text),
             Command::SetHud(h) => self.set_hud(h),
             Command::SetGamescope(g) => self.set_gamescope(g),

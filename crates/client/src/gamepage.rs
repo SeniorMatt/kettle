@@ -29,6 +29,10 @@ pub struct GamePageState {
     /// `None` = no achievements (or no readable local files).
     pub achievements: HashMap<u32, Option<Arc<Achievements>>>,
     pub dlc: HashMap<u32, Load<Arc<Vec<DlcEntry>>>>,
+    /// The last session with its screenshots, while its summary is open.
+    pub post_game: HashMap<u32, crate::PostGame>,
+    /// Games whose "Would you recommend" box is hidden right now.
+    pub recommend_hidden: std::collections::HashSet<u32>,
     /// Demo mode: friends and the numbers come from `demo`.
     pub demo: bool,
 }
@@ -72,6 +76,7 @@ const MAX_AGE: Duration = gamepage::NEWS_TTL;
 
 impl Client {
     pub(crate) fn load_game_page(&mut self, app: AppId) {
+        self.refresh_post_game(app);
         if self.state.gamepage.demo {
             self.state.gamepage.news.insert(app.0, Load::Ready(Arc::new(demo::news(app.0))));
             self.state.gamepage.achievements.insert(app.0, Some(Arc::new(demo::achievements(app.0))));

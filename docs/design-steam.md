@@ -102,7 +102,14 @@ reference shows none (the PLAY button is flat green).
 | Escape in a drop-down or popup | closes only the popup | same: the Settings and Properties windows ignore Escape while a popup is open or a field has the keyboard |
 | Escape in the main window | goes back | same, unless a menu, dialog or text field is active |
 
-Not done on the game page: the "Say something about this game" box, the recommendation box and post-game summary, the Steam Workshop / guides / reviews strips, the Featured card's gradient (Kettle's is flat by rule). Not done: Steam's penguin (Linux only) filter icon, the wallet balance, cloud status icon, the faint logo
+Game page, below the tab box (measured, TF2 page): recommendation box y 415-505 (#434952, texts 17 px, buttons 36 px high:
+Yes 91, No 87, Maybe Later 108 wide, 6 apart, 28 from the edge); POST-GAME SUMMARY heading, then a 185 px flat panel with
+224 x 126 thumbnails 22 px apart and < > X at the right of the heading; "Say something about this game" field 36 px high under
+ACTIVITY, with "View Latest News" right under it. Kettle shows the recommendation box after 1 hour of play (Yes/No open the
+store page, Maybe Later hides it for 30 days) and the summary from the last session's screenshots in
+`~/Pictures/Kettle/<game>/`; posting from the field is not possible (no call in the client), Enter says so.
+
+Not done on the game page: the Steam Workshop / guides / reviews strips, the Featured card's gradient (Kettle's is flat by rule). Not done: Steam's penguin (Linux only) filter icon, the wallet balance, cloud status icon, the faint logo
 watermark in the Home box, store-tag based dynamic collections.
 
 ## What is tested
