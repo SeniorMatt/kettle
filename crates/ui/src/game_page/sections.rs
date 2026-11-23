@@ -180,7 +180,7 @@ fn say_something(ui: &mut Ui, w: f32) {
         egui::TextEdit::singleline(&mut text)
             .hint_text(hint)
             .font(theme::regular(16.0))
-            .frame(false)
+            .frame(egui::Frame::NONE)
             .margin(egui::Margin::symmetric(18, 8))
             .vertical_align(egui::Align::Center)
             .desired_width(w),

@@ -200,7 +200,9 @@ pub fn summary(ui: &mut Ui, client: &mut Client, tex: &mut Textures, game: &Game
         match tex.get_web(client, &url) {
             Art::Ready(t, a) => widgets::image_cover(ui, r, t, Color32::WHITE.gamma_multiply(a)),
             Art::Loading => widgets::placeholder(ui, r),
-            Art::Missing => ui.painter().rect_filled(r, 0.0, theme::BG_CAPSULE),
+            Art::Missing => {
+                ui.painter().rect_filled(r, 0.0, theme::BG_CAPSULE);
+            }
         }
         let resp = ui.interact(r.intersect(panel), Id::new(("post-shot", i)), Sense::click());
         if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
