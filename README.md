@@ -47,7 +47,9 @@ The library above is a demo library, filled with well-known games.
 - **Steam Cloud saves**: downloaded before a game starts, uploaded after it ends, and you choose when both sides changed.
 - **The Store**, with your wishlist, reviews, trailers, browsing by tag and prices in your currency.
 - **ProtonDB ratings** and per-game environment variables for Windows games.
-- **Friends and chat**, and a Shift+Tab overlay with a performance HUD while a game started by Kettle is running.
+- **Friends and chat.**
+- **The Shift+Tab overlay inside the game**, like Steam's: friends, achievements, notes, screenshots (F12) and a performance monitor. It takes the mouse while open and stays with the game on every workspace.
+- **No waiting for Steam.** Games that need the Steam client find it already running; the rest never wait.
 - **Updates itself** (AppImage) when a new release is out, if you want it to.
 - **No telemetry.** Kettle talks to Valve's servers, plus GitHub for its own updates and ProtonDB for ratings; nothing else. See [PRIVACY.md](PRIVACY.md).
 
