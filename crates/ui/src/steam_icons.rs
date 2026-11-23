@@ -294,3 +294,16 @@ pub fn arrow_down(p: &Painter, c: Pos2, size: f32, color: Color32) {
     );
     line(p, &[c + vec2(-half * 0.8, half), c + vec2(half * 0.8, half)], 2.0, color);
 }
+
+/// Thumb up or down (the "recommend" answers): a cuff, a hand and a thumb, drawn as flat rounded boxes.
+pub fn thumb(p: &Painter, c: Pos2, size: f32, up: bool, color: Color32) {
+    let s = size * 0.5;
+    let f = if up { 1.0 } else { -1.0 };
+    let r = |x0: f32, y0: f32, x1: f32, y1: f32| {
+        let (ya, yb) = (c.y - f * y0 * s, c.y - f * y1 * s);
+        Rect::from_min_max(Pos2::new(c.x + x0 * s, ya.min(yb)), Pos2::new(c.x + x1 * s, ya.max(yb)))
+    };
+    p.rect_filled(r(-1.0, 0.05, -0.55, -0.95), 1.0, color);
+    p.rect_filled(r(-0.4, 0.05, 1.0, -0.95), 2.0, color);
+    p.rect_filled(r(-0.1, 1.0, 0.5, -0.2), 2.0, color);
+}

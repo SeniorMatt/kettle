@@ -436,9 +436,17 @@ fn capsule(
                 Art::Ready(h, alpha) => widgets::image_cover(ui, header, h, Color32::WHITE.gamma_multiply(alpha)),
                 _ => {
                     let text_rect = rect.shrink(10.0);
-                    let galley =
-                        ui.painter().layout(game.name.clone(), theme::medium(15.0), theme::TEXT, text_rect.width());
-                    ui.painter().galley(text_rect.left_top(), galley, theme::TEXT);
+                    // Generated tile, like Steam's for a game without art: the name centred on a flat card.
+                    let mut job = egui::text::LayoutJob::simple(
+                        game.name.clone(),
+                        theme::medium(15.0),
+                        theme::TEXT,
+                        text_rect.width(),
+                    );
+                    job.halign = egui::Align::Center;
+                    let galley = ui.painter().layout_job(job);
+                    let pos = egui::pos2(rect.center().x, rect.center().y - galley.size().y / 2.0);
+                    ui.painter().galley(pos, galley, theme::TEXT);
                 }
             }
         }

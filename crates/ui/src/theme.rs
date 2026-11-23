@@ -311,8 +311,7 @@ pub fn apply(ctx: &egui::Context) {
     ctx.all_styles_mut(|s| {
         // Steam's scrollbars: 12 px wide with a 6 px thumb; thin and invisible until the area is scrolled
         // or hovered in floating mode.
-        s.spacing.scroll =
-            egui::style::ScrollStyle { bar_width: 12.0, floating_width: 3.0, ..egui::style::ScrollStyle::thin() };
+        s.spacing.scroll = scroll_style();
         s.spacing.menu_margin = Margin::symmetric(8, 5);
         s.spacing.slider_rail_height = 10.0;
         s.interaction.selectable_labels = false;
@@ -417,3 +416,21 @@ pub const GP_FEATURED_H: f32 = 100.0; // measured: card y 425-525
 pub const GP_FEATURED_HEADER_H: f32 = 27.0; // measured: strip y 425-452
 pub const GP_RIGHT_W: f32 = 187.0; // measured: right column x 715-902
 pub const GP_COL_GAP: f32 = 32.0; // measured: left column ends x 683
+
+/// Steam's scrollbar: no track, and the thin thumb shows only while the pointer is over the scrolled area
+/// (or the bar is dragged); it widens to 12 px with the pointer on the bar.
+pub fn scroll_style() -> egui::style::ScrollStyle {
+    egui::style::ScrollStyle {
+        bar_width: 12.0,
+        floating_width: 3.0,
+        floating_allocated_width: 6.0,
+        foreground_color: false,
+        dormant_background_opacity: 0.0,
+        dormant_handle_opacity: 0.0,
+        active_background_opacity: 0.0,
+        active_handle_opacity: 1.0,
+        interact_background_opacity: 0.0,
+        interact_handle_opacity: 1.0,
+        ..egui::style::ScrollStyle::floating()
+    }
+}

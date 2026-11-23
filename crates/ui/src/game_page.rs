@@ -1,6 +1,7 @@
 //! A game's page: hero banner with logo, the action bar (Play / Install and
 //! stats), and details below.
 
+mod recommend;
 mod sections;
 
 use crate::dialogs::Overlays;
@@ -354,6 +355,7 @@ fn tab_strip(ui: &mut Ui, client: &mut Client, game: &sr_model::Game) {
 fn details(ui: &mut Ui, client: &mut Client, tex: &mut Textures, game: &sr_model::Game) {
     tab_strip(ui, client, game);
     egui::Frame::new().inner_margin(egui::Margin { left: 20, right: 23, top: 24, bottom: 24 }).show(ui, |ui| {
+        recommend::show(ui, client, game);
         sections::show(ui, client, tex, game);
     });
 }

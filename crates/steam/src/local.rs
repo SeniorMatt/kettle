@@ -175,3 +175,45 @@ pub fn cached_art(root: &Path, appid: u32, file: &str) -> Option<PathBuf> {
     let flat = cache.join(format!("{appid}_{file}"));
     flat.is_file().then_some(flat)
 }
+
+/// Custom art the official client keeps for a non-Steam shortcut: `userdata/<account>/config/grid/<id><suffix>.<ext>`
+/// (`p` portrait cover, none for the wide header, `_hero`, `_logo`, `_icon`). Read only. The newer file names use
+/// the 32-bit shortcut id; the old ones a 64-bit id (`id << 32 | 0x02000000`), tried second.
+pub fn grid_art(root: &Path, appid: u32, suffix: &str) -> Option<PathBuf> {
+    let old = (u64::from(appid) << 32) | 0x0200_0000;
+    let accounts = std::fs::read_dir(root.join("userdata")).ok()?;
+    let mut dirs: Vec<PathBuf> = accounts.flatten().map(|e| e.path().join("config/grid")).collect();
+    dirs.sort();
+    for dir in dirs {
+        for stem in [appid.to_string(), old.to_string()] {
+            for ext in ["png", "jpg", "jpeg", "webp", "ico"] {
+                let f = dir.join(format!("{stem}{suffix}.{ext}"));
+                if f.is_file() {
+                    return Some(f);
+                }
+            }
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod grid_tests {
+    use super::*;
+
+    #[test]
+    fn finds_grid_art_by_new_and_old_ids() {
+        let root = std::env::temp_dir().join(format!("kettle-grid-test-{}", std::process::id()));
+        let grid = root.join("userdata/1234/config/grid");
+        std::fs::create_dir_all(&grid).unwrap();
+        let id = 0x8123_4567u32;
+        std::fs::write(grid.join(format!("{id}p.png")), b"x").unwrap();
+        let old = (u64::from(id) << 32) | 0x0200_0000;
+        std::fs::write(grid.join(format!("{old}_hero.jpg")), b"x").unwrap();
+        assert_eq!(grid_art(&root, id, "p"), Some(grid.join(format!("{id}p.png"))));
+        assert_eq!(grid_art(&root, id, "_hero"), Some(grid.join(format!("{old}_hero.jpg"))));
+        assert_eq!(grid_art(&root, id, "_logo"), None);
+        assert_eq!(grid_art(&root.join("nope"), id, "p"), None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}
