@@ -42,13 +42,13 @@ pub fn recommend(ui: &mut Ui, client: &mut Client, game: &Game) {
     let rect = row(ui, theme::REC_H);
     let app = game.app_id;
     ui.painter().rect_filled(rect, 2.0, theme::REC_BG);
-    let title = ui.painter().layout_no_wrap(played_text(game.playtime_minutes), theme::regular(17.0), theme::REC_TITLE);
+    let title = ui.painter().layout_no_wrap(played_text(game.playtime_minutes), theme::regular(15.0), theme::REC_TITLE);
     let ty = rect.top() + 14.0;
     let tx = rect.left() + 23.0;
-    let body_w = (rect.width() - 282.0 - 20.0).clamp(120.0, 250.0);
+    let body_w = (rect.width() - 282.0 - 12.0).clamp(120.0, 262.0);
     let body = ui.painter().layout(
         "Would you recommend this game to other players?".to_string(),
-        theme::regular(17.0),
+        theme::regular(15.0),
         theme::REC_BODY,
         body_w,
     );
@@ -81,12 +81,12 @@ pub fn recommend(ui: &mut Ui, client: &mut Client, game: &Game) {
                     Pos2::new(r.left() + 40.0, r.center().y),
                     egui::Align2::LEFT_CENTER,
                     label,
-                    theme::regular(16.0),
+                    theme::regular(14.0),
                     theme::REC_BTN_TEXT,
                 );
             }
             None => {
-                p.text(r.center(), egui::Align2::CENTER_CENTER, label, theme::regular(16.0), theme::REC_BTN_TEXT);
+                p.text(r.center(), egui::Align2::CENTER_CENTER, label, theme::regular(14.0), theme::REC_BTN_TEXT);
             }
         }
         if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
