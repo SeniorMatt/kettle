@@ -48,7 +48,7 @@ jobs:
       - name: Overlay library on a virtual screen
         if: always()
         run: |
-          sudo apt-get install -y -qq mesa-utils libgl1-mesa-dri vulkan-tools x11-apps ffmpeg xdotool xvfb mesa-vulkan-drivers >/dev/null
+          sudo apt-get install -y -qq mesa-utils libgl1-mesa-dri vulkan-tools x11-apps ffmpeg xdotool xvfb mesa-vulkan-drivers libnotify4 libcurl4 libpulse0 libsamplerate0 libfreetype6 libsdl2-2.0-0 >/dev/null
           cargo build -p sr-overlay-hook --lib --example sdl_test
           scripts/overlay-test.sh target/overlay-hook
           scripts/overlay-gl-vk-test.sh target/overlay-hook

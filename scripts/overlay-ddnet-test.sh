@@ -57,6 +57,9 @@ ICD=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json 2>/dev/null | head -1)
   ./DDNet "gfx_backend $BACKEND;gfx_screen_width 1280;gfx_screen_height 720;gfx_fullscreen 0;gfx_borderless 0;snd_enable 0;cl_skip_start_menu 1;gfx_vsync 0;connect 127.0.0.1:8309" \
   >"$OUT/$TAG-game.out" 2>&1) &
 GAME=$!
+# A game that cannot even start (a missing shared library) must say so, not fail every check afterwards.
+sleep 2
+if ! kill -0 $GAME 2>/dev/null; then echo "DDNet exited at start:"; head -5 "$OUT/$TAG-game.out"; exit 1; fi
 MARK=gl; [ "$BACKEND" = Vulkan ] && MARK=vk
 wait_for "$LOG" "$MARK first frame" 300 || echo "note: no overlay frame yet (the overlay only draws when open or with the HUD)"
 sleep 12   # joining the local game
