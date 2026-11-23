@@ -75,6 +75,7 @@ unsafe fn key_of(handle: u64) -> usize {
 
 // ---- what we know about the game's Vulkan objects ----------------------------------------------------------
 
+#[allow(dead_code)]
 struct Inst {
     handle: vk::Instance,
     ash: ash::Instance,
@@ -104,6 +105,8 @@ struct Swap {
     extent: vk::Extent2D,
     /// Created with the colour-attachment usage we need and a format we can draw to.
     usable: bool,
+    /// Created with the transfer-source usage too: a screenshot can copy its images.
+    readable: bool,
     images: Vec<vk::Image>,
     views: Vec<vk::ImageView>,
     fbs: Vec<vk::Framebuffer>,
@@ -114,6 +117,10 @@ struct Swap {
 struct Registry {
     instances: HashMap<usize, Arc<Inst>>,
     devices: HashMap<usize, Arc<Dev>>,
+    /// The next layer's lookup functions by dispatch key, recorded first and by plain inserts only: whatever
+    /// goes wrong later in our bookkeeping, the game's own lookups still reach the driver.
+    gipas: HashMap<usize, vk::PFN_vkGetInstanceProcAddr>,
+    gdpas: HashMap<usize, vk::PFN_vkGetDeviceProcAddr>,
 }
 
 fn reg() -> MutexGuard<'static, Registry> {
@@ -194,8 +201,8 @@ pub unsafe extern "system" fn kettle_vk_gipa(instance: vk::Instance, name: *cons
     if let Some(f) = our_instance_fn(n).or_else(|| our_device_fn(n)) {
         return Some(f);
     }
-    let inst = inst_of(instance.as_raw())?;
-    unsafe { (inst.gipa)(instance, name) }
+    let gipa = reg().gipas.get(&unsafe { key_of(instance.as_raw()) }).copied()?;
+    unsafe { gipa(instance, name) }
 }
 
 /// # Safety
@@ -206,16 +213,16 @@ pub unsafe extern "system" fn kettle_vk_gdpa(device: vk::Device, name: *const c_
         return None;
     }
     let n = unsafe { CStr::from_ptr(name) }.to_str().unwrap_or("");
-    let dev = dev_of(device.as_raw())?;
+    let gdpa = reg().gdpas.get(&unsafe { key_of(device.as_raw()) }).copied()?;
     // Only intercept what the device really supports (the swapchain functions need the extension).
     if let Some(f) = our_device_fn(n) {
         if n.contains("Swapchain") || n == "vkQueuePresentKHR" {
-            let real = unsafe { (dev.gdpa)(device, name) };
+            let real = unsafe { gdpa(device, name) };
             real?;
         }
         return Some(f);
     }
-    unsafe { (dev.gdpa)(device, name) }
+    unsafe { gdpa(device, name) }
 }
 
 unsafe extern "system" fn create_instance(
@@ -240,16 +247,35 @@ unsafe extern "system" fn create_instance(
             return r;
         }
         let handle = *out;
-        let ash = ash::Instance::load(&ash::StaticFn { get_instance_proc_addr: gipa }, handle);
-        let inst = Arc::new(Inst { handle, ash, gipa });
-        reg().instances.insert(key_of(handle.as_raw()), inst);
+        let key = key_of(handle.as_raw());
+        reg().gipas.insert(key, gipa);
+        crate::guard::run_always("vkCreateInstance", || {
+            let ash = ash::Instance::load(&ash::StaticFn { get_instance_proc_addr: gipa }, handle);
+            let inst = Arc::new(Inst { handle, ash, gipa });
+            reg().instances.insert(key, inst);
+        });
         vk::Result::SUCCESS
     }
 }
 
 unsafe extern "system" fn destroy_instance(instance: vk::Instance, alloc: *const vk::AllocationCallbacks<'_>) {
-    let Some(inst) = inst_of(instance.as_raw()) else { return };
-    reg().instances.remove(&unsafe { key_of(instance.as_raw()) });
+    let key = unsafe { key_of(instance.as_raw()) };
+    let Some(inst) = inst_of(instance.as_raw()) else {
+        // Not registered (our bookkeeping failed): the next layer's function still has to run.
+        let gipa = reg().gipas.remove(&key);
+        unsafe {
+            if let Some(f) = gipa.and_then(|g| g(instance, c"vkDestroyInstance".as_ptr())) {
+                let f: vk::PFN_vkDestroyInstance = std::mem::transmute(f);
+                f(instance, alloc);
+            }
+        }
+        return;
+    };
+    {
+        let mut r = reg();
+        r.instances.remove(&key);
+        r.gipas.remove(&key);
+    }
     unsafe {
         let alloc = alloc.as_ref();
         inst.ash.destroy_instance(alloc);
@@ -284,6 +310,21 @@ unsafe extern "system" fn create_device(
             return r;
         }
         let handle = *out;
+        reg().gdpas.insert(key_of(handle.as_raw()), gdpa);
+        crate::guard::run_always("vkCreateDevice", || register_device(inst, phys, handle, gdpa, set_loader_data));
+        vk::Result::SUCCESS
+    }
+}
+
+/// Everything we keep about a new device.
+fn register_device(
+    inst: Arc<Inst>,
+    phys: vk::PhysicalDevice,
+    handle: vk::Device,
+    gdpa: vk::PFN_vkGetDeviceProcAddr,
+    set_loader_data: Option<SetLoaderData>,
+) {
+    unsafe {
         let load = |n: &CStr| std::mem::transmute::<vk::PFN_vkVoidFunction, *const c_void>(gdpa(handle, n.as_ptr()));
         let ash = ash::Device::load_with(load, handle);
         let swapchain = ash::khr::swapchain::DeviceFn::load(load);
@@ -302,14 +343,28 @@ unsafe extern "system" fn create_device(
             renderer: Mutex::new(None),
         });
         reg().devices.insert(key_of(handle.as_raw()), dev);
-        vk::Result::SUCCESS
     }
 }
 
 unsafe extern "system" fn destroy_device(device: vk::Device, alloc: *const vk::AllocationCallbacks<'_>) {
-    let Some(dev) = dev_of(device.as_raw()) else { return };
-    reg().devices.remove(&unsafe { key_of(device.as_raw()) });
-    unsafe {
+    let key = unsafe { key_of(device.as_raw()) };
+    let Some(dev) = dev_of(device.as_raw()) else {
+        let gdpa = reg().gdpas.remove(&key);
+        unsafe {
+            if let Some(f) = gdpa.and_then(|g| g(device, c"vkDestroyDevice".as_ptr())) {
+                let f: vk::PFN_vkDestroyDevice = std::mem::transmute(f);
+                f(device, alloc);
+            }
+        }
+        return;
+    };
+    {
+        let mut r = reg();
+        r.devices.remove(&key);
+        r.gdpas.remove(&key);
+    }
+    // Our cleanup is guarded: the game's device is destroyed whatever happens to it.
+    crate::guard::run_always("vkDestroyDevice", || unsafe {
         let _ = dev.ash.device_wait_idle();
         if let Some(mut r) = lock(&dev.renderer).take() {
             r.destroy(&dev);
@@ -318,17 +373,29 @@ unsafe extern "system" fn destroy_device(device: vk::Device, alloc: *const vk::A
             s.destroy(&dev);
             state::release(id as usize);
         }
-        dev.ash.destroy_device(alloc.as_ref());
-    }
+    });
+    unsafe { dev.ash.destroy_device(alloc.as_ref()) };
 }
 
 unsafe extern "system" fn get_device_queue(device: vk::Device, family: u32, index: u32, out: *mut vk::Queue) {
-    let Some(dev) = dev_of(device.as_raw()) else { return };
+    let Some(dev) = dev_of(device.as_raw()) else {
+        // Not registered: straight to the next layer.
+        let gdpa = reg().gdpas.get(&unsafe { key_of(device.as_raw()) }).copied();
+        unsafe {
+            if let Some(f) = gdpa.and_then(|g| g(device, c"vkGetDeviceQueue".as_ptr())) {
+                let f: vk::PFN_vkGetDeviceQueue = std::mem::transmute(f);
+                f(device, family, index, out);
+            }
+        }
+        return;
+    };
     unsafe {
         (dev.ash.fp_v1_0().get_device_queue)(device, family, index, out);
-        if !(*out).is_null() {
-            lock(&dev.queues).insert((*out).as_raw(), family);
-        }
+        crate::guard::run_always("vkGetDeviceQueue", || {
+            if !(*out).is_null() {
+                lock(&dev.queues).insert((*out).as_raw(), family);
+            }
+        });
     }
 }
 
@@ -337,13 +404,32 @@ unsafe extern "system" fn get_device_queue2(
     info: *const vk::DeviceQueueInfo2<'_>,
     out: *mut vk::Queue,
 ) {
-    let Some(dev) = dev_of(device.as_raw()) else { return };
+    let Some(dev) = dev_of(device.as_raw()) else {
+        let gdpa = reg().gdpas.get(&unsafe { key_of(device.as_raw()) }).copied();
+        unsafe {
+            if let Some(f) = gdpa.and_then(|g| g(device, c"vkGetDeviceQueue2".as_ptr())) {
+                let f: vk::PFN_vkGetDeviceQueue2 = std::mem::transmute(f);
+                f(device, info, out);
+            }
+        }
+        return;
+    };
     unsafe {
         (dev.ash.fp_v1_1().get_device_queue2)(device, info, out);
-        if !(*out).is_null() {
-            lock(&dev.queues).insert((*out).as_raw(), (*info).queue_family_index);
-        }
+        crate::guard::run_always("vkGetDeviceQueue2", || {
+            if !(*out).is_null() {
+                lock(&dev.queues).insert((*out).as_raw(), (*info).queue_family_index);
+            }
+        });
     }
+}
+
+/// Is `f` one a screenshot can read (four 8-bit channels, in either order)?
+fn orig_readable_format(f: vk::Format) -> bool {
+    matches!(
+        f,
+        vk::Format::B8G8R8A8_UNORM | vk::Format::B8G8R8A8_SRGB | vk::Format::R8G8B8A8_UNORM | vk::Format::R8G8B8A8_SRGB
+    )
 }
 
 /// Formats the overlay can draw into, and whether the target is sRGB-encoded.
@@ -365,29 +451,45 @@ unsafe extern "system" fn create_swapchain(
     unsafe {
         let orig = &*ci;
         let drawable = target_kind(orig.image_format).is_some();
-        let mut with_usage = *orig;
-        with_usage.image_usage |= vk::ImageUsageFlags::COLOR_ATTACHMENT;
         let create = dev.swapchain.create_swapchain_khr;
-        let mut usable = drawable;
-        let mut r = if drawable { create(device, &with_usage, alloc, out) } else { vk::Result::ERROR_UNKNOWN };
+        let (mut usable, mut readable) = (drawable, false);
+        let mut r = vk::Result::ERROR_UNKNOWN;
+        if drawable {
+            // The usage the overlay (and a screenshot) needs on top of the game's; the first the driver takes.
+            for (extra, can_read) in [
+                (vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_SRC, true),
+                (vk::ImageUsageFlags::COLOR_ATTACHMENT, false),
+            ] {
+                let mut with_usage = *orig;
+                with_usage.image_usage |= extra;
+                r = create(device, &with_usage, alloc, out);
+                if r == vk::Result::SUCCESS {
+                    readable = can_read && orig_readable_format(orig.image_format);
+                    break;
+                }
+            }
+        }
         if r != vk::Result::SUCCESS {
             usable = false;
             r = create(device, ci, alloc, out);
         }
         if r == vk::Result::SUCCESS {
             // The image views are made without the game's mutable-format list: only the same format is used.
-            lock(&dev.swaps).insert(
-                (*out).as_raw(),
-                Swap {
-                    format: orig.image_format,
-                    extent: orig.image_extent,
-                    usable,
-                    images: Vec::new(),
-                    views: Vec::new(),
-                    fbs: Vec::new(),
-                    pass: vk::RenderPass::null(),
-                },
-            );
+            crate::guard::run_always("vkCreateSwapchainKHR", || {
+                lock(&dev.swaps).insert(
+                    (*out).as_raw(),
+                    Swap {
+                        format: orig.image_format,
+                        extent: orig.image_extent,
+                        usable,
+                        readable,
+                        images: Vec::new(),
+                        views: Vec::new(),
+                        fbs: Vec::new(),
+                        pass: vk::RenderPass::null(),
+                    },
+                );
+            });
         }
         r
     }
@@ -400,14 +502,16 @@ unsafe extern "system" fn destroy_swapchain(
 ) {
     let Some(dev) = dev_of(device.as_raw()) else { return };
     unsafe {
-        let removed = lock(&dev.swaps).remove(&swapchain.as_raw());
-        if let Some(s) = removed {
-            if let Some(r) = lock(&dev.renderer).as_mut() {
-                r.wait(&dev);
+        crate::guard::run_always("vkDestroySwapchainKHR", || {
+            let removed = lock(&dev.swaps).remove(&swapchain.as_raw());
+            if let Some(s) = removed {
+                if let Some(r) = lock(&dev.renderer).as_mut() {
+                    r.wait(&dev);
+                }
+                s.destroy(&dev);
             }
-            s.destroy(&dev);
-        }
-        state::release(swapchain.as_raw() as usize);
+            state::release(swapchain.as_raw() as usize);
+        });
         (dev.swapchain.destroy_swapchain_khr)(device, swapchain, alloc);
     }
 }
@@ -429,9 +533,9 @@ unsafe extern "system" fn queue_present(queue: vk::Queue, info: *const vk::Prese
     // Which device? A queue's dispatch key is its device's.
     let Some(dev) = dev_of(queue.as_raw()) else { return vk::Result::ERROR_DEVICE_LOST };
     let present = dev.swapchain.queue_present_khr;
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe { draw(&dev, queue, &*info) }));
+    let result = crate::guard::run("vkQueuePresentKHR", || unsafe { draw(&dev, queue, &*info) });
     match result {
-        Ok(Some(sem)) => unsafe {
+        Some(Some(sem)) => unsafe {
             let mut patched = *info;
             let sems = [sem];
             patched.wait_semaphore_count = 1;
@@ -473,11 +577,14 @@ unsafe fn draw(dev: &Arc<Dev>, queue: vk::Queue, info: &vk::PresentInfoKHR<'_>) 
         }
     }
     let (i, claim) = chosen?;
-    let (w, h) = {
+    let (w, h, readable, format) = {
         let swaps = lock(&dev.swaps);
         let s = swaps.get(&swapchains[i].as_raw())?;
-        (s.extent.width, s.extent.height)
+        (s.extent.width, s.extent.height, s.readable, s.format)
     };
+    if state::take_shot() && readable {
+        unsafe { grab(dev, queue, family, swapchains[i], indices[i], (w, h), format) };
+    }
     let frame = {
         let mut c = state::lock();
         c.tick();
@@ -501,6 +608,158 @@ unsafe fn draw(dev: &Arc<Dev>, queue: vk::Queue, info: &vk::PresentInfoKHR<'_>) 
     }
     let waits = unsafe { std::slice::from_raw_parts(info.p_wait_semaphores, info.wait_semaphore_count as usize) };
     unsafe { r.render(dev, queue, swapchains[i], indices[i], waits, &mut frame) }
+}
+
+/// Copy the image this present shows (the game's frame, the overlay not yet drawn into it) to the CPU and save
+/// it as a screenshot. Waits for the device to be idle first: the game's own rendering of this frame is already
+/// submitted, and a screenshot is rare. Everything made here is destroyed again.
+unsafe fn grab(
+    dev: &Arc<Dev>,
+    queue: vk::Queue,
+    family: u32,
+    swapchain: vk::SwapchainKHR,
+    index: u32,
+    (w, h): (u32, u32),
+    format: vk::Format,
+) {
+    let bgra = matches!(format, vk::Format::B8G8R8A8_UNORM | vk::Format::B8G8R8A8_SRGB);
+    if w == 0 || h == 0 || w > 16384 || h > 16384 {
+        return;
+    }
+    unsafe {
+        let a = &dev.ash;
+        let get = dev.swapchain.get_swapchain_images_khr;
+        let mut n = 0u32;
+        if get(dev.handle, swapchain, &mut n, std::ptr::null_mut()) != vk::Result::SUCCESS || index >= n {
+            return;
+        }
+        let mut imgs = vec![vk::Image::null(); n as usize];
+        if get(dev.handle, swapchain, &mut n, imgs.as_mut_ptr()) != vk::Result::SUCCESS {
+            return;
+        }
+        let image = imgs[index as usize];
+        let size = u64::from(w) * u64::from(h) * 4;
+        let Some(buf) = Buf::new(dev, size, vk::BufferUsageFlags::TRANSFER_DST) else { return };
+        let pool = a.create_command_pool(
+            &vk::CommandPoolCreateInfo::default()
+                .queue_family_index(family)
+                .flags(vk::CommandPoolCreateFlags::TRANSIENT),
+            None,
+        );
+        let mut pixels = None;
+        if let Ok(pool) = pool {
+            let cmds = a.allocate_command_buffers(
+                &vk::CommandBufferAllocateInfo::default()
+                    .command_pool(pool)
+                    .level(vk::CommandBufferLevel::PRIMARY)
+                    .command_buffer_count(1),
+            );
+            let fence = a.create_fence(&vk::FenceCreateInfo::default(), None);
+            if let (Ok(cmds), Ok(fence)) = (cmds, fence) {
+                let cmd = cmds[0];
+                let range = vk::ImageSubresourceRange {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                };
+                let barrier = |from: vk::ImageLayout, to: vk::ImageLayout, src, dst| {
+                    vk::ImageMemoryBarrier::default()
+                        .old_layout(from)
+                        .new_layout(to)
+                        .src_access_mask(src)
+                        .dst_access_mask(dst)
+                        .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                        .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                        .image(image)
+                        .subresource_range(range)
+                };
+                let recorded = a
+                    .begin_command_buffer(
+                        cmd,
+                        &vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
+                    )
+                    .is_ok();
+                if recorded {
+                    // The game left the image ready to present; wait for the device first so its work is done.
+                    let _ = a.device_wait_idle();
+                    a.cmd_pipeline_barrier(
+                        cmd,
+                        vk::PipelineStageFlags::ALL_COMMANDS,
+                        vk::PipelineStageFlags::TRANSFER,
+                        vk::DependencyFlags::empty(),
+                        &[],
+                        &[],
+                        &[barrier(
+                            vk::ImageLayout::PRESENT_SRC_KHR,
+                            vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                            vk::AccessFlags::MEMORY_READ | vk::AccessFlags::MEMORY_WRITE,
+                            vk::AccessFlags::TRANSFER_READ,
+                        )],
+                    );
+                    a.cmd_copy_image_to_buffer(
+                        cmd,
+                        image,
+                        vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                        buf.buf,
+                        &[vk::BufferImageCopy {
+                            buffer_offset: 0,
+                            buffer_row_length: 0,
+                            buffer_image_height: 0,
+                            image_subresource: vk::ImageSubresourceLayers {
+                                aspect_mask: vk::ImageAspectFlags::COLOR,
+                                mip_level: 0,
+                                base_array_layer: 0,
+                                layer_count: 1,
+                            },
+                            image_offset: vk::Offset3D::default(),
+                            image_extent: vk::Extent3D { width: w, height: h, depth: 1 },
+                        }],
+                    );
+                    a.cmd_pipeline_barrier(
+                        cmd,
+                        vk::PipelineStageFlags::TRANSFER,
+                        vk::PipelineStageFlags::ALL_COMMANDS,
+                        vk::DependencyFlags::empty(),
+                        &[],
+                        &[],
+                        &[barrier(
+                            vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                            vk::ImageLayout::PRESENT_SRC_KHR,
+                            vk::AccessFlags::TRANSFER_READ,
+                            vk::AccessFlags::MEMORY_READ,
+                        )],
+                    );
+                    let cmd_list = [cmd];
+                    if a.end_command_buffer(cmd).is_ok()
+                        && a.queue_submit(queue, &[vk::SubmitInfo::default().command_buffers(&cmd_list)], fence).is_ok()
+                    {
+                        if a.wait_for_fences(&[fence], true, FENCE_WAIT_NS).is_ok() {
+                            pixels = Some(std::slice::from_raw_parts(buf.ptr, size as usize).to_vec());
+                        } else {
+                            // Still running: do not free what it uses.
+                            let _ = a.device_wait_idle();
+                        }
+                    }
+                }
+                a.destroy_fence(fence, None);
+            } else if let Ok(fence) = fence {
+                a.destroy_fence(fence, None);
+            }
+            a.destroy_command_pool(pool, None);
+        }
+        buf.destroy(dev);
+        if let Some(mut px) = pixels {
+            for p in px.as_chunks_mut::<4>().0 {
+                if bgra {
+                    p.swap(0, 2);
+                }
+                p[3] = 255;
+            }
+            crate::shot::save(px, w, h);
+        }
+    }
 }
 
 // ---- the renderer ------------------------------------------------------------------------------------------

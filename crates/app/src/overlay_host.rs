@@ -45,8 +45,9 @@ mod imp {
     use sr_client::{Client, Command, OverlaySnapshot, overlay_snapshot};
     use sr_model::{AppId, SteamId};
     use sr_overlay_proto::{
-        AchievementRow, FriendRow, FromHook, MAX_LINE, OverlayAction, OverlayData, ToHook, decode, encode,
+        AchievementRow, FriendRow, FromHook, MAX_LINE, OverlayAction, OverlayData, ToHook, b64_encode, decode, encode,
     };
+    use std::collections::{HashMap, HashSet};
     use std::io::{BufRead, BufReader, Read, Write};
     use std::os::unix::fs::PermissionsExt;
     use std::os::unix::net::{UnixListener, UnixStream};
@@ -60,6 +61,16 @@ mod imp {
     const UPDATE_CLOSED: Duration = Duration::from_secs(3);
 
     type Conns = Arc<Mutex<Vec<UnixStream>>>;
+
+    /// The side of the pictures sent to the overlay (it draws them at most 36 points wide).
+    const AVATAR_SIDE: u32 = 48;
+    /// Pictures fetched and sent per friends list (the overlay shows the online friends first).
+    const MAX_AVATARS: usize = 80;
+    /// Recent achievements sent.
+    const MAX_RECENT_ACHIEVEMENTS: usize = 10;
+
+    /// Pictures by URL: `None` = could not be loaded. Filled by one worker thread.
+    type AvatarCache = Arc<Mutex<HashMap<String, Option<(u32, String)>>>>;
 
     pub struct Host {
         wake: Arc<dyn Fn() + Send + Sync>,
@@ -75,6 +86,23 @@ mod imp {
         last_sent: Instant,
         /// A library connected since the last data: send at once.
         fresh: Arc<AtomicBool>,
+        avatar_tx: mpsc::Sender<String>,
+        avatars: AvatarCache,
+        /// URLs asked for, and the ids whose picture the libraries have (cleared when one connects).
+        asked: HashSet<String>,
+        sent: HashSet<u64>,
+        /// The game whose page data (achievements) was asked for.
+        loaded_app: Option<AppId>,
+    }
+
+    /// `<Pictures>/Kettle/<game>`: where this game's screenshots go.
+    fn screenshot_dir(game: &str) -> String {
+        let home = std::env::var_os("HOME").filter(|h| !h.is_empty()).map(PathBuf::from).unwrap_or_default();
+        let name: String =
+            game.chars().map(|c| if c.is_control() || "/\\:*?\"<>|".contains(c) { '_' } else { c }).collect();
+        let name = name.trim().trim_start_matches('.').trim();
+        let name = if name.is_empty() { "Games" } else { name };
+        home.join("Pictures/Kettle").join(name.chars().take(80).collect::<String>()).display().to_string()
     }
 
     fn snapshot_to_data(s: &OverlaySnapshot, hud_on: bool) -> OverlayData {
@@ -83,6 +111,8 @@ mod imp {
             game: s.game.clone(),
             session_secs: s.session_secs,
             total_minutes: 0,
+            me_id: 0,
+            screenshot_dir: screenshot_dir(&s.game),
             me: s.me.clone(),
             friends_connected: s.friends_connected,
             friends: s
@@ -113,7 +143,25 @@ mod imp {
     impl Host {
         pub fn new(wake: Arc<dyn Fn() + Send + Sync>) -> Host {
             let (tx, rx) = mpsc::channel();
+            let (avatar_tx, avatar_rx) = mpsc::channel::<String>();
+            let avatars: AvatarCache = Arc::default();
+            let cache = avatars.clone();
+            let _ = std::thread::Builder::new().name("overlay-avatars".into()).spawn(move || {
+                // One picture at a time, politely; ends when the host is dropped.
+                while let Ok(url) = avatar_rx.recv() {
+                    let img =
+                        sr_client::load_avatar_square(&url, AVATAR_SIDE).map(|(n, px)| (n as u32, b64_encode(&px)));
+                    if let Ok(mut c) = cache.lock() {
+                        c.insert(url, img);
+                    }
+                }
+            });
             Host {
+                avatar_tx,
+                avatars,
+                asked: HashSet::new(),
+                sent: HashSet::new(),
+                loaded_app: None,
                 wake,
                 tx,
                 rx,
@@ -228,9 +276,69 @@ mod imp {
 
         fn data(&self, client: &Client) -> Option<OverlayData> {
             let app = self.app?;
-            let s = overlay_snapshot(client.state(), app, false)?;
-            let hud = client.state().settings.hud.preset != sr_steam::mangohud::Preset::Off;
-            Some(snapshot_to_data(&s, hud))
+            let state = client.state();
+            let s = overlay_snapshot(state, app, false)?;
+            let hud = state.settings.hud.preset != sr_steam::mangohud::Preset::Off;
+            let mut d = snapshot_to_data(&s, hud);
+            // Steam's total plus this session (the total only grows when the game ends).
+            d.total_minutes = state
+                .game(app)
+                .map_or(0, |g| g.playtime_minutes)
+                .saturating_add((s.session_secs / 60).min(u64::from(u32::MAX)) as u32);
+            d.me_id = state.friends.me.id;
+            if let Some(a) = state.gamepage.achievements(app) {
+                d.achievements_total = a.total;
+                d.achievements_unlocked = a.unlocked;
+                d.achievements_recent = a
+                    .list
+                    .iter()
+                    .filter(|x| x.unlocked)
+                    .take(MAX_RECENT_ACHIEVEMENTS)
+                    .map(|x| AchievementRow {
+                        name: if x.display.is_empty() { x.name.clone() } else { x.display.clone() },
+                        description: x.desc.clone(),
+                        time: x.time,
+                    })
+                    .collect();
+            }
+            Some(d)
+        }
+
+        /// Ask for the pictures of the account and the friends in `d`, and send the ones that arrived (each
+        /// once per connection).
+        fn send_avatars(&mut self, client: &Client, d: &OverlayData) {
+            let friends = &client.state().friends;
+            let mut wanted: Vec<(u64, String)> = Vec::new();
+            if let Some(u) = friends.my_avatar_url() {
+                wanted.push((friends.me.id, u.to_string()));
+            }
+            let urls: HashMap<u64, &str> =
+                friends.friends.iter().filter_map(|f| f.avatar_url.as_deref().map(|u| (f.id.0, u))).collect();
+            for row in d.friends.iter().take(MAX_AVATARS) {
+                if let Some(u) = urls.get(&row.id) {
+                    wanted.push((row.id, (*u).to_string()));
+                }
+            }
+            for (id, url) in wanted {
+                if self.sent.contains(&id) {
+                    continue;
+                }
+                if self.asked.insert(url.clone()) {
+                    let _ = self.avatar_tx.send(url.clone());
+                }
+                let ready = self.avatars.lock().ok().and_then(|c| c.get(&url).cloned());
+                match ready {
+                    Some(Some((size, rgba))) => {
+                        if self.send(&ToHook::Avatar { id, size, rgba }) {
+                            self.sent.insert(id);
+                        }
+                    }
+                    Some(None) => {
+                        self.sent.insert(id); // not loadable: do not ask again
+                    }
+                    None => {}
+                }
+            }
         }
 
         /// Apply what the libraries reported and keep them supplied with data. Call once per frame.
@@ -239,6 +347,7 @@ mod imp {
                 match msg {
                     FromHook::Hello { .. } => {}
                     FromHook::Visible { open } => self.visible = open,
+                    FromHook::Screenshot { path } => eprintln!("[overlay] screenshot saved: {path}"),
                     FromHook::Action { a } => match a {
                         OverlayAction::OpenUrl { url } => {
                             if let Err(e) = sr_client::open_url(&url) {
@@ -258,11 +367,22 @@ mod imp {
             if !self.active() {
                 return;
             }
+            // The game's achievements come from what its page loads (cached, cheap to repeat).
+            if self.app != self.loaded_app {
+                self.loaded_app = self.app;
+                if let Some(app) = self.app {
+                    client.send(Command::LoadGamePage(app));
+                }
+            }
             let every = if self.visible { UPDATE_OPEN } else { UPDATE_CLOSED };
             let fresh = self.fresh.swap(false, Ordering::SeqCst);
+            if fresh {
+                self.sent.clear();
+            }
             if fresh || self.last_sent.elapsed() >= every {
                 if let Some(d) = self.data(client) {
-                    self.send(&ToHook::Data(d));
+                    self.send(&ToHook::Data(d.clone()));
+                    self.send_avatars(client, &d);
                 }
                 self.last_sent = Instant::now();
             }

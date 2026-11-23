@@ -573,17 +573,22 @@ pub fn prepare_with(info: &AppInfo, installed: Option<&InstalledApp>, opts: &Pre
             crate::mangohud::apply(&mut plan, hud, &parsed);
         }
     }
+    // The overlay goes into the game even inside Gamescope, but not into Gamescope itself: there its variables
+    // are set by `env` right in front of the game's command (see `overlay_hook::take_for_child`).
+    let mut child_env = Vec::new();
     if let Some(o) = &opts.overlay
-        && gs.is_none()
         && host == HostOs::Linux
     {
-        crate::overlay_hook::apply(&mut plan, &o.lib, o.socket.as_deref());
+        crate::overlay_hook::apply(&mut plan, &o.lib, o.lib32.as_deref(), o.socket.as_deref());
+        if gs.is_some() {
+            child_env = crate::overlay_hook::take_for_child(&mut plan, &o.lib, o.lib32.as_deref());
+        }
     }
     let wrapped = gs.is_some();
     if let Some(g) = gs {
         let mut g = g.clone();
         g.mangoapp = g.mangoapp && opts.hud.is_some() && !crate::mangohud::user_owns(&parsed);
-        crate::gamescope::apply(&mut plan, &g);
+        crate::gamescope::apply(&mut plan, &g, &child_env);
     }
     let tool = tool.filter(|_| uses_tool).map(|t| (t.internal_name.clone(), source.unwrap_or(ChoiceSource::Newest)));
     Ok(Prepared {

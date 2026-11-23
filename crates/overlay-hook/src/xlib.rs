@@ -25,8 +25,29 @@ const BUTTON_RELEASE: c_int = 5;
 const MOTION_NOTIFY: c_int = 6;
 const NO_EXPOSE: c_int = 14;
 const GENERIC_EVENT: c_int = 35;
-/// The size of an XEvent on 64-bit Linux.
-const EVENT_BYTES: usize = 192;
+/// Offsets into an XEvent (it is made of longs and pointers, so they depend on the pointer width) and its size.
+#[cfg(target_pointer_width = "64")]
+mod off {
+    pub const DISPLAY: usize = 24;
+    pub const WINDOW: usize = 32;
+    /// `x`; `y` follows.
+    pub const X: usize = 64;
+    /// A key event's `keycode` and a button event's `button`.
+    pub const DETAIL: usize = 84;
+    /// A generic event's `evtype`.
+    pub const EVTYPE: usize = 36;
+    pub const EVENT_BYTES: usize = 192;
+}
+#[cfg(target_pointer_width = "32")]
+mod off {
+    pub const DISPLAY: usize = 12;
+    pub const WINDOW: usize = 16;
+    pub const X: usize = 32;
+    pub const DETAIL: usize = 52;
+    pub const EVTYPE: usize = 20;
+    pub const EVENT_BYTES: usize = 96;
+}
+const EVENT_BYTES: usize = off::EVENT_BYTES;
 
 fn active() -> bool {
     !crate::sdl::in_use()
@@ -41,6 +62,7 @@ fn key_of(sym: u64) -> (KeyKind, Option<Key>) {
     let k = match sym {
         0xff09 | 0xfe20 => return (KeyKind::Tab, Some(Tab)),
         0xff1b => return (KeyKind::Escape, Some(Escape)),
+        0xffc9 => return (KeyKind::F12, None),
         0xffe1 | 0xffe2 => return (KeyKind::Shift, None),
         0xffe3 | 0xffe4 => return (KeyKind::Ctrl, None),
         0xffe9 | 0xffea | 0xffe7 | 0xffe8 | 0xfe03 => return (KeyKind::Alt, None),
@@ -69,9 +91,81 @@ fn key_of(sym: u64) -> (KeyKind, Option<Key>) {
     (KeyKind::Other, Some(k))
 }
 
+/// XInput2's `XIEventMask`.
+#[repr(C)]
+pub struct XiMask {
+    deviceid: c_int,
+    mask_len: c_int,
+    mask: *mut u8,
+}
+
+/// XInput2 event types a game reads raw input with (XI_RawKeyPress .. XI_RawMotion): they come from the device,
+/// whatever window has the focus, so while the overlay is open the game must not be subscribed to them.
+const XI_RAW_FIRST: usize = 13;
+const XI_RAW_LAST: usize = 17;
+
+/// A copy of the masks of one `XISelectEvents` call.
+type XiSelection = Vec<(c_int, Vec<u8>)>;
+
+/// Copy the masks the game passed.
+unsafe fn copy_masks(masks: *const XiMask, n: c_int) -> XiSelection {
+    let mut out = Vec::new();
+    for i in 0..n.max(0) as usize {
+        let m = unsafe { &*masks.add(i) };
+        let bytes = if m.mask.is_null() || m.mask_len <= 0 || m.mask_len > 64 {
+            Vec::new()
+        } else {
+            unsafe { std::slice::from_raw_parts(m.mask, m.mask_len as usize) }.to_vec()
+        };
+        out.push((m.deviceid, bytes));
+    }
+    out
+}
+
+/// `mask` without the raw input events.
+fn strip_raw(mask: &[u8]) -> Vec<u8> {
+    let mut m = mask.to_vec();
+    for ev in XI_RAW_FIRST..=XI_RAW_LAST {
+        if let Some(b) = m.get_mut(ev / 8) {
+            *b &= !(1 << (ev % 8));
+        }
+    }
+    m
+}
+
+/// Call the real `XISelectEvents` for a window with these masks.
+unsafe fn select_events(dpy: Display, win: Window, sel: &XiSelection, strip: bool) {
+    let Some(call) =
+        (unsafe { f::<unsafe extern "C" fn(Display, Window, *mut XiMask, c_int) -> c_int>(&slots::XISelectEvents) })
+    else {
+        return;
+    };
+    let mut bytes: Vec<Vec<u8>> = sel.iter().map(|(_, m)| if strip { strip_raw(m) } else { m.clone() }).collect();
+    let mut masks: Vec<XiMask> = sel
+        .iter()
+        .zip(bytes.iter_mut())
+        .map(|((id, _), b)| XiMask { deviceid: *id, mask_len: b.len() as c_int, mask: b.as_mut_ptr() })
+        .collect();
+    unsafe { call(dpy, win, masks.as_mut_ptr(), masks.len() as c_int) };
+}
+
+/// The arguments of an `XIGrabDevice` the game holds.
+#[derive(Clone)]
+struct XiGrab {
+    win: Window,
+    cursor: c_ulong,
+    grab_mode: c_int,
+    paired_mode: c_int,
+    owner_events: c_int,
+    mask: XiSelection,
+}
+
 /// What the game believes about grabs and cursors, kept while the overlay has changed the real ones.
 #[derive(Default)]
 struct State {
+    /// XInput2 grabs by device id, and the event selections by window.
+    xi_grabs: HashMap<c_int, XiGrab>,
+    xi_select: HashMap<Window, XiSelection>,
     dpy: usize,
     win: Window,
     /// `XGrabPointer` arguments of the grab the game holds.
@@ -105,22 +199,23 @@ unsafe fn filter(ev: *const u8) -> Verdict {
         let mut s = state();
         match ty {
             KEY_PRESS | KEY_RELEASE | BUTTON_PRESS | BUTTON_RELEASE | MOTION_NOTIFY => {
-                s.dpy = unsafe { rd::<usize>(ev, 24) };
-                s.win = unsafe { rd::<Window>(ev, 32) };
+                s.dpy = unsafe { rd::<usize>(ev, off::DISPLAY) };
+                s.win = unsafe { rd::<Window>(ev, off::WINDOW) };
             }
             _ => {}
         }
     }
     match ty {
         KEY_PRESS | KEY_RELEASE => {
-            let keycode: u32 = unsafe { rd(ev, 84) };
+            let keycode: u32 = unsafe { rd(ev, off::DETAIL) };
             let sym = unsafe {
                 match lib::<unsafe extern "C" fn(*const u8, c_int) -> c_ulong>(c"XLookupKeysym", &[c"libX11.so.6"]) {
                     Some(l) => l(ev, 0),
                     None => 0,
                 }
             };
-            let (kind, key) = key_of(sym);
+            #[allow(clippy::unnecessary_cast)] // c_ulong is 32 bits on i686
+            let (kind, key) = key_of(sym as u64);
             let down = ty == KEY_PRESS;
             // Held Shift+Tab arrives as release/press pairs: a second toggle this soon is the key repeating.
             if down && kind == KeyKind::Tab {
@@ -154,8 +249,8 @@ unsafe fn filter(ev: *const u8) -> Verdict {
             step.verdict
         }
         BUTTON_PRESS | BUTTON_RELEASE => {
-            let (x, y): (c_int, c_int) = unsafe { (rd(ev, 64), rd(ev, 68)) };
-            let b: u32 = unsafe { rd(ev, 84) };
+            let (x, y): (c_int, c_int) = unsafe { (rd(ev, off::X), rd(ev, off::X + 4)) };
+            let b: u32 = unsafe { rd(ev, off::DETAIL) };
             let pos = Pos2::new(x as f32, y as f32);
             let down = ty == BUTTON_PRESS;
             state::with_input(|i| match b {
@@ -180,12 +275,12 @@ unsafe fn filter(ev: *const u8) -> Verdict {
             })
         }
         MOTION_NOTIFY => {
-            let (x, y): (c_int, c_int) = unsafe { (rd(ev, 64), rd(ev, 68)) };
+            let (x, y): (c_int, c_int) = unsafe { (rd(ev, off::X), rd(ev, off::X + 4)) };
             state::with_input(|i| i.motion(Pos2::new(x as f32, y as f32)))
         }
         GENERIC_EVENT => {
             // XInput2 key, button, motion and raw versions of them: the game must not see them while open.
-            let evtype: c_int = unsafe { rd(ev, 36) };
+            let evtype: c_int = unsafe { rd(ev, off::EVTYPE) };
             if state::is_open() && matches!(evtype, 2..=6 | 13..=17 | 18..=24) {
                 Verdict::Swallow
             } else {
@@ -201,7 +296,7 @@ unsafe fn fill_noop(dpy: Display, ev: *mut u8) {
     unsafe {
         std::ptr::write_bytes(ev, 0, EVENT_BYTES);
         std::ptr::write_unaligned(ev.cast::<c_int>(), NO_EXPOSE);
-        std::ptr::write_unaligned(ev.add(24).cast::<usize>(), dpy as usize);
+        std::ptr::write_unaligned(ev.add(off::DISPLAY).cast::<usize>(), dpy as usize);
     }
 }
 
@@ -242,6 +337,17 @@ pub fn on_open(open: bool, _pos: Pos2) {
                 && let Some(u) = ungrab_k
             {
                 u(dpy, 0);
+            }
+            // XInput2: let go of device grabs, and stop the raw input the game selected.
+            if let Some(u) = f::<unsafe extern "C" fn(Display, c_int, c_ulong) -> c_int>(&slots::XIUngrabDevice) {
+                for dev in s.xi_grabs.keys() {
+                    u(dpy, *dev, 0);
+                }
+            }
+            for (w, sel) in &s.xi_select {
+                if sel.iter().any(|(_, m)| strip_raw(m) != *m) {
+                    select_events(dpy, *w, sel, true);
+                }
             }
             if let Some(u) = undefine {
                 for (w, c) in &s.cursors {
@@ -306,6 +412,38 @@ pub fn on_open(open: bool, _pos: Pos2) {
                 )
             {
                 gk(dpy, g[0], g[1] as c_int, g[2] as c_int, g[3] as c_int, 0);
+            }
+            for (w, sel) in &s.xi_select {
+                if sel.iter().any(|(_, m)| strip_raw(m) != *m) {
+                    select_events(dpy, *w, sel, false);
+                }
+            }
+            if let Some(g) = f::<
+                unsafe extern "C" fn(
+                    Display,
+                    c_int,
+                    Window,
+                    c_ulong,
+                    c_ulong,
+                    c_int,
+                    c_int,
+                    c_int,
+                    *mut XiMask,
+                ) -> c_int,
+            >(&slots::XIGrabDevice)
+            {
+                for (dev, x) in &s.xi_grabs {
+                    let mut bytes: Vec<Vec<u8>> = x.mask.iter().map(|(_, m)| m.clone()).collect();
+                    let mut masks: Vec<XiMask> = x
+                        .mask
+                        .iter()
+                        .zip(bytes.iter_mut())
+                        .map(|((id, _), b)| XiMask { deviceid: *id, mask_len: b.len() as c_int, mask: b.as_mut_ptr() })
+                        .collect();
+                    if let Some(m) = masks.first_mut() {
+                        g(dpy, *dev, x.win, 0, x.cursor, x.grab_mode, x.paired_mode, x.owner_events, m);
+                    }
+                }
             }
             if let Some(d) = define {
                 for (w, c) in &s.cursors {
@@ -465,6 +603,57 @@ hooks! {
         }
         unsafe { real(dpy, time) }
     }
+    fn XIGrabDevice(real; dpy: Display, dev: c_int, w: Window, time: c_ulong, cursor: c_ulong, gm: c_int, pm: c_int, owner: c_int, mask: *mut XiMask) -> c_int {
+        if !active() || mask.is_null() {
+            return unsafe { real(dpy, dev, w, time, cursor, gm, pm, owner, mask) };
+        }
+        let grab = XiGrab {
+            win: w,
+            cursor,
+            grab_mode: gm,
+            paired_mode: pm,
+            owner_events: owner,
+            mask: unsafe { copy_masks(mask, 1) },
+        };
+        state().dpy = dpy as usize;
+        if state::is_open() {
+            // The game believes it holds the grab; the pointer stays free for the overlay.
+            state().xi_grabs.insert(dev, grab);
+            return 0;
+        }
+        let r = unsafe { real(dpy, dev, w, time, cursor, gm, pm, owner, mask) };
+        if r == 0 {
+            state().xi_grabs.insert(dev, grab);
+        }
+        r
+    }
+    fn XIUngrabDevice(real; dpy: Display, dev: c_int, time: c_ulong) -> c_int {
+        if active() {
+            state().xi_grabs.remove(&dev);
+            if state::is_open() {
+                return 0;
+            }
+        }
+        unsafe { real(dpy, dev, time) }
+    }
+    fn XISelectEvents(real; dpy: Display, w: Window, masks: *mut XiMask, n: c_int) -> c_int {
+        if !active() || masks.is_null() || n <= 0 {
+            return unsafe { real(dpy, w, masks, n) };
+        }
+        let sel = unsafe { copy_masks(masks, n) };
+        state().dpy = dpy as usize;
+        if sel.iter().all(|(_, m)| m.iter().all(|b| *b == 0)) {
+            state().xi_select.remove(&w);
+        } else {
+            state().xi_select.insert(w, sel.clone());
+        }
+        if state::is_open() && sel.iter().any(|(_, m)| strip_raw(m) != *m) {
+            // The raw input the game asks for while the overlay is open waits until it closes.
+            unsafe { select_events(dpy, w, &sel, true) };
+            return 0;
+        }
+        unsafe { real(dpy, w, masks, n) }
+    }
     fn XWarpPointer(real; dpy: Display, sw: Window, dw: Window, sx: c_int, sy: c_int, sw2: c_uint, sh: c_uint, dx: c_int, dy: c_int) -> c_int {
         if active() && state::is_open() {
             return 1;
@@ -512,3 +701,26 @@ hooks! {
 
 #[allow(dead_code)]
 fn _types(_: *const c_char) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn raw_input_bits_are_stripped_and_the_rest_kept() {
+        // Bits for XI_Motion (6), XI_RawKeyPress (13) and XI_RawMotion (17), then 18 (XI_TouchBegin).
+        let mut m = vec![0u8; 4];
+        for ev in [6usize, 13, 17, 18] {
+            m[ev / 8] |= 1 << (ev % 8);
+        }
+        let s = strip_raw(&m);
+        assert_ne!(s, m);
+        assert_ne!(s[0] & (1 << 6), 0, "motion stays");
+        assert_eq!(s[1] & (1 << 5), 0, "raw key press goes");
+        assert_eq!(s[2] & (1 << 1), 0, "raw motion goes");
+        assert_ne!(s[2] & (1 << 2), 0, "touch stays");
+        assert_eq!(strip_raw(&s), s);
+        // A short mask is fine.
+        assert_eq!(strip_raw(&[0xff]), vec![0xff]);
+    }
+}

@@ -86,6 +86,15 @@ fn worker(shared: &(Mutex<Shared>, Condvar), wake: &Waker) {
     }
 }
 
+/// A picture from `url` as a `side` x `side` square of RGBA pixels (cropped from the middle). Blocks: call it
+/// from a worker thread. Used for the avatars the in-game overlay shows.
+pub fn load_square(url: &str, side: u32) -> Option<(usize, Vec<u8>)> {
+    let bytes = storefront::fetch_image(url).ok()?;
+    let img = image::load_from_memory(&bytes).ok()?;
+    let img = img.resize_to_fill(side, side, image::imageops::FilterType::Triangle).into_rgba8();
+    Some((side as usize, img.into_raw()))
+}
+
 fn load(url: String) -> WebImage {
     let decoded = storefront::fetch_image(&url).ok().and_then(|b| image::load_from_memory(&b).ok());
     let Some(img) = decoded else { return WebImage { url, size: [0, 0], rgba: None } };

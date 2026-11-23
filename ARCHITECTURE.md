@@ -95,12 +95,17 @@ Steam's overlay is drawn inside the game's frames and takes the game's input whi
 with `crates/overlay-hook` (package `sr-overlay-hook`, cdylib `libkettle_overlay.so`), loaded two ways that
 `KETTLE_OVERLAY=1` switches on for games Kettle starts:
 
-- `LD_PRELOAD` (appended to the game's own value; 64-bit only, a 32-bit game gets no overlay yet): hooks
+- `LD_PRELOAD` (appended to the game's own value; both `libkettle_overlay.so` and the i686 `libkettle_overlay32.so`, the
+  loader skips the one of the wrong word size with a harmless message on stderr): hooks
   `glXSwapBuffers` / `eglSwapBuffers*` (also found through `glXGetProcAddress*`, `eglGetProcAddress` and a hooked
   `dlsym`, which is how SDL loads them), SDL2 / SDL3 event and mouse functions, and Xlib event and grab functions.
 - Vulkan implicit layer `VK_LAYER_KETTLE_overlay` (manifest `kettle_overlay.json` in
   `$XDG_DATA_HOME/vulkan/implicit_layer.d`, which the Steam Linux Runtime container imports like MangoHud's):
   draws before `vkQueuePresentKHR`. DXVK and VKD3D are ordinary Vulkan applications, so Proton games are covered.
+  The 32-bit copy has its own manifest (`kettle_overlay_32.json`, same layer name).
+- Inside Gamescope the library goes into the game, not into Gamescope: `gamescope::apply` puts `env LD_PRELOAD=...
+  KETTLE_OVERLAY=... KETTLE_OVERLAY_SOCKET=...` right in front of the game's command (behind its display shim), so
+  Shift+Tab works there too.
 
 Modules (`src/`): `state` (the one overlay of the process: egui context, data, frame timing), `input` (pure input
 state machine: Shift+Tab toggles, everything is swallowed while open, releases of keys the game saw pressed still
@@ -108,9 +113,33 @@ reach it), `sdl` and `xlib` (feed it, and release relative mode, grabs and the h
 calls are remembered while open and applied again on close), `gl` (egui_glow; saves and restores all GL state it
 touches), `vk` (own small egui renderer, shader compiled from `overlay.wgsl` by `build.rs`; submits one command
 buffer on the present queue that waits for the game's semaphores and signals its own), `real` (real function lookup,
-`dlsym` hook), `ipc` (socket to Kettle). Programs that create windows through SDL are handled by the SDL hooks;
+`dlsym` hook), `guard` (see below), `shot` (screenshots), `ipc` (socket to Kettle). Programs that create windows through SDL are handled by the SDL hooks;
 the Xlib hooks (Wine, GLFW) stay out of their way. The look is `crates/overlay-ui`; the wire types are in
 `crates/overlay-proto` (JSON lines over `$XDG_RUNTIME_DIR/kettle-overlay-<pid>.sock`, named to the game in
 `KETTLE_OVERLAY_SOCKET`). Kettle's side is `crates/app/src/overlay_host.rs`; it installs the library to
 `<data dir>/overlay/` at start (`overlay_install.rs`, `sr_steam::overlay_hook`) and `run.rs` adds the variables.
-Proof: `scripts/overlay-test.sh` (SDL2 test program under Xvfb) and the checks in `.github/workflows/check.yml`.
+**A bug in the overlay never kills the game.** Every function the library exports to the game runs its own code
+through `guard::run` (`catch_unwind`; the `hooks!` macro does it for every GL, SDL, Xlib, XInput2 and `dlsym` hook, the
+Vulkan layer entries call it by hand). A panic is caught, logged once, the overlay switches itself off for the process
+(closed, grabs and cursor given back) and the call goes straight through to the real function. This needs unwinding
+panics, so the workspace profiles have no `panic = "abort"` (Cargo ignores a per-package setting); the test
+`guard::tests::panics_are_caught` aborts if that is ever put back. The Vulkan layer keeps the next layer's lookup
+functions in plain maps filled first, so the game's own lookups work whatever happens to the rest of our bookkeeping.
+A lost Kettle: sends never block (`MSG_DONTWAIT | MSG_NOSIGNAL`, a hung or stopped Kettle cannot stall a frame or raise
+SIGPIPE in the game), the connect loop retries every 2 s, and the overlay keeps showing the last data it got.
+
+**Data and actions.** Kettle sends `OverlayData` (game, session, total playtime, achievements from the game page's
+data, friends, the screenshot folder) every 0.5 s while the overlay is open and every 3 s otherwise, and `avatar`
+messages (48 px RGBA, base64, once per connection) for the account and the friends it lists. `OpenUrl` (allow-listed in
+`sr_client::open_url`) and `OpenChat` are carried out in Kettle. F12 and the overlay's button take a screenshot: the GL
+hook reads the back buffer with `glReadPixels`, the Vulkan layer copies the swapchain image (made with the
+transfer-source usage) before the overlay is drawn into it; a thread writes a PNG to `~/Pictures/Kettle/<game>/` and
+sends `screenshot{path}` to Kettle. Hi-dpi: the surface is `scale` times the window's size in points (SDL's
+`SDL_GetWindowSizeInPixels` over `SDL_GetWindowSize`); egui gets `native_pixels_per_point = scale` and a screen in
+points, which is what the game's mouse coordinates use. XInput2: `XIGrabDevice` / `XIUngrabDevice` are virtualized like
+`XGrabPointer`, and the raw-input bits (13..17) of the game's `XISelectEvents` are taken away while the overlay is open.
+Xlib event offsets depend on the pointer width (`xlib::off`), so the i686 build reads 32-bit `XEvent`s correctly.
+
+Proof: `scripts/overlay-test.sh` (SDL2 test program under Xvfb), `overlay-gl-vk-test.sh` (glxgears, vkcube),
+`overlay-ddnet-test.sh`, `overlay-kettle-test.sh` (a fake Kettle on the real socket), and the checks in
+`.github/workflows/check.yml`.

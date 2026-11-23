@@ -194,6 +194,7 @@ fn cmd_launch(args: &[String]) -> Result<()> {
         // `--overlay` shows the plan with the in-game overlay library added (the installed one).
         overlay: args[..split].iter().any(|a| a == "--overlay").then(|| crate::overlay_hook::Hook {
             lib: crate::overlay_hook::installed_lib(),
+            lib32: Some(crate::overlay_hook::installed_lib32()),
             socket: None,
         }),
     };

@@ -28,7 +28,8 @@ XVFB=$!
 trap 'touch "$OUT/quit"; sleep 0.5; kill $GAME 2>/dev/null; kill $XVFB 2>/dev/null' EXIT
 sleep 1
 
-LD_PRELOAD="$LIB" KETTLE_OVERLAY=1 KETTLE_OVERLAY_DEMO=hud KETTLE_OVERLAY_LOG="$OUT/hook.log" \
+rm -rf "$OUT/shots"
+LD_PRELOAD="$LIB" KETTLE_OVERLAY=1 KETTLE_OVERLAY_DEMO=hud KETTLE_OVERLAY_LOG="$OUT/hook.log" KETTLE_OVERLAY_SHOTDIR="$OUT/shots" \
   TEST_LOG="$OUT/game.log" TEST_QUIT="$OUT/quit" LIBGL_ALWAYS_SOFTWARE=1 SDL_VIDEODRIVER=x11 "$APP" \
   >"$OUT/app.out" 2>&1 &
 GAME=$!
@@ -74,6 +75,12 @@ m=$(mark); xdotool key c; xdotool mousemove_relative 7 3; xdotool click 1; sleep
 check "the game gets keys, motion and clicks again" \
   "since $m | grep -q 'key down scancode=6' && since $m | grep -q '^motion' && since $m | grep -q 'button down 1'"
 shot 5-game-again
+
+# 5. F12 takes a screenshot of the game's frame: a PNG appears, the game never sees the key.
+m=$(mark); xdotool key F12; sleep 2
+check "F12 saves a screenshot (a PNG of the window's size)" \
+  "f=\$(ls '$OUT'/shots/*.png 2>/dev/null | head -1); [ -n \"\$f\" ] && file \"\$f\" | grep -q 'PNG image data, [0-9]* x [0-9]*' && grep -q '^screenshot ' '$OUT/hook.log'"
+check "the game never sees F12" "! since $m | grep -q 'scancode=69'"
 
 echo "failures: $fails"
 exit $((fails > 0))

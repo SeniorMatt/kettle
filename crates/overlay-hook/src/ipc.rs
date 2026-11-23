@@ -13,13 +13,20 @@ fn out() -> &'static Mutex<Option<UnixStream>> {
     OUT.get_or_init(|| Mutex::new(None))
 }
 
-/// Send one message; dropped silently when not connected.
+/// Send one message; dropped silently when not connected or when Kettle does not read (a stopped or hung Kettle
+/// must never stall the game's frame). A broken connection is forgotten; the connect loop makes a new one.
 pub fn send(msg: &FromHook) {
-    if let Ok(mut g) = out().lock()
-        && let Some(s) = g.as_mut()
-        && s.write_all(&encode(msg)).is_err()
-    {
-        *g = None;
+    use std::os::fd::AsRawFd;
+    let line = encode(msg);
+    let Ok(mut g) = out().try_lock() else { return };
+    if let Some(s) = g.as_mut() {
+        // MSG_NOSIGNAL: the game is not ours, so SIGPIPE would kill it. MSG_DONTWAIT: never block.
+        let n = unsafe {
+            libc::send(s.as_raw_fd(), line.as_ptr().cast(), line.len(), libc::MSG_NOSIGNAL | libc::MSG_DONTWAIT)
+        };
+        if n < 0 && std::io::Error::last_os_error().kind() != std::io::ErrorKind::WouldBlock {
+            *g = None;
+        }
     }
 }
 
@@ -46,23 +53,28 @@ pub fn start() {
     let Some(path) = std::env::var_os("KETTLE_OVERLAY_SOCKET").filter(|p| !p.is_empty()) else { return };
     let _ = std::thread::Builder::new().name("kettle-overlay".into()).spawn(move || {
         loop {
-            if let Ok(stream) = UnixStream::connect(&path) {
-                let _ = stream.set_write_timeout(Some(Duration::from_millis(300)));
-                if let Ok(w) = stream.try_clone() {
-                    if let Ok(mut g) = out().lock() {
-                        *g = Some(w);
-                    }
-                    let exe = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_default();
-                    send(&FromHook::Hello { pid: std::process::id(), exe });
-                    read_loop(stream);
-                    if let Ok(mut g) = out().lock() {
-                        *g = None;
-                    }
-                }
-            }
+            // A panic ends only this connection, never the thread or the game; the overlay keeps showing the
+            // last data it got while Kettle is away, and the loop connects again.
+            let _ = std::panic::catch_unwind(|| connect_once(&path));
             std::thread::sleep(Duration::from_secs(2));
         }
     });
+}
+
+fn connect_once(path: &std::ffi::OsStr) {
+    if let Ok(stream) = UnixStream::connect(path) {
+        if let Ok(w) = stream.try_clone() {
+            if let Ok(mut g) = out().lock() {
+                *g = Some(w);
+            }
+            let exe = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_default();
+            send(&FromHook::Hello { pid: std::process::id(), exe });
+            read_loop(stream);
+        }
+        if let Ok(mut g) = out().lock() {
+            *g = None;
+        }
+    }
 }
 
 fn read_loop(stream: UnixStream) {
@@ -78,6 +90,11 @@ fn read_loop(stream: UnixStream) {
         match decode::<ToHook>(&buf) {
             Some(ToHook::Data(d)) => state::set_data(d),
             Some(ToHook::Toggle) => state::toggle(),
+            Some(ToHook::Avatar { id, size, rgba }) => {
+                if let Some(px) = sr_overlay_proto::b64_decode(&rgba) {
+                    state::set_avatar(id, size, px);
+                }
+            }
             None => {}
         }
     }

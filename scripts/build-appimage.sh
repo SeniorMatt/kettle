@@ -23,6 +23,12 @@ mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications" "$APPDIR/usr/share/i
 cp target/release/kettle "$APPDIR/usr/bin/"
 # The in-game overlay library; Kettle copies it to its data folder at start (crates/app/src/overlay_install.rs).
 mkdir -p "$APPDIR/usr/lib" && cp target/release/libkettle_overlay.so "$APPDIR/usr/lib/"
+# And its 32-bit copy for 32-bit games (needs `rustup target add i686-unknown-linux-gnu` and gcc-multilib;
+# KETTLE_SKIP_I686=1 leaves it out, e.g. on a machine without them).
+if [ -z "${KETTLE_SKIP_I686:-}" ]; then
+  CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}" "$CARGO" build --release -p sr-overlay-hook --lib --target i686-unknown-linux-gnu
+  cp target/i686-unknown-linux-gnu/release/libkettle_overlay.so "$APPDIR/usr/lib/libkettle_overlay32.so"
+fi
 cp packaging/kettle.desktop "$APPDIR/" && cp packaging/kettle.desktop "$APPDIR/usr/share/applications/"
 cp packaging/kettle.svg "$APPDIR/" && cp packaging/kettle.svg "$APPDIR/usr/share/icons/hicolor/scalable/apps/"
 cat > "$APPDIR/AppRun" <<'RUN'

@@ -124,6 +124,7 @@ fn key_of(sc: u32) -> (KeyKind, Option<Key>) {
         224 | 228 => return (KeyKind::Ctrl, None),
         225 | 229 => return (KeyKind::Shift, None),
         226 | 230 => return (KeyKind::Alt, None),
+        69 => return (KeyKind::F12, None),
         _ => return (KeyKind::Other, None),
     };
     (KeyKind::Other, Some(k))
@@ -227,6 +228,41 @@ fn event_size() -> usize {
 }
 
 // ---- grab release and restore ----------------------------------------------------------------------------
+
+/// How many device pixels one point of the game's window is (hi-dpi), from SDL's own two window sizes: the
+/// window's size in points (what its mouse coordinates use) and in pixels (what the game renders). Asked at most
+/// twice a second, and only when SDL runs the game's window. 1.0 when SDL cannot tell.
+pub fn update_scale() {
+    use std::sync::atomic::AtomicU64;
+    static LAST: AtomicU64 = AtomicU64::new(0);
+    if !in_use() {
+        return;
+    }
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
+    let last = LAST.load(Ordering::Relaxed);
+    if now.saturating_sub(last) < 500 || LAST.compare_exchange(last, now, Ordering::Relaxed, Ordering::Relaxed).is_err()
+    {
+        return;
+    }
+    type Focus = unsafe extern "C" fn() -> *mut c_void;
+    type Size = unsafe extern "C" fn(*mut c_void, *mut c_int, *mut c_int);
+    let get = |n: &std::ffi::CStr| crate::real::sym_in(n, &[c"libSDL2-2.0.so.0", c"libSDL3.so.0"]);
+    let (Some(size), Some(pixels)) = (get(c"SDL_GetWindowSize"), get(c"SDL_GetWindowSizeInPixels")) else { return };
+    let focus = get(c"SDL_GetMouseFocus").or_else(|| get(c"SDL_GetKeyboardFocus"));
+    let Some(focus) = focus else { return };
+    unsafe {
+        let win = std::mem::transmute::<usize, Focus>(focus)();
+        if win.is_null() {
+            return;
+        }
+        let (mut w, mut h, mut pw, mut ph) = (0, 0, 0, 0);
+        std::mem::transmute::<usize, Size>(size)(win, &mut w, &mut h);
+        std::mem::transmute::<usize, Size>(pixels)(win, &mut pw, &mut ph);
+        if w > 0 && pw > 0 {
+            state::set_scale(pw as f32 / w as f32);
+        }
+    }
+}
 
 /// The overlay opens (`open`) or closes. Runs in the game's thread.
 pub fn on_open(open: bool, pos: Pos2) {

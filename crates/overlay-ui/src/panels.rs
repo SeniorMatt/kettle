@@ -460,7 +460,12 @@ fn friends(
     let k = pn.l.k;
     // Account row.
     pn.p.rect_filled(pn.rect(0.0, 0.0, w, 52.0), 0.0, Color32::from_rgb(0x2a, 0x30, 0x3a));
-    let me = OverlayFriend { name: data.account_name.clone(), steam_id: 1, ..Default::default() };
+    let me = OverlayFriend {
+        name: data.account_name.clone(),
+        steam_id: 1,
+        avatar: data.account_avatar.clone(),
+        ..Default::default()
+    };
     avatar(ui, &pn.p, pn.rect(8.0, 9.0, 36.0, 36.0), &me, k, Color32::from_rgb(0x57, 0x5f, 0x6b));
     let nm = pn.text(
         50.0,

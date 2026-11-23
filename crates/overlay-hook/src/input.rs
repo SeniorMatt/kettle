@@ -18,6 +18,8 @@ pub enum KeyKind {
     Alt,
     Tab,
     Escape,
+    /// Takes a screenshot (like Steam's default).
+    F12,
     Other,
 }
 
@@ -46,6 +48,8 @@ pub struct Input {
     swallowed_buttons: HashSet<u8>,
     events: Vec<Event>,
     pos: Pos2,
+    /// F12 was pressed: a screenshot is wanted (taken by the renderer at the next frame).
+    shot: bool,
 }
 
 fn button_of(b: u8) -> Option<PointerButton> {
@@ -92,6 +96,11 @@ impl Input {
 
     pub fn pos(&self) -> Pos2 {
         self.pos
+    }
+
+    /// Was a screenshot asked for with the key since the last call?
+    pub fn take_shot(&mut self) -> bool {
+        std::mem::take(&mut self.shot)
     }
 
     /// The events collected since the last call (for one egui frame).
@@ -142,6 +151,11 @@ impl Input {
         }
         if swallowed_before {
             return step(Verdict::Swallow, None); // auto-repeat of a swallowed key
+        }
+        if kind == KeyKind::F12 {
+            self.swallowed_keys.insert(native);
+            self.shot = true;
+            return step(Verdict::Swallow, None);
         }
         if self.open {
             self.swallowed_keys.insert(native);
@@ -348,5 +362,22 @@ mod tests {
         assert!(i.modifiers().ctrl && i.modifiers().command);
         i.key(10, KeyKind::Ctrl, None, false, false);
         assert!(!i.modifiers().ctrl);
+    }
+
+    #[test]
+    fn f12_takes_a_screenshot_and_the_game_does_not_see_it() {
+        let mut i = Input::default();
+        let s = i.key(70, KeyKind::F12, None, true, false);
+        assert_eq!(s.verdict, Verdict::Swallow);
+        assert!(i.take_shot());
+        assert!(!i.take_shot(), "once per press");
+        // Its release is swallowed too, and a held key does not take more.
+        i.key(70, KeyKind::F12, None, true, true);
+        assert!(!i.take_shot());
+        assert_eq!(i.key(70, KeyKind::F12, None, false, false).verdict, Verdict::Swallow);
+        // Overlay switched off in Kettle: F12 is the game's.
+        i.disabled = true;
+        assert_eq!(i.key(70, KeyKind::F12, None, true, false).verdict, Verdict::Pass);
+        assert!(!i.take_shot());
     }
 }
