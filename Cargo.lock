@@ -4274,6 +4274,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sr-overlay-ui"
+version = "0.1.0-alpha.6"
+dependencies = [
+ "egui",
+ "egui_kittest",
+ "png",
+]
+
+[[package]]
 name = "sr-steam"
 version = "0.1.0-alpha.6"
 dependencies = [
