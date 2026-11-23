@@ -117,7 +117,7 @@ pub use sysinfo::system_info;
 pub use tools::{
     CompatInfo, CompatState, ReleaseInfo, Source, ToolInfo, ToolInstall, ToolKind, ToolOrigin, ToolPhase, ToolTarget,
 };
-pub use web_image::WebImage;
+pub use web_image::{WebImage, load_square as load_avatar_square};
 
 use sr_model::{Account, AppId, Game, InstallState, SteamId};
 use sr_steam::{auth, local, secrets, store, storefront, webapi};

@@ -25,6 +25,8 @@ pub struct OverlayData {
     /// Local date, already formatted ("Thu, June 8, 2023"). May be empty.
     pub date: String,
     pub account_name: String,
+    /// The account's picture as square RGBA pixels, if loaded.
+    pub account_avatar: Option<(usize, Vec<u8>)>,
     pub friends: Vec<OverlayFriend>,
     pub achievements: Option<OverlayAchievements>,
     pub perf: Option<OverlayPerf>,

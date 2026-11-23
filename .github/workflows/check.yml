@@ -13,9 +13,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+          targets: i686-unknown-linux-gnu
       - uses: Swatinem/rust-cache@v2
-      - name: SDL2 runtime (the overlay test program links it)
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq libsdl2-2.0-0
+      - name: SDL2 runtime (the overlay test program links it) and the 32-bit C runtime (the i686 overlay library)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libsdl2-2.0-0 gcc-multilib
+      - name: 32-bit overlay library
+        run: cargo build -p sr-overlay-hook --lib --target i686-unknown-linux-gnu
       - name: Check
         run: cargo check --workspace --all-targets --keep-going --message-format short
       - name: Test
@@ -50,6 +53,7 @@ jobs:
           scripts/overlay-test.sh target/overlay-hook
           scripts/overlay-gl-vk-test.sh target/overlay-hook
           scripts/overlay-ddnet-test.sh target/overlay-hook
+          scripts/overlay-kettle-test.sh target/overlay-hook
       - uses: actions/upload-artifact@v4
         if: always()
         with:

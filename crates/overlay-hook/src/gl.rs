@@ -144,7 +144,7 @@ impl Raw {
             (self.active_texture)(GL_TEXTURE0);
             s.texture0 = self.int(0x8069);
             s.sampler0 = if self.bind_sampler.is_some() { self.int(0x8919) } else { 0 };
-            s.unpack_buffer = self.int(0x88ED);
+            s.unpack_buffer = self.int(0x88EF);
             if self.bind_framebuffer.is_some() {
                 s.draw_fb = self.int(0x8CA6);
                 s.read_fb = self.int(0x8CAA);
@@ -241,6 +241,62 @@ impl Raw {
     }
 }
 
+/// Read the game's frame (the back buffer of the default framebuffer, before the overlay draws into it) and save it
+/// as a screenshot. Every piece of state it touches is put back.
+unsafe fn grab(get: &dyn Fn(&CStr) -> Fp, w: u32, h: u32) {
+    if w == 0 || h == 0 || w > 16384 || h > 16384 {
+        return;
+    }
+    let Some(raw) = (unsafe { Raw::load(get) }) else { return };
+    let rp = get(c"glReadPixels");
+    if rp.is_null() {
+        return;
+    }
+    let read_pixels: unsafe extern "C" fn(c_int, c_int, c_int, c_int, c_uint, c_uint, *mut c_void) =
+        unsafe { std::mem::transmute(rp) };
+    let rb = get(c"glReadBuffer");
+    let read_buffer: Option<unsafe extern "C" fn(c_uint)> =
+        if rb.is_null() { None } else { Some(unsafe { std::mem::transmute(rb) }) };
+    let mut px = vec![0u8; w as usize * h as usize * 4];
+    unsafe {
+        while (raw.get_error)() != 0 {}
+        // GL_PIXEL_PACK_BUFFER_BINDING, GL_PACK_ALIGNMENT / ROW_LENGTH / SKIP_ROWS / SKIP_PIXELS, GL_READ_BUFFER.
+        let pack_buf = raw.int(0x88ED);
+        let pack: Vec<i32> = [0x0D05, 0x0D02, 0x0D03, 0x0D04].into_iter().map(|e| raw.int(e)).collect();
+        let read_buf = raw.int(0x0C02);
+        let read_fb = if raw.bind_framebuffer.is_some() { raw.int(0x8CAA) } else { 0 };
+        (raw.bind_buffer)(0x88EB, 0);
+        for (e, v) in [0x0D05, 0x0D02, 0x0D03, 0x0D04].into_iter().zip([1, 0, 0, 0]) {
+            (raw.pixel_storei)(e, v);
+        }
+        if let Some(bind) = raw.bind_framebuffer {
+            bind(GL_READ_FRAMEBUFFER, 0);
+        }
+        if let Some(rb) = read_buffer {
+            rb(0x0405); // GL_BACK
+        }
+        read_pixels(0, 0, w as c_int, h as c_int, 0x1908, 0x1401, px.as_mut_ptr().cast());
+        let failed = (raw.get_error)() != 0;
+        // Put everything back.
+        if let Some(rb) = read_buffer {
+            rb(read_buf as c_uint);
+        }
+        if let Some(bind) = raw.bind_framebuffer {
+            bind(GL_READ_FRAMEBUFFER, read_fb as c_uint);
+        }
+        for (e, v) in [0x0D05, 0x0D02, 0x0D03, 0x0D04].into_iter().zip(pack) {
+            (raw.pixel_storei)(e, v);
+        }
+        (raw.bind_buffer)(0x88EB, pack_buf as c_uint);
+        while (raw.get_error)() != 0 {}
+        if failed {
+            return;
+        }
+    }
+    crate::shot::finish_gl(&mut px, w as usize, h as usize);
+    crate::shot::save(px, w, h);
+}
+
 /// What one GL context needs to draw.
 struct Surface {
     raw: Raw,
@@ -259,6 +315,9 @@ unsafe fn draw(ctx: usize, get: &dyn Fn(&CStr) -> Fp, size: impl FnOnce() -> (u3
         return;
     }
     let (w, h) = size();
+    if state::take_shot() {
+        unsafe { grab(get, w, h) };
+    }
     let frame = {
         let mut c = state::lock();
         c.tick();

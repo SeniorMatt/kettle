@@ -48,6 +48,7 @@ fn sample() -> OverlayData {
         clock: "1:04 PM".into(),
         date: "Thu, June 8, 2023".into(),
         account_name: "Lawrence".into(),
+        account_avatar: None,
         friends,
         achievements: Some(OverlayAchievements {
             unlocked: 9,

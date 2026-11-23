@@ -27,6 +27,19 @@ pub fn prepare(host: &mut Host) -> Option<Hook> {
                 return None;
             }
         };
-        Some(Hook { lib, socket: host.socket() })
+        // The 32-bit copy for 32-bit games, when one is shipped (the AppImage has it).
+        let lib32 = overlay_hook::find_source32(&exe)
+            .or_else(|| {
+                let p = overlay_hook::installed_lib32();
+                p.is_file().then_some(p)
+            })
+            .and_then(|s| match overlay_hook::install32(&s) {
+                Ok(l) => Some(l),
+                Err(e) => {
+                    eprintln!("[overlay] cannot install the 32-bit overlay library: {e:#}");
+                    None
+                }
+            });
+        Some(Hook { lib, lib32, socket: host.socket() })
     }
 }

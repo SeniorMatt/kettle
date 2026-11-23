@@ -23,8 +23,8 @@ trap 'kill $PID 2>/dev/null; kill $XVFB 2>/dev/null' EXIT
 sleep 1
 
 # ---- glxgears: the performance HUD, then Shift+Tab through Xlib ----
-rm -f "$OUT/gears.log"
-LD_PRELOAD="$LIB" KETTLE_OVERLAY=1 KETTLE_OVERLAY_DEMO=hud KETTLE_OVERLAY_LOG="$OUT/gears.log" \
+rm -rf "$OUT/gears.log" "$OUT/shots-gl" "$OUT/shots-vk"
+LD_PRELOAD="$LIB" KETTLE_OVERLAY=1 KETTLE_OVERLAY_DEMO=hud KETTLE_OVERLAY_LOG="$OUT/gears.log" KETTLE_OVERLAY_SHOTDIR="$OUT/shots-gl" \
   LIBGL_ALWAYS_SOFTWARE=1 glxgears -geometry 1280x720+0+0 >"$OUT/gears.out" 2>&1 &
 PID=$!
 wait_for "$OUT/gears.log" "gl first frame" && ok "glxgears: the OpenGL hook draws" || fail "glxgears: the OpenGL hook draws (no frame)"
@@ -36,6 +36,9 @@ check "glxgears: Shift+Tab opens through the Xlib hooks" "grep -q 'visible open=
 shot glxgears-2-open
 xdotool key shift+Tab; sleep 1.5
 check "glxgears: Shift+Tab closes" "grep -q 'visible open=false' '$OUT/gears.log'"
+xdotool key F12; sleep 2
+check "glxgears: F12 saves a screenshot through glReadPixels" \
+  "f=\$(ls '$OUT'/shots-gl/*.png 2>/dev/null | head -1); [ -n \"\$f\" ] && file \"\$f\" | grep -q 'PNG image data'"
 kill $PID 2>/dev/null; wait $PID 2>/dev/null
 
 # ---- vkcube: the Vulkan layer (the layer manifest is made like Kettle makes it) ----
@@ -57,12 +60,15 @@ EOF
 ICD=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json 2>/dev/null | head -1)
 rm -f "$OUT/vkcube.log"
 XDG_DATA_HOME="$XDG" VK_ICD_FILENAMES="$ICD" KETTLE_OVERLAY=1 KETTLE_OVERLAY_DEMO=open KETTLE_OVERLAY_LOG="$OUT/vkcube.log" \
+  KETTLE_OVERLAY_SHOTDIR="$OUT/shots-vk" KETTLE_OVERLAY_DEMO_SHOT=1 \
   vkcube --width 1280 --height 720 >"$OUT/vkcube.out" 2>&1 &
 PID=$!
 wait_for "$OUT/vkcube.log" "vk first frame" && ok "vkcube: the Vulkan layer draws into the swapchain" || { fail "vkcube: the Vulkan layer draws (no frame)"; tail -5 "$OUT/vkcube.out"; }
 sleep 3
 shot vkcube-open
 kill -0 $PID 2>/dev/null && ok "vkcube: still running after the overlay frames" || fail "vkcube died"
+check "vkcube: a screenshot of the swapchain image was saved" \
+  "f=\$(ls '$OUT'/shots-vk/*.png 2>/dev/null | head -1); [ -n \"\$f\" ] && file \"\$f\" | grep -q 'PNG image data, 1280 x 720'"
 kill $PID 2>/dev/null; wait $PID 2>/dev/null
 
 echo "failures: $fails"

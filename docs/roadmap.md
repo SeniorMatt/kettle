@@ -153,9 +153,12 @@ Nothing here is a promise. The owner decides what comes next. Bugs found on real
 - [x] Overlay: friends, chat, notes, session time
 - [ ] Overlay: tested on KDE Wayland
 - [x] Overlay: drawn inside the game's frames (OpenGL preload, Vulkan layer), pinned to the game; takes the game's input while open (SDL2, SDL3, Xlib)
-- [ ] Overlay: tested with real games (DDNet, a Proton game); 32-bit games; Wayland-native input
+- [ ] Overlay: tested with real games (DDNet standalone passes under Xvfb; a Proton game still to try); Wayland-native input
+- [x] Overlay: a bug in it never kills the game (panics caught, overlay switches itself off, calls pass through); a lost Kettle never stalls it
+- [x] Overlay: 32-bit games (i686 library and layer manifest; built in CI)
+- [x] Overlay: playtime, achievements and friend pictures from Kettle; screenshots (F12 and button); hi-dpi; XInput2 raw input
 - [ ] Overlay: draws on top of exclusive-fullscreen games (Vulkan layer; built, untested)
-- [ ] Overlay: inside Gamescope (the library is not loaded there; the in-process window is the fallback)
+- [x] Overlay: inside Gamescope (the library is loaded into the game after `--`; command line unit-tested, not run with a real Gamescope)
 - [ ] Overlay: web browser
 - [ ] Overlay: achievements and guides
 - [x] Overlay: FPS counter (drawn by the overlay library; MangoHud inside Gamescope)

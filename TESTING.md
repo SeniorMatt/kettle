@@ -77,7 +77,7 @@ Pick a small game you own (under 2 GB).
 
 ### In-game overlay (Shift+Tab)
 
-The overlay is drawn inside the game's own frames by `libkettle_overlay.so` and takes the game's input while open. The checks below need a real game; the automatic version is `scripts/overlay-test.sh` (a test program under Xvfb, run in CI).
+The overlay is drawn inside the game's own frames by `libkettle_overlay.so` and takes the game's input while open. The checks below need a real game; the automatic version is `scripts/overlay-test.sh` (a test program under Xvfb, run in CI), plus `overlay-gl-vk-test.sh`, `overlay-ddnet-test.sh` and `overlay-kettle-test.sh` (a fake Kettle on the socket: data, avatars, F12 screenshot, lost Kettle).
 
 **DDNet (SDL2, OpenGL or Vulkan backend, relative mouse), owner steps:**
 - [ ] Start DDNet from Kettle (a Linux build, or add the standalone release as a non-Steam game). `ls ~/.local/share/kettle/overlay/` shows `libkettle_overlay.so`; `ls ~/.local/share/vulkan/implicit_layer.d/kettle_overlay.json` exists.
@@ -93,7 +93,13 @@ The overlay is drawn inside the game's own frames by `libkettle_overlay.so` and 
 - [ ] With no game running, Kettle takes no Shift+Tab (it is no longer a global shortcut).
 - [ ] `ls -l $XDG_RUNTIME_DIR/kettle-overlay-*.sock` shows mode `srw-------` while Kettle runs and no file after it exits.
 - [ ] While the overlay is closed and the HUD is off, the game's frame rate is the same with and without it (`KETTLE_OVERLAY_DISABLE=1`).
-- [ ] 32-bit games get no overlay yet (follow-up: an i686 build of the library). Gamescope games use the in-process window.
+- [ ] A 32-bit game (an old Source or Unity game on Steam): Shift+Tab opens the overlay; `ls ~/.local/share/kettle/overlay/` has `libkettle_overlay32.so` and `ls ~/.local/share/vulkan/implicit_layer.d/` has `kettle_overlay_32.json`. The loader may print `wrong ELF class ... cannot be preloaded` on stderr for the copy of the other word size: harmless.
+- [ ] Overlay data from Kettle: Game Overview shows "Total Playtime" like the library does (plus this session), the Achievements panel shows unlocked / total and the recent ones (open the game's page in Kettle once), friends show their pictures, the account row shows yours.
+- [ ] F12 (and TAKE SCREENSHOT in the overlay) saves a PNG of the game without the overlay to `~/Pictures/Kettle/<game>/`, the game does not see F12. Try an OpenGL game and a Vulkan / Proton one; the terminal prints `[overlay] screenshot saved: ...`.
+- [ ] Hi-dpi: on a 2x screen (KDE Wayland, SDL game with high-dpi on) the overlay has the same size as on a 1x screen and the mouse hits what it points at.
+- [ ] Games that read mouse input with XInput2 raw events (many Wine games): while the overlay is open the game's view does not turn; after closing it does again.
+- [ ] Break the overlay on purpose (not for owners): `KETTLE_OVERLAY_DISABLE=1` is the off switch; a panic inside the library prints `[kettle-overlay] disabled for this process: ...` and the game goes on without it.
+- [ ] Stop Kettle (`kill -STOP`) while a game runs and the overlay is open: the game does not stutter; `kill -CONT` and the data catches up.
 
 #### Gamescope (Settings > Run games in Gamescope; `sr-cli launch <appid> --dry-run --gamescope`)
 Needs `gamescope` installed (`sudo apt install gamescope`). Never tried in a real session yet; test on KDE Wayland first.
@@ -103,7 +109,7 @@ Needs `gamescope` installed (`sudo apt install gamescope`). Never tried in a rea
 - [ ] Window / Borderless / Windowed, game resolution lower than the window with FSR, NIS and Nearest: the picture is scaled. Sharpness changes the FSR look.
 - [ ] Frame rate limit: the game is capped (turn the performance overlay on to see it). With the cap only on the performance overlay, it still caps (through Gamescope) and does not cap twice.
 - [ ] Performance overlay on with `mangoapp` installed: one HUD, drawn by Gamescope; `MANGOHUD=1` is not in the command. Without `mangoapp`: the usual in-game HUD.
-- [ ] Overlay in Gamescope: the library is not loaded there; Games > Show overlay opens the in-process window.
+- [ ] Overlay in Gamescope: Shift+Tab opens the overlay inside the Gamescope window (`sr-cli launch <appid> --dry-run --gamescope --overlay` shows `env LD_PRELOAD=... KETTLE_OVERLAY=1 ...` after the display file and no `LD_PRELOAD` for Gamescope itself). Not tried with a real Gamescope yet.
 - [ ] Mouse: a game that loses the mouse works with "Always grab the mouse" on. Note which games need it.
 - [ ] HDR only with the switch on and an HDR screen. Adaptive sync only with the switch on.
 - [ ] NVIDIA: Gamescope needs a recent driver and `nvidia-drm.modeset=1`; note any black window, missing cursor or crash and the driver version.

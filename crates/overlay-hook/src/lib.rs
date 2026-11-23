@@ -9,14 +9,17 @@
 //! * `sdl`, `xlib`: input hooks that feed it and release and restore the game's grabs and cursor.
 //! * `gl`, `vk`: renderers that draw just before the game's swap or present.
 //! * `real`: finding the real functions behind the hooks, and the `dlsym` hook.
+//! * `shot`: screenshots (the renderers read the frame back, a thread writes the PNG).
 //! * `ipc`: the socket to Kettle.
 #![allow(clippy::missing_safety_doc, clippy::missing_transmute_annotations)]
 
 pub mod gl;
+pub mod guard;
 pub mod input;
 pub mod ipc;
 pub mod real;
 pub mod sdl;
+pub mod shot;
 pub mod state;
 pub mod vk;
 pub mod xlib;

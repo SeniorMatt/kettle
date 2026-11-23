@@ -95,13 +95,14 @@ pub unsafe extern "C" fn dlsym(handle: *mut c_void, name: *const c_char) -> *mut
     if p.is_null() || name.is_null() {
         return p;
     }
-    match find(unsafe { CStr::from_ptr(name) }) {
-        Some(slot) => {
+    // Once the overlay is off, lookups give the real functions (the hooks pass through anyway).
+    let ours = crate::guard::run("dlsym", || {
+        find(unsafe { CStr::from_ptr(name) }).map(|slot| {
             slot.set_real(p as usize);
             slot.ours as *mut c_void
-        }
-        None => p,
-    }
+        })
+    });
+    ours.flatten().unwrap_or(p)
 }
 
 /// A function from a library that may be loaded privately (so `RTLD_NEXT` cannot see it): behind us first,
@@ -136,7 +137,11 @@ macro_rules! hooks {
                     return unsafe { ::std::mem::zeroed() };
                 };
                 let $real: unsafe extern "C" fn($($t),*) -> $r = unsafe { ::std::mem::transmute::<usize, _>(p) };
-                $body
+                // Our code runs guarded; on a panic (or once the overlay is off) the real function is called.
+                match $crate::guard::run(stringify!($name), || -> $r { $body }) {
+                    Some(r) => r,
+                    None => unsafe { $real($($a),*) },
+                }
             }
         )*
         pub mod slots {

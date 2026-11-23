@@ -4261,6 +4261,7 @@ dependencies = [
  "egui_glow",
  "libc",
  "naga",
+ "png",
  "sr-overlay-proto",
  "sr-overlay-ui",
 ]

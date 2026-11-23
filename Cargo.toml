@@ -20,4 +20,5 @@ debug = false
 lto = "thin"
 codegen-units = 4
 strip = true
-panic = "abort"
+# No `panic = "abort"` here: the overlay library (loaded into games) catches its own panics so that a bug in it
+# never kills the game, and Cargo ignores a per-package panic setting. See crates/overlay-hook/src/guard.rs.

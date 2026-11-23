@@ -452,13 +452,21 @@ pub fn user_wrapped(user: &Parsed) -> bool {
 const SHIM: &str = r#"printf '%s' "$DISPLAY" > "$1.tmp" && mv -f "$1.tmp" "$1"; shift; exec "$@""#;
 
 /// Put Gamescope in front of the whole plan.
-pub fn apply(plan: &mut LaunchPlan, l: &Launch) {
+///
+/// `child_env` are variables for the game only, not for Gamescope (the in-game overlay's library and socket):
+/// they are set by `env` right in front of the game's command, behind the shim, so Gamescope and the shim's
+/// shell never load them.
+pub fn apply(plan: &mut LaunchPlan, l: &Launch, child_env: &[(String, String)]) {
     let mut a = args(&l.settings, l.mangoapp, l.fps());
     a.push("--".into());
     let inner = std::iter::once(plan.program.to_string_lossy().into_owned()).chain(plan.args.drain(..));
     if let Some(file) = &l.display_file {
         a.extend(["/bin/sh", "-c", SHIM, "kettle-gamescope"].map(String::from));
         a.push(file.to_string_lossy().into_owned());
+    }
+    if !child_env.is_empty() {
+        a.push("env".into());
+        a.extend(child_env.iter().map(|(k, v)| format!("{k}={v}")));
     }
     a.extend(inner);
     plan.program = l.binary.clone();
@@ -615,7 +623,7 @@ mod tests {
     #[test]
     fn wraps_the_whole_command_behind_the_shim() {
         let mut p = plan();
-        apply(&mut p, &launch(on()));
+        apply(&mut p, &launch(on()), &[]);
         assert_eq!(p.program, PathBuf::from("/usr/bin/gamescope"));
         assert_eq!(
             p.args[..9],
@@ -635,7 +643,7 @@ mod tests {
         p.args = parsed.args.clone();
         crate::launch_opts::apply(&mut p, &parsed);
         assert_eq!(p.program, PathBuf::from("gamemoderun"));
-        apply(&mut p, &launch(on()));
+        apply(&mut p, &launch(on()), &[]);
         let at = p.args.iter().position(|a| a == "/run/u/d.display").unwrap();
         assert_eq!(p.args[at + 1], "gamemoderun", "the wrapper is the first thing the shim starts");
         assert_eq!(p.env.get("FOO").map(String::as_str), Some("1"));
@@ -644,11 +652,32 @@ mod tests {
     }
 
     #[test]
+    fn overlay_variables_reach_the_game_not_gamescope() {
+        let mut p = plan();
+        let kid = vec![
+            ("KETTLE_OVERLAY".to_string(), "1".to_string()),
+            ("LD_PRELOAD".to_string(), "/o/libkettle_overlay.so".to_string()),
+        ];
+        apply(&mut p, &launch(on()), &kid);
+        // gamescope args -- sh -c SHIM name file env K=V ... program ...
+        let at = p.args.iter().position(|a| a == "/run/u/d.display").unwrap();
+        assert_eq!(
+            p.args[at + 1..at + 4],
+            strs(&["env", "KETTLE_OVERLAY=1", "LD_PRELOAD=/o/libkettle_overlay.so"])[..]
+        );
+        assert_eq!(p.args[at + 4], "/rt/run", "the game's own command follows");
+        assert!(
+            !p.env.contains_key("LD_PRELOAD") && !p.env.contains_key("KETTLE_OVERLAY"),
+            "gamescope itself gets none"
+        );
+    }
+
+    #[test]
     fn without_a_display_file_there_is_no_shim() {
         let mut p = plan();
         let mut l = launch(on());
         l.display_file = None;
-        apply(&mut p, &l);
+        apply(&mut p, &l, &[]);
         assert_eq!(p.args[..3], strs(&["-f", "--", "/rt/run"])[..]);
     }
 
@@ -682,10 +711,10 @@ mod tests {
     #[test]
     fn hdr_sets_the_dxvk_variable() {
         let mut p = plan();
-        apply(&mut p, &launch(GamescopeSettings { hdr: true, ..on() }));
+        apply(&mut p, &launch(GamescopeSettings { hdr: true, ..on() }), &[]);
         assert_eq!(p.env.get("DXVK_HDR").map(String::as_str), Some("1"));
         let mut p = plan();
-        apply(&mut p, &launch(on()));
+        apply(&mut p, &launch(on()), &[]);
         assert!(!p.env.contains_key("DXVK_HDR"));
     }
 
