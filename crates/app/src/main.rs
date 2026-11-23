@@ -19,6 +19,8 @@ struct App {
     started: Instant,
     first_frame_logged: bool,
     timings: bool,
+    library_logged: bool,
+    image_logged: bool,
     /// Frames drawn since the last report (a quiet UI draws almost none).
     frames: u32,
     last_report: Instant,
@@ -164,6 +166,17 @@ impl eframe::App for App {
                 (self.frames, self.last_report) = (0, Instant::now());
             }
         }
+        if self.timings {
+            let ms = self.started.elapsed().as_secs_f64() * 1e3;
+            if !self.library_logged && !self.client.state().games.is_empty() {
+                self.library_logged = true;
+                eprintln!("[timing] library loaded after {ms:.0} ms ({} games)", self.client.state().games.len());
+            }
+            if !self.image_logged && sr_ui::first_image_shown() {
+                self.image_logged = true;
+                eprintln!("[timing] first images shown after {ms:.0} ms");
+            }
+        }
         if self.timings && !self.first_frame_logged {
             self.first_frame_logged = true;
             eprintln!("[timing] first frame after {:.0} ms", self.started.elapsed().as_secs_f64() * 1e3);
@@ -200,7 +213,7 @@ fn main() -> eframe::Result {
         return result;
     }
     let started = Instant::now();
-    let timings = std::env::var_os("KETTLE_TIMINGS").is_some();
+    let timings = std::env::var_os("KETTLE_TIMING").is_some() || std::env::var_os("KETTLE_TIMINGS").is_some();
     let options = eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
         viewport: egui::ViewportBuilder::default()
@@ -246,6 +259,8 @@ fn main() -> eframe::Result {
                 started,
                 first_frame_logged: false,
                 timings,
+                library_logged: false,
+                image_logged: false,
                 frames: 0,
                 last_report: Instant::now(),
                 hotkey,

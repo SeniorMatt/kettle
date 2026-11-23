@@ -49,6 +49,11 @@ use sr_client::{Client, CollCmd, Command, ConnectionStatus, Screen};
 use sr_model::AppId;
 
 pub use overlay_panel::{OverlayPanel, PanelOutput};
+
+/// True once the first cover image has been uploaded (for the KETTLE_TIMING log).
+pub fn first_image_shown() -> bool {
+    textures::FIRST_IMAGE.load(std::sync::atomic::Ordering::Relaxed)
+}
 pub(crate) use settings_page::SettingsTab;
 
 /// A page change asked for by a dialog or a page (handled once per frame by [`AppUi`]).
@@ -193,6 +198,17 @@ impl AppUi {
                             _ => SettingsTab::Account,
                         };
                         self.navigate(ctx, Nav::Settings(tab), client);
+                    }
+                    "collection" => {
+                        let c = &client.state().collections;
+                        let id = [sr_client::FAVORITE, sr_client::HIDDEN]
+                            .into_iter()
+                            .map(|id| (id.to_string(), c.title(id).unwrap_or_default().to_string()))
+                            .chain(c.sections.iter().map(|s| (s.id.clone(), s.name.clone())))
+                            .find(|(_, n)| n.eq_ignore_ascii_case(arg))
+                            .map(|(id, _)| id);
+                        client.send(Command::Select(None));
+                        client.send(Command::Collections(CollCmd::Show(id)));
                     }
                     "downloads" => self.navigate(ctx, Nav::Downloads, client),
                     "store" => self.goto(Tab::Store, client),

@@ -23,6 +23,10 @@ fn harness() -> Harness<'static, State> {
             std::env::set_var("XDG_DATA_HOME", dir.join("data"));
             std::env::set_var("XDG_CACHE_HOME", dir.join("cache"));
             std::env::set_var("KETTLE_DEMO", "60");
+            std::env::set_var(
+                "KETTLE_DEMO_APPS",
+                "440,570,730,105600,252490,292030,367520,413150,504230,620,1091500,1145360,1245620,374320",
+            );
         }
     });
     let client = Client::new(Arc::new(|| {})).expect("client");
@@ -78,7 +82,8 @@ fn clicking_a_list_row_selects_the_game() {
     // The list starts with section headers; one of the first rows is a game.
     let mut hit = false;
     for i in 0..12 {
-        press(&mut h, row(i));
+        // The left edge is a header's fold square and part of a game row.
+        press(&mut h, pos2(14.0, row(i).y));
         if h.state().1.state().selected.is_some() {
             hit = true;
             break;
@@ -88,15 +93,29 @@ fn clicking_a_list_row_selects_the_game() {
 }
 
 #[test]
-fn collection_header_folds_when_clicked_anywhere() {
+fn collection_header_toggle_folds_only() {
     let mut h = harness();
     let before = h.state().0.sidebar.collapsed_count();
-    // Row 0 is a header: click it far from the left edge, nowhere near a button.
-    press(&mut h, pos2(200.0, row(0).y));
-    let folded = h.state().0.sidebar.collapsed_count();
-    assert_eq!(folded, before + 1, "the header did not fold");
-    press(&mut h, pos2(60.0, row(0).y));
-    assert_eq!(h.state().0.sidebar.collapsed_count(), before, "the header did not unfold");
+    // Row 0 is a header: its fold square sits at the left.
+    press(&mut h, pos2(14.0, row(0).y));
+    assert_eq!(h.state().0.sidebar.collapsed_count(), before + 1, "the toggle did not fold");
+    assert!(h.state().1.state().collections.selected.is_none(), "the toggle must not open the collection");
+    press(&mut h, pos2(14.0, row(0).y));
+    assert_eq!(h.state().0.sidebar.collapsed_count(), before, "the toggle did not unfold");
+}
+
+#[test]
+fn collection_header_click_opens_the_page_and_back_returns() {
+    let mut h = harness();
+    let before = h.state().0.sidebar.collapsed_count();
+    // The title, and the empty space at the right, open the collection and do not fold it.
+    for x in [70.0, 200.0] {
+        press(&mut h, pos2(x, row(0).y));
+        assert_eq!(h.state().0.sidebar.collapsed_count(), before, "a header click must not fold");
+        assert!(h.state().1.state().collections.selected.is_some(), "a header click should open the collection");
+        press(&mut h, pos2(23.0, 46.0));
+        assert!(h.state().1.state().collections.selected.is_none(), "back should return to all games");
+    }
 }
 
 #[test]
@@ -138,4 +157,28 @@ fn escape_closes_only_the_open_popup() {
     assert!(!egui::Popup::is_any_open(&h.ctx), "Escape should close the popup");
     assert_eq!(h.state().1.state().selected, selected, "Escape must not also go back");
     assert_eq!(h.state().0.tab, Tab::Library);
+}
+
+#[test]
+fn collection_page_shows_the_games_of_the_clicked_section() {
+    let mut h = harness();
+    for id in ["favorite", "uc-demo", "all"] {
+        if id == "all" {
+            // Fold the sections above so the "all" header is within view.
+            for above in ["favorite", "uc-demo"] {
+                let i = h.state().0.sidebar.header_row(above).expect("header");
+                press(&mut h, pos2(14.0, row(i).y));
+            }
+        }
+        let i = h.state().0.sidebar.header_row(id).unwrap_or_else(|| panic!("no header {id}"));
+        press(&mut h, pos2(120.0, row(i).y));
+        let (app, client, _) = h.state();
+        let mut want = app.sidebar.section_apps(client, id);
+        let mut got = app.library.shown_apps(client);
+        want.sort_unstable();
+        got.sort_unstable();
+        assert!(!want.is_empty(), "section {id} is empty");
+        assert_eq!(got, want, "the page for {id} differs from its sidebar section");
+        press(&mut h, pos2(23.0, 46.0));
+    }
 }
