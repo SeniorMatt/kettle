@@ -298,7 +298,7 @@ fn start_size() -> [f32; 2] {
 
 #[cfg(test)]
 mod tests {
-    use super::play_arg;
+    use super::{doctor_arg, play_arg};
 
     fn args(list: &[&str]) -> impl Iterator<Item = String> {
         list.iter().map(|s| s.to_string()).collect::<Vec<_>>().into_iter()
