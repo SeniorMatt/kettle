@@ -6,6 +6,7 @@
 //!   sr-cli proton install <source> <tag|latest> --dir D
 //!   sr-cli proton remove <name> --dir D
 //!   sr-cli appinfo <appid>                             launch entries from Steam's appinfo.vdf
+//!   sr-cli launch <appid> --doctor [--deep]         the plan plus a check of every file it needs (paste it in a bug report)
 //!   sr-cli launch <appid> [--dry-run] [--windows] [--tool NAME] [--hud off|fps|graph|full] [--proton-log] [--gamescope|--no-gamescope] [-- args...]
 
 use crate::compat::{self, ToolOrigin};
@@ -235,12 +236,20 @@ fn cmd_launch(args: &[String]) -> Result<()> {
     if let Some(id) = p.tool.as_ref().and_then(|(n, _)| compat::discover().into_iter().find(|t| &t.internal_name == n))
         && let Some(need) = id.require_tool_appid
     {
-        let used = p.plan.env.get("STEAM_COMPAT_TOOL_PATHS").is_some_and(|v| v.contains("SteamLinuxRuntime"));
+        let wanted = run::runtime_for(&id, &compat::discover()).map(|rt| rt.dir.to_string_lossy().into_owned());
+        let used = wanted
+            .is_some_and(|w| p.plan.env.get("STEAM_COMPAT_TOOL_PATHS").is_some_and(|v| v.split(':').any(|d| d == w)));
         println!("container:   {} ({})", run::runtime_name(need), if used { "used" } else { "NOT found/used" });
     }
     // Only looks; the client is never started from here.
     let needs = crate::steam_client::uses_steamworks(&p.install_dir);
     println!("needs the Steam client: {}, running: {}", yn(needs), yn(crate::steam_client::is_running()));
+    if args.iter().any(|a| a == "--doctor") {
+        println!("---- checks ----");
+        let deep = args.iter().any(|a| a == "--deep");
+        print!("{}", crate::doctor::report(appid, &opts, deep));
+        return Ok(());
+    }
     if args.iter().any(|a| a == "--dry-run") {
         return Ok(());
     }

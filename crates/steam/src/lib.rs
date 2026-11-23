@@ -10,6 +10,7 @@ pub mod community;
 pub mod compat;
 pub mod compat_cli;
 pub mod content;
+pub mod doctor;
 pub mod friends;
 pub mod gamepage;
 pub mod gamescope;
