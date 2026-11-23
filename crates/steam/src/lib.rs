@@ -18,6 +18,7 @@ pub mod http_dl;
 pub mod launch_opts;
 pub mod local;
 pub mod mangohud;
+pub mod overlay_hook;
 pub mod proton_releases;
 pub mod redact;
 pub mod run;

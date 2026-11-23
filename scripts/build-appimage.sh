@@ -16,11 +16,13 @@ if [ ! -x "$TOOL" ]; then
 fi
 
 CARGO="${CARGO:-$(command -v cargo || echo "$HOME/.cargo/bin/cargo")}"
-CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}" "$CARGO" build --release -p kettle
+CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}" "$CARGO" build --release -p kettle -p sr-overlay-hook
 
 APPDIR="$(mktemp -d)/kettle.AppDir"
 mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications" "$APPDIR/usr/share/icons/hicolor/scalable/apps"
 cp target/release/kettle "$APPDIR/usr/bin/"
+# The in-game overlay library; Kettle copies it to its data folder at start (crates/app/src/overlay_install.rs).
+mkdir -p "$APPDIR/usr/lib" && cp target/release/libkettle_overlay.so "$APPDIR/usr/lib/"
 cp packaging/kettle.desktop "$APPDIR/" && cp packaging/kettle.desktop "$APPDIR/usr/share/applications/"
 cp packaging/kettle.svg "$APPDIR/" && cp packaging/kettle.svg "$APPDIR/usr/share/icons/hicolor/scalable/apps/"
 cat > "$APPDIR/AppRun" <<'RUN'
