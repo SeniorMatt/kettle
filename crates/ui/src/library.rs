@@ -78,6 +78,12 @@ pub struct LibraryView {
 const RECENT_MAX: usize = 12;
 
 impl LibraryView {
+    /// App ids the page shows, in order (for tests).
+    #[cfg(test)]
+    pub(crate) fn shown_apps(&self, client: &Client) -> Vec<u32> {
+        self.order.iter().map(|&i| client.state().games[i].app_id.0).collect()
+    }
+
     fn cover(&self) -> Vec2 {
         let w = if self.cover_w <= 0.0 { theme::CAPSULE_W } else { self.cover_w };
         Vec2::new(w, (w * 1.5).round())
@@ -328,7 +334,12 @@ impl LibraryView {
                 let app = games[i].app_id.0;
                 self.show.pass(&games[i])
                     && match members {
-                        Some(m) => m.contains(&app),
+                        // Hidden games stay out of every collection but the Hidden one, as in the sidebar.
+                        Some(m) => {
+                            m.contains(&app)
+                                && (colls.selected.as_deref() == Some(sr_client::HIDDEN)
+                                    || !colls.hidden.contains(&app))
+                        }
                         None => !colls.hidden.contains(&app),
                     }
             })

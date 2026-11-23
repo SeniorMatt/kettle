@@ -141,6 +141,27 @@ impl SidebarView {
         self.collapsed.len()
     }
 
+    /// Row index of the header `id` (for tests).
+    #[cfg(test)]
+    pub(crate) fn header_row(&self, id: &str) -> Option<usize> {
+        self.rows.iter().position(|r| matches!(r, Row::Header { id: h, .. } if h == id))
+    }
+
+    /// App ids listed under the header `id` (for tests; the section must be unfolded).
+    #[cfg(test)]
+    pub(crate) fn section_apps(&self, client: &Client, id: &str) -> Vec<u32> {
+        let mut out = Vec::new();
+        let mut inside = false;
+        for row in &self.rows {
+            match row {
+                Row::Header { id: h, .. } => inside = h == id,
+                Row::Game(i) if inside => out.push(client.state().games[*i].app_id.0),
+                Row::Game(_) => {}
+            }
+        }
+        out
+    }
+
     pub fn show(&mut self, ui: &mut Ui, client: &mut Client, tex: &mut Textures, ov: &mut Overlays, library_rev: u64) {
         let frame = egui::Frame::new().fill(theme::BG_SIDEBAR);
         egui::Panel::left("sidebar")

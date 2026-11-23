@@ -23,6 +23,10 @@ fn harness() -> Harness<'static, State> {
             std::env::set_var("XDG_DATA_HOME", dir.join("data"));
             std::env::set_var("XDG_CACHE_HOME", dir.join("cache"));
             std::env::set_var("KETTLE_DEMO", "60");
+            std::env::set_var(
+                "KETTLE_DEMO_APPS",
+                "440,570,730,105600,252490,292030,367520,413150,504230,620,1091500,1145360,1245620,374320",
+            );
         }
     });
     let client = Client::new(Arc::new(|| {})).expect("client");
@@ -153,4 +157,28 @@ fn escape_closes_only_the_open_popup() {
     assert!(!egui::Popup::is_any_open(&h.ctx), "Escape should close the popup");
     assert_eq!(h.state().1.state().selected, selected, "Escape must not also go back");
     assert_eq!(h.state().0.tab, Tab::Library);
+}
+
+#[test]
+fn collection_page_shows_the_games_of_the_clicked_section() {
+    let mut h = harness();
+    for id in ["favorite", "uc-demo", "all"] {
+        if id == "all" {
+            // Fold the sections above so the "all" header is within view.
+            for above in ["favorite", "uc-demo"] {
+                let i = h.state().0.sidebar.header_row(above).expect("header");
+                press(&mut h, pos2(14.0, row(i).y));
+            }
+        }
+        let i = h.state().0.sidebar.header_row(id).unwrap_or_else(|| panic!("no header {id}"));
+        press(&mut h, pos2(120.0, row(i).y));
+        let (app, client, _) = h.state();
+        let mut want = app.sidebar.section_apps(client, id);
+        let mut got = app.library.shown_apps(client);
+        want.sort_unstable();
+        got.sort_unstable();
+        assert!(!want.is_empty(), "section {id} is empty");
+        assert_eq!(got, want, "the page for {id} differs from its sidebar section");
+        press(&mut h, pos2(23.0, 46.0));
+    }
 }
