@@ -64,7 +64,7 @@ The library above is a demo library, filled with well-known games.
 ## Progress
 
 <!-- status:start -->
-**Kettle does 46.2% of what Steam does** (78 of 169 features; see the [roadmap](docs/roadmap.md)).
+**Kettle does 48.3% of what Steam does** (86 of 178 features; see the [roadmap](docs/roadmap.md)).
 
 ![Status](docs/images/status.svg)
 
@@ -74,12 +74,12 @@ The library above is a demo library, filled with well-known games.
 | Library | 16/24 (67%) |
 | Store | 8/11 (73%) |
 | Downloads | 10/18 (56%) |
-| Play | 8/21 (38%) |
+| Play | 11/25 (44%) |
 | Compatibility | 6/7 (86%) |
 | Cloud | 3/4 (75%) |
 | Friends | 3/9 (33%) |
 | Chat | 1/8 (12%) |
-| Overlay | 3/8 (38%) |
+| Overlay | 8/13 (62%) |
 | Community | 0/15 (0%) |
 | Notifications | 1/3 (33%) |
 | Settings | 6/12 (50%) |
