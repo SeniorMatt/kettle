@@ -31,7 +31,7 @@ fn main() {
         assert_eq!(SDL_Init(0x20), 0, "SDL_Init");
         let title = CString::new("sdl_test").unwrap();
         // SDL_WINDOW_OPENGL = 2
-        let win = SDL_CreateWindow(title.as_ptr(), 100, 100, 640, 480, 2);
+        let win = SDL_CreateWindow(title.as_ptr(), 0, 0, 1280, 720, 2);
         assert!(!win.is_null(), "window");
         let ctx = SDL_GL_CreateContext(win);
         assert!(!ctx.is_null(), "context");
@@ -53,15 +53,12 @@ fn main() {
                 let i32_at = |o: usize| i32::from_le_bytes(ev[o..o + 4].try_into().unwrap());
                 match ty {
                     0x300 | 0x301 => {
-                        writeln!(log, "key {} scancode={}", if ty == 0x300 { "down" } else { "up" }, i32_at(16)).unwrap()
+                        writeln!(log, "key {} scancode={}", if ty == 0x300 { "down" } else { "up" }, i32_at(16))
+                            .unwrap()
                     }
-                    0x401 | 0x402 => writeln!(
-                        log,
-                        "button {} {}",
-                        if ty == 0x401 { "down" } else { "up" },
-                        ev[16]
-                    )
-                    .unwrap(),
+                    0x401 | 0x402 => {
+                        writeln!(log, "button {} {}", if ty == 0x401 { "down" } else { "up" }, ev[16]).unwrap()
+                    }
                     0x400 => writeln!(log, "motion xrel={} yrel={}", i32_at(28), i32_at(32)).unwrap(),
                     0x100 => {
                         writeln!(log, "quit").unwrap();
@@ -71,7 +68,7 @@ fn main() {
                 }
             }
             // What the game believes about itself (stays "1 1 0" whatever the overlay does).
-            if frame % 30 == 0 {
+            if frame.is_multiple_of(30) {
                 writeln!(
                     log,
                     "state rel={} grab={} cursor={}",

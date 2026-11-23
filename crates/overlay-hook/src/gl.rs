@@ -1,9 +1,9 @@
 //! OpenGL: draws the overlay with egui_glow just before the game's buffer swap, and puts every piece of GL
 //! state it touched back, so the game cannot tell.
 
-use crate::state::{self, Claim};
 use crate::hooks;
 use crate::real;
+use crate::state::{self, Claim};
 use egui_glow::Painter;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -213,7 +213,12 @@ impl Raw {
             (self.bind_buffer)(GL_ARRAY_BUFFER, s.array_buffer as c_uint);
             (self.bind_buffer)(GL_ELEMENT_ARRAY_BUFFER, s.element_buffer as c_uint);
             (self.bind_buffer)(GL_PIXEL_UNPACK_BUFFER, s.unpack_buffer as c_uint);
-            (self.blend_func_separate)(s.blend[0] as c_uint, s.blend[1] as c_uint, s.blend[2] as c_uint, s.blend[3] as c_uint);
+            (self.blend_func_separate)(
+                s.blend[0] as c_uint,
+                s.blend[1] as c_uint,
+                s.blend[2] as c_uint,
+                s.blend[3] as c_uint,
+            );
             (self.blend_equation_separate)(s.blend[4] as c_uint, s.blend[5] as c_uint);
             (self.scissor)(s.scissor[0], s.scissor[1], s.scissor[2], s.scissor[3]);
             (self.viewport)(s.viewport[0], s.viewport[1], s.viewport[2], s.viewport[3]);
@@ -280,6 +285,8 @@ unsafe fn draw(ctx: usize, get: &dyn Fn(&CStr) -> Fp, size: impl FnOnce() -> (u3
             }
         });
         let Some(s) = entry else { return };
+        static FIRST: std::sync::Once = std::sync::Once::new();
+        FIRST.call_once(|| crate::ipc::log("gl first frame"));
         unsafe {
             let saved = s.raw.save();
             s.raw.prepare();
@@ -323,8 +330,7 @@ unsafe fn glx_swap(dpy: *mut c_void, drawable: c_ulong) {
         let q = real::sym_in(c"glXQueryDrawable", &[c"libGL.so.1", c"libGLX.so.0"]);
         let (mut w, mut h) = (0u32, 0u32);
         if let Some(q) = q {
-            let q: unsafe extern "C" fn(*mut c_void, c_ulong, c_int, *mut c_uint) =
-                unsafe { std::mem::transmute(q) };
+            let q: unsafe extern "C" fn(*mut c_void, c_ulong, c_int, *mut c_uint) = unsafe { std::mem::transmute(q) };
             unsafe {
                 q(dpy, drawable, 0x801D, &mut w);
                 q(dpy, drawable, 0x801E, &mut h);

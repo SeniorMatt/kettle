@@ -7,8 +7,10 @@ fn main() {
     let info = naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
         .validate(&module)
         .expect("shader is valid");
-    let words = naga::back::spv::write_vec(&module, &info, &naga::back::spv::Options::default(), None)
-        .expect("shader compiles to SPIR-V");
+    // Positions are already in Vulkan's clip space (y down): naga must not flip them.
+    let mut options = naga::back::spv::Options::default();
+    options.flags.remove(naga::back::spv::WriterFlags::ADJUST_COORDINATE_SPACE);
+    let words = naga::back::spv::write_vec(&module, &info, &options, None).expect("shader compiles to SPIR-V");
     let bytes: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
     let out = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("overlay.spv");
     std::fs::write(out, bytes).expect("write SPIR-V");

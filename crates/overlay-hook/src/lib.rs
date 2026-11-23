@@ -10,7 +10,7 @@
 //! * `gl`, `vk`: renderers that draw just before the game's swap or present.
 //! * `real`: finding the real functions behind the hooks, and the `dlsym` hook.
 //! * `ipc`: the socket to Kettle.
-#![allow(clippy::missing_safety_doc)]
+#![allow(clippy::missing_safety_doc, clippy::missing_transmute_annotations)]
 
 pub mod gl;
 pub mod input;

@@ -66,12 +66,21 @@ pub struct OverlayData {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "k", rename_all = "snake_case")]
 pub enum OverlayAction {
-    OpenUrl { url: String },
-    OpenChat { id: u64 },
-    SendChat { id: u64, text: String },
+    OpenUrl {
+        url: String,
+    },
+    OpenChat {
+        id: u64,
+    },
+    SendChat {
+        id: u64,
+        text: String,
+    },
     Screenshot,
     /// The performance monitor was switched on or off in the overlay.
-    PerfHud { on: bool },
+    PerfHud {
+        on: bool,
+    },
     /// The user asked to close the overlay (the library closes it).
     Close,
 }

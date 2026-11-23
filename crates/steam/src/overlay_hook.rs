@@ -10,6 +10,13 @@ use crate::run::{LaunchPlan, Runner};
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
+/// The installed library and Kettle's socket, as a launch needs them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Hook {
+    pub lib: PathBuf,
+    pub socket: Option<PathBuf>,
+}
+
 pub const LIB_NAME: &str = "libkettle_overlay.so";
 pub const LAYER_FILE: &str = "kettle_overlay.json";
 /// The folder the library is installed to.

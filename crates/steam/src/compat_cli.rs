@@ -190,6 +190,11 @@ fn cmd_launch(args: &[String]) -> Result<()> {
         hud: cli_hud(appid, flag_value(&args[..split], "--hud")),
         proton_log: args[..split].iter().any(|a| a == "--proton-log"),
         gamescope: cli_gamescope(appid, &args[..split]),
+        // `--overlay` shows the plan with the in-game overlay library added (the installed one).
+        overlay: args[..split].iter().any(|a| a == "--overlay").then(|| crate::overlay_hook::Hook {
+            lib: crate::overlay_hook::installed_lib(),
+            socket: None,
+        }),
     };
     let p = run::prepare(appid, &opts)?;
     println!("{} ({appid}){}", p.name, if p.installed { "" } else { "  [not installed: path is where it would go]" });

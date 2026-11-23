@@ -148,11 +148,13 @@ Nothing here is a promise. The owner decides what comes next. Bugs found on real
 - [x] Overlay: Shift+Tab while our game runs (X11)
 - [x] Overlay: friends, chat, notes, session time
 - [ ] Overlay: tested on KDE Wayland
-- [ ] Overlay: draws on top of exclusive-fullscreen games (Vulkan layer)
-- [ ] Overlay: overlay inside Gamescope (STEAM_OVERLAY window on Gamescope's X server; written, not tried in a session)
+- [x] Overlay: drawn inside the game's frames (OpenGL preload, Vulkan layer), pinned to the game; takes the game's input while open (SDL2, SDL3, Xlib)
+- [ ] Overlay: tested with real games (DDNet, a Proton game); 32-bit games; Wayland-native input
+- [ ] Overlay: draws on top of exclusive-fullscreen games (Vulkan layer; built, untested)
+- [ ] Overlay: inside Gamescope (the library is not loaded there; the in-process window is the fallback)
 - [ ] Overlay: web browser
 - [ ] Overlay: achievements and guides
-- [x] Overlay: FPS counter (MangoHud)
+- [x] Overlay: FPS counter (drawn by the overlay library; MangoHud inside Gamescope)
 
 ## Community
 

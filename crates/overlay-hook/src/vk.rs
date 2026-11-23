@@ -83,11 +83,12 @@ struct Inst {
 
 type SetLoaderData = unsafe extern "system" fn(vk::Device, *mut c_void) -> vk::Result;
 
+#[allow(dead_code)]
 struct Dev {
     handle: vk::Device,
     phys: vk::PhysicalDevice,
     ash: ash::Device,
-    swapchain: ash::khr::swapchain::Device,
+    swapchain: ash::khr::swapchain::DeviceFn,
     inst: Arc<Inst>,
     gdpa: vk::PFN_vkGetDeviceProcAddr,
     set_loader_data: Option<SetLoaderData>,
@@ -239,7 +240,7 @@ unsafe extern "system" fn create_instance(
             return r;
         }
         let handle = *out;
-        let ash = ash::Instance::load(&vk::StaticFn { get_instance_proc_addr: gipa }, handle);
+        let ash = ash::Instance::load(&ash::StaticFn { get_instance_proc_addr: gipa }, handle);
         let inst = Arc::new(Inst { handle, ash, gipa });
         reg().instances.insert(key_of(handle.as_raw()), inst);
         vk::Result::SUCCESS
@@ -283,8 +284,9 @@ unsafe extern "system" fn create_device(
             return r;
         }
         let handle = *out;
-        let ash = ash::Device::load(inst.ash.fp_v1_0(), handle);
-        let swapchain = ash::khr::swapchain::Device::new(&inst.ash, &ash);
+        let load = |n: &CStr| std::mem::transmute::<vk::PFN_vkVoidFunction, *const c_void>(gdpa(handle, n.as_ptr()));
+        let ash = ash::Device::load_with(load, handle);
+        let swapchain = ash::khr::swapchain::DeviceFn::load(load);
         let dev = Arc::new(Dev {
             handle,
             phys,
@@ -330,7 +332,11 @@ unsafe extern "system" fn get_device_queue(device: vk::Device, family: u32, inde
     }
 }
 
-unsafe extern "system" fn get_device_queue2(device: vk::Device, info: *const vk::DeviceQueueInfo2<'_>, out: *mut vk::Queue) {
+unsafe extern "system" fn get_device_queue2(
+    device: vk::Device,
+    info: *const vk::DeviceQueueInfo2<'_>,
+    out: *mut vk::Queue,
+) {
     let Some(dev) = dev_of(device.as_raw()) else { return };
     unsafe {
         (dev.ash.fp_v1_1().get_device_queue2)(device, info, out);
@@ -361,7 +367,7 @@ unsafe extern "system" fn create_swapchain(
         let drawable = target_kind(orig.image_format).is_some();
         let mut with_usage = *orig;
         with_usage.image_usage |= vk::ImageUsageFlags::COLOR_ATTACHMENT;
-        let create = dev.swapchain.fp().create_swapchain_khr;
+        let create = dev.swapchain.create_swapchain_khr;
         let mut usable = drawable;
         let mut r = if drawable { create(device, &with_usage, alloc, out) } else { vk::Result::ERROR_UNKNOWN };
         if r != vk::Result::SUCCESS {
@@ -402,7 +408,7 @@ unsafe extern "system" fn destroy_swapchain(
             s.destroy(&dev);
         }
         state::release(swapchain.as_raw() as usize);
-        (dev.swapchain.fp().destroy_swapchain_khr)(device, swapchain, alloc);
+        (dev.swapchain.destroy_swapchain_khr)(device, swapchain, alloc);
     }
 }
 
@@ -422,7 +428,7 @@ impl Swap {
 unsafe extern "system" fn queue_present(queue: vk::Queue, info: *const vk::PresentInfoKHR<'_>) -> vk::Result {
     // Which device? A queue's dispatch key is its device's.
     let Some(dev) = dev_of(queue.as_raw()) else { return vk::Result::ERROR_DEVICE_LOST };
-    let present = dev.swapchain.fp().queue_present_khr;
+    let present = dev.swapchain.queue_present_khr;
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe { draw(&dev, queue, &*info) }));
     match result {
         Ok(Some(sem)) => unsafe {
@@ -482,12 +488,14 @@ unsafe fn draw(dev: &Arc<Dev>, queue: vk::Queue, info: &vk::PresentInfoKHR<'_>) 
     if claim == Claim::New
         && let Some(r) = guard.as_mut()
     {
-        r.reset_textures(dev);
+        unsafe { r.reset_textures(dev) };
     }
     if guard.is_none() {
-        *guard = Renderer::new(dev, family);
+        *guard = unsafe { Renderer::new(dev, family) };
     }
     let r = guard.as_mut()?;
+    static FIRST: std::sync::Once = std::sync::Once::new();
+    FIRST.call_once(|| crate::ipc::log("vk first frame"));
     if r.family != family {
         return None;
     }
@@ -496,6 +504,8 @@ unsafe fn draw(dev: &Arc<Dev>, queue: vk::Queue, info: &vk::PresentInfoKHR<'_>) 
 }
 
 // ---- the renderer ------------------------------------------------------------------------------------------
+
+unsafe impl Send for Buf {}
 
 struct Buf {
     buf: vk::Buffer,
@@ -509,6 +519,7 @@ struct Tex {
     mem: vk::DeviceMemory,
     view: vk::ImageView,
     set: vk::DescriptorSet,
+    #[allow(dead_code)]
     size: [usize; 2],
 }
 
@@ -547,9 +558,8 @@ struct Renderer {
 const SPIRV: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/overlay.spv"));
 
 fn find_memory(dev: &Dev, bits: u32, want: vk::MemoryPropertyFlags) -> Option<u32> {
-    (0..dev.mem.memory_type_count).find(|i| {
-        bits & (1 << i) != 0 && dev.mem.memory_types[*i as usize].property_flags.contains(want)
-    })
+    (0..dev.mem.memory_type_count)
+        .find(|i| bits & (1 << i) != 0 && dev.mem.memory_types[*i as usize].property_flags.contains(want))
 }
 
 impl Buf {
@@ -564,7 +574,10 @@ impl Buf {
             };
             let mem = dev
                 .ash
-                .allocate_memory(&vk::MemoryAllocateInfo::default().allocation_size(req.size).memory_type_index(ty), None)
+                .allocate_memory(
+                    &vk::MemoryAllocateInfo::default().allocation_size(req.size).memory_type_index(ty),
+                    None,
+                )
                 .ok();
             let Some(mem) = mem else {
                 dev.ash.destroy_buffer(buf, None);
@@ -642,7 +655,8 @@ impl Renderer {
                 .create_descriptor_set_layout(&vk::DescriptorSetLayoutCreateInfo::default().bindings(&bindings), None)
                 .ok()?;
             let sets = [layout_set];
-            let layout_pipe = a.create_pipeline_layout(&vk::PipelineLayoutCreateInfo::default().set_layouts(&sets), None).ok()?;
+            let layout_pipe =
+                a.create_pipeline_layout(&vk::PipelineLayoutCreateInfo::default().set_layouts(&sets), None).ok()?;
             let sizes = [
                 vk::DescriptorPoolSize::default().ty(vk::DescriptorType::SAMPLED_IMAGE).descriptor_count(128),
                 vk::DescriptorPoolSize::default().ty(vk::DescriptorType::SAMPLER).descriptor_count(128),
@@ -669,7 +683,9 @@ impl Renderer {
             };
             let sampler_linear = mk(vk::Filter::LINEAR).ok()?;
             let sampler_nearest = mk(vk::Filter::NEAREST).ok()?;
-            let words: Vec<u32> = SPIRV.chunks_exact(4).map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
+            let words: Vec<u32> = (0..SPIRV.len() / 4)
+                .map(|i| u32::from_le_bytes([SPIRV[i * 4], SPIRV[i * 4 + 1], SPIRV[i * 4 + 2], SPIRV[i * 4 + 3]]))
+                .collect();
             let shader = a.create_shader_module(&vk::ShaderModuleCreateInfo::default().code(&words), None).ok()?;
             let cmds = a
                 .allocate_command_buffers(
@@ -683,11 +699,21 @@ impl Renderer {
             for cmd in cmds {
                 // Command buffers the layer makes itself need the loader's dispatch pointer set.
                 if let Some(set) = dev.set_loader_data {
-                    set(dev.handle, cmd.as_raw() as *mut c_void);
+                    let _ = set(dev.handle, cmd.as_raw() as *mut c_void);
                 }
-                let fence = a.create_fence(&vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED), None).ok()?;
+                let fence =
+                    a.create_fence(&vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED), None).ok()?;
                 let sem = a.create_semaphore(&vk::SemaphoreCreateInfo::default(), None).ok()?;
-                frames.push(FrameRes { cmd, fence, sem, vertices: None, indices: None, staging: None, used: false, garbage_tex: vec![] });
+                frames.push(FrameRes {
+                    cmd,
+                    fence,
+                    sem,
+                    vertices: None,
+                    indices: None,
+                    staging: None,
+                    used: false,
+                    garbage_tex: vec![],
+                });
             }
             Some(Renderer {
                 family,
@@ -773,8 +799,11 @@ impl Renderer {
                 .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
                 .initial_layout(vk::ImageLayout::PRESENT_SRC_KHR)
                 .final_layout(vk::ImageLayout::PRESENT_SRC_KHR)];
-            let refs = [vk::AttachmentReference::default().attachment(0).layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)];
-            let sub = [vk::SubpassDescription::default().pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS).color_attachments(&refs)];
+            let refs =
+                [vk::AttachmentReference::default().attachment(0).layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)];
+            let sub = [vk::SubpassDescription::default()
+                .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
+                .color_attachments(&refs)];
             let dep = [vk::SubpassDependency::default()
                 .src_subpass(vk::SUBPASS_EXTERNAL)
                 .dst_subpass(0)
@@ -782,27 +811,57 @@ impl Renderer {
                 .dst_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
                 .src_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
                 .dst_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_READ | vk::AccessFlags::COLOR_ATTACHMENT_WRITE)];
-            let pass = a.create_render_pass(&vk::RenderPassCreateInfo::default().attachments(&att).subpasses(&sub).dependencies(&dep), None).ok()?;
+            let pass = a
+                .create_render_pass(
+                    &vk::RenderPassCreateInfo::default().attachments(&att).subpasses(&sub).dependencies(&dep),
+                    None,
+                )
+                .ok()?;
             let mk = |entry: &CStr| -> Option<vk::Pipeline> {
                 let stages = [
-                    vk::PipelineShaderStageCreateInfo::default().stage(vk::ShaderStageFlags::VERTEX).module(self.shader).name(c"vs_main"),
-                    vk::PipelineShaderStageCreateInfo::default().stage(vk::ShaderStageFlags::FRAGMENT).module(self.shader).name(entry),
+                    vk::PipelineShaderStageCreateInfo::default()
+                        .stage(vk::ShaderStageFlags::VERTEX)
+                        .module(self.shader)
+                        .name(c"vs_main"),
+                    vk::PipelineShaderStageCreateInfo::default()
+                        .stage(vk::ShaderStageFlags::FRAGMENT)
+                        .module(self.shader)
+                        .name(entry),
                 ];
-                let binds = [vk::VertexInputBindingDescription::default().binding(0).stride(20).input_rate(vk::VertexInputRate::VERTEX)];
+                let binds = [vk::VertexInputBindingDescription::default()
+                    .binding(0)
+                    .stride(20)
+                    .input_rate(vk::VertexInputRate::VERTEX)];
                 let attrs = [
-                    vk::VertexInputAttributeDescription::default().location(0).binding(0).format(vk::Format::R32G32_SFLOAT).offset(0),
-                    vk::VertexInputAttributeDescription::default().location(1).binding(0).format(vk::Format::R32G32_SFLOAT).offset(8),
-                    vk::VertexInputAttributeDescription::default().location(2).binding(0).format(vk::Format::R8G8B8A8_UNORM).offset(16),
+                    vk::VertexInputAttributeDescription::default()
+                        .location(0)
+                        .binding(0)
+                        .format(vk::Format::R32G32_SFLOAT)
+                        .offset(0),
+                    vk::VertexInputAttributeDescription::default()
+                        .location(1)
+                        .binding(0)
+                        .format(vk::Format::R32G32_SFLOAT)
+                        .offset(8),
+                    vk::VertexInputAttributeDescription::default()
+                        .location(2)
+                        .binding(0)
+                        .format(vk::Format::R8G8B8A8_UNORM)
+                        .offset(16),
                 ];
-                let vi = vk::PipelineVertexInputStateCreateInfo::default().vertex_binding_descriptions(&binds).vertex_attribute_descriptions(&attrs);
-                let ia = vk::PipelineInputAssemblyStateCreateInfo::default().topology(vk::PrimitiveTopology::TRIANGLE_LIST);
+                let vi = vk::PipelineVertexInputStateCreateInfo::default()
+                    .vertex_binding_descriptions(&binds)
+                    .vertex_attribute_descriptions(&attrs);
+                let ia =
+                    vk::PipelineInputAssemblyStateCreateInfo::default().topology(vk::PrimitiveTopology::TRIANGLE_LIST);
                 let vp = vk::PipelineViewportStateCreateInfo::default().viewport_count(1).scissor_count(1);
                 let rs = vk::PipelineRasterizationStateCreateInfo::default()
                     .polygon_mode(vk::PolygonMode::FILL)
                     .cull_mode(vk::CullModeFlags::NONE)
                     .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
                     .line_width(1.0);
-                let ms = vk::PipelineMultisampleStateCreateInfo::default().rasterization_samples(vk::SampleCountFlags::TYPE_1);
+                let ms = vk::PipelineMultisampleStateCreateInfo::default()
+                    .rasterization_samples(vk::SampleCountFlags::TYPE_1);
                 let blend_att = [vk::PipelineColorBlendAttachmentState::default()
                     .blend_enable(true)
                     .src_color_blend_factor(vk::BlendFactor::ONE)
@@ -827,7 +886,9 @@ impl Renderer {
                     .layout(self.layout_pipe)
                     .render_pass(pass)
                     .subpass(0)];
-                a.create_graphics_pipelines(vk::PipelineCache::null(), &ci, None).ok().and_then(|v| v.into_iter().next())
+                a.create_graphics_pipelines(vk::PipelineCache::null(), &ci, None)
+                    .ok()
+                    .and_then(|v| v.into_iter().next())
             };
             let (Some(gamma), Some(linear)) = (mk(c"fs_gamma"), mk(c"fs_linear")) else {
                 a.destroy_render_pass(pass, None);
@@ -870,7 +931,11 @@ impl Renderer {
 
             let cmd = self.frames[slot].cmd;
             a.reset_command_buffer(cmd, vk::CommandBufferResetFlags::empty()).ok()?;
-            a.begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)).ok()?;
+            a.begin_command_buffer(
+                cmd,
+                &vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
+            )
+            .ok()?;
 
             self.upload_textures(dev, slot, cmd, frame)?;
 
@@ -910,7 +975,13 @@ impl Renderer {
                 if x1 <= x0 || y1 <= y0 {
                     continue;
                 }
-                draws.push(Draw { first, count: m.indices.len() as u32, base, clip: [x0, y0, x1 - x0, y1 - y0], tex: m.texture_id });
+                draws.push(Draw {
+                    first,
+                    count: m.indices.len() as u32,
+                    base,
+                    clip: [x0, y0, x1 - x0, y1 - y0],
+                    tex: m.texture_id,
+                });
             }
             if !draws.is_empty() {
                 let f = &mut self.frames[slot];
@@ -923,16 +994,30 @@ impl Renderer {
                 std::ptr::copy_nonoverlapping(idx.as_ptr().cast::<u8>(), f.indices.as_ref()?.ptr, idx.len() * 4);
                 a.cmd_begin_render_pass(
                     cmd,
-                    &vk::RenderPassBeginInfo::default().render_pass(pass).framebuffer(fb).render_area(vk::Rect2D { offset: vk::Offset2D::default(), extent }),
+                    &vk::RenderPassBeginInfo::default()
+                        .render_pass(pass)
+                        .framebuffer(fb)
+                        .render_area(vk::Rect2D { offset: vk::Offset2D::default(), extent }),
                     vk::SubpassContents::INLINE,
                 );
                 a.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, pipeline);
-                a.cmd_set_viewport(cmd, 0, &[vk::Viewport { x: 0.0, y: 0.0, width: fw, height: fh, min_depth: 0.0, max_depth: 1.0 }]);
+                a.cmd_set_viewport(
+                    cmd,
+                    0,
+                    &[vk::Viewport { x: 0.0, y: 0.0, width: fw, height: fh, min_depth: 0.0, max_depth: 1.0 }],
+                );
                 a.cmd_bind_vertex_buffers(cmd, 0, &[f.vertices.as_ref()?.buf], &[0]);
                 a.cmd_bind_index_buffer(cmd, f.indices.as_ref()?.buf, 0, vk::IndexType::UINT32);
                 for d in &draws {
                     let Some(t) = self.textures.get(&d.tex) else { continue };
-                    a.cmd_bind_descriptor_sets(cmd, vk::PipelineBindPoint::GRAPHICS, self.layout_pipe, 0, &[t.set], &[]);
+                    a.cmd_bind_descriptor_sets(
+                        cmd,
+                        vk::PipelineBindPoint::GRAPHICS,
+                        self.layout_pipe,
+                        0,
+                        &[t.set],
+                        &[],
+                    );
                     a.cmd_set_scissor(
                         cmd,
                         0,
@@ -948,7 +1033,7 @@ impl Renderer {
             a.end_command_buffer(cmd).ok()?;
 
             // Free the textures egui is done with after this frame.
-            let freed: Vec<egui::TextureId> = frame.textures.free.drain(..).collect();
+            let freed: Vec<egui::TextureId> = std::mem::take(&mut frame.textures.free).into_iter().collect();
             for id in freed {
                 if let Some(t) = self.textures.remove(&id) {
                     self.frames[slot].garbage_tex.push(t);
@@ -960,7 +1045,11 @@ impl Renderer {
             let stages = vec![vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT; waits.len()];
             let cmds = [cmd];
             let sems = [f.sem];
-            let submit = vk::SubmitInfo::default().wait_semaphores(waits).wait_dst_stage_mask(&stages).command_buffers(&cmds).signal_semaphores(&sems);
+            let submit = vk::SubmitInfo::default()
+                .wait_semaphores(waits)
+                .wait_dst_stage_mask(&stages)
+                .command_buffers(&cmds)
+                .signal_semaphores(&sems);
             if a.queue_submit(queue, &[submit], f.fence).is_err() {
                 // Leave the fence signaled so the slot is reusable.
                 let _ = a.queue_submit(queue, &[], f.fence);
@@ -971,7 +1060,13 @@ impl Renderer {
         }
     }
 
-    unsafe fn framebuffer(&mut self, dev: &Dev, swapchain: vk::SwapchainKHR, index: u32, pass: vk::RenderPass) -> Option<vk::Framebuffer> {
+    unsafe fn framebuffer(
+        &mut self,
+        dev: &Dev,
+        swapchain: vk::SwapchainKHR,
+        index: u32,
+        pass: vk::RenderPass,
+    ) -> Option<vk::Framebuffer> {
         unsafe {
             let mut swaps = lock(&dev.swaps);
             let s = swaps.get_mut(&swapchain.as_raw())?;
@@ -982,7 +1077,17 @@ impl Renderer {
                 for v in s.views.drain(..) {
                     dev.ash.destroy_image_view(v, None);
                 }
-                s.images = dev.swapchain.get_swapchain_images(swapchain).ok()?;
+                let mut n = 0u32;
+                let get = dev.swapchain.get_swapchain_images_khr;
+                if get(dev.handle, swapchain, &mut n, std::ptr::null_mut()) != vk::Result::SUCCESS {
+                    return None;
+                }
+                let mut imgs = vec![vk::Image::null(); n as usize];
+                if get(dev.handle, swapchain, &mut n, imgs.as_mut_ptr()) != vk::Result::SUCCESS {
+                    return None;
+                }
+                imgs.truncate(n as usize);
+                s.images = imgs;
                 for img in &s.images {
                     let view = dev
                         .ash
@@ -1006,7 +1111,12 @@ impl Renderer {
                     let fb = dev
                         .ash
                         .create_framebuffer(
-                            &vk::FramebufferCreateInfo::default().render_pass(pass).attachments(&views).width(s.extent.width).height(s.extent.height).layers(1),
+                            &vk::FramebufferCreateInfo::default()
+                                .render_pass(pass)
+                                .attachments(&views)
+                                .width(s.extent.width)
+                                .height(s.extent.height)
+                                .layers(1),
                             None,
                         )
                         .ok()?;
@@ -1019,7 +1129,13 @@ impl Renderer {
     }
 
     /// Apply egui's texture changes: create or update images, with the pixels going through a staging buffer.
-    unsafe fn upload_textures(&mut self, dev: &Dev, slot: usize, cmd: vk::CommandBuffer, frame: &mut state::Frame) -> Option<()> {
+    unsafe fn upload_textures(
+        &mut self,
+        dev: &Dev,
+        slot: usize,
+        cmd: vk::CommandBuffer,
+        frame: &mut state::Frame,
+    ) -> Option<()> {
         unsafe {
             let a = &dev.ash;
             let mut items: Vec<(egui::TextureId, egui::epaint::ImageDelta)> = Vec::new();
@@ -1066,17 +1182,18 @@ impl Renderer {
                     }
                 };
                 let t = self.textures.get(&id)?;
-                let barrier = |old: vk::ImageLayout, new: vk::ImageLayout, src: vk::AccessFlags, dst: vk::AccessFlags| {
-                    vk::ImageMemoryBarrier::default()
-                        .old_layout(old)
-                        .new_layout(new)
-                        .src_access_mask(src)
-                        .dst_access_mask(dst)
-                        .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                        .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                        .image(t.image)
-                        .subresource_range(sub)
-                };
+                let barrier =
+                    |old: vk::ImageLayout, new: vk::ImageLayout, src: vk::AccessFlags, dst: vk::AccessFlags| {
+                        vk::ImageMemoryBarrier::default()
+                            .old_layout(old)
+                            .new_layout(new)
+                            .src_access_mask(src)
+                            .dst_access_mask(dst)
+                            .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                            .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                            .image(t.image)
+                            .subresource_range(sub)
+                    };
                 a.cmd_pipeline_barrier(
                     cmd,
                     vk::PipelineStageFlags::FRAGMENT_SHADER | vk::PipelineStageFlags::TOP_OF_PIPE,
@@ -1084,7 +1201,12 @@ impl Renderer {
                     vk::DependencyFlags::empty(),
                     &[],
                     &[],
-                    &[barrier(old_layout, vk::ImageLayout::TRANSFER_DST_OPTIMAL, vk::AccessFlags::SHADER_READ, vk::AccessFlags::TRANSFER_WRITE)],
+                    &[barrier(
+                        old_layout,
+                        vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                        vk::AccessFlags::SHADER_READ,
+                        vk::AccessFlags::TRANSFER_WRITE,
+                    )],
                 );
                 let region = vk::BufferImageCopy::default()
                     .buffer_offset(offset as u64)
@@ -1104,7 +1226,12 @@ impl Renderer {
                     vk::DependencyFlags::empty(),
                     &[],
                     &[],
-                    &[barrier(vk::ImageLayout::TRANSFER_DST_OPTIMAL, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL, vk::AccessFlags::TRANSFER_WRITE, vk::AccessFlags::SHADER_READ)],
+                    &[barrier(
+                        vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                        vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                        vk::AccessFlags::TRANSFER_WRITE,
+                        vk::AccessFlags::SHADER_READ,
+                    )],
                 );
                 offset += bytes.len();
             }
@@ -1133,7 +1260,12 @@ impl Renderer {
             let req = a.get_image_memory_requirements(image);
             let ty = find_memory(dev, req.memory_type_bits, vk::MemoryPropertyFlags::DEVICE_LOCAL)
                 .or_else(|| find_memory(dev, req.memory_type_bits, vk::MemoryPropertyFlags::empty()))?;
-            let mem = a.allocate_memory(&vk::MemoryAllocateInfo::default().allocation_size(req.size).memory_type_index(ty), None).ok()?;
+            let mem = a
+                .allocate_memory(
+                    &vk::MemoryAllocateInfo::default().allocation_size(req.size).memory_type_index(ty),
+                    None,
+                )
+                .ok()?;
             a.bind_image_memory(image, mem, 0).ok()?;
             let view = a
                 .create_image_view(
@@ -1152,14 +1284,28 @@ impl Renderer {
                 )
                 .ok()?;
             let layouts = [self.layout_set];
-            let set = a.allocate_descriptor_sets(&vk::DescriptorSetAllocateInfo::default().descriptor_pool(self.desc_pool).set_layouts(&layouts)).ok()?[0];
+            let set = a
+                .allocate_descriptor_sets(
+                    &vk::DescriptorSetAllocateInfo::default().descriptor_pool(self.desc_pool).set_layouts(&layouts),
+                )
+                .ok()?[0];
             let sampler = if mag == egui::TextureFilter::Nearest { self.sampler_nearest } else { self.sampler_linear };
-            let img_info = [vk::DescriptorImageInfo::default().image_view(view).image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)];
+            let img_info = [vk::DescriptorImageInfo::default()
+                .image_view(view)
+                .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)];
             let samp_info = [vk::DescriptorImageInfo::default().sampler(sampler)];
             a.update_descriptor_sets(
                 &[
-                    vk::WriteDescriptorSet::default().dst_set(set).dst_binding(0).descriptor_type(vk::DescriptorType::SAMPLED_IMAGE).image_info(&img_info),
-                    vk::WriteDescriptorSet::default().dst_set(set).dst_binding(1).descriptor_type(vk::DescriptorType::SAMPLER).image_info(&samp_info),
+                    vk::WriteDescriptorSet::default()
+                        .dst_set(set)
+                        .dst_binding(0)
+                        .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+                        .image_info(&img_info),
+                    vk::WriteDescriptorSet::default()
+                        .dst_set(set)
+                        .dst_binding(1)
+                        .descriptor_type(vk::DescriptorType::SAMPLER)
+                        .image_info(&samp_info),
                 ],
                 &[],
             );

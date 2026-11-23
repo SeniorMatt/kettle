@@ -53,7 +53,7 @@ fn core() -> &'static Mutex<Core> {
             data.me = "demo".into();
             data.hud = std::env::var("KETTLE_OVERLAY_DEMO").is_ok_and(|v| v == "hud");
         }
-        let c = Core {
+        let mut c = Core {
             input: Input::default(),
             ctx: Context::default(),
             data,
@@ -65,6 +65,11 @@ fn core() -> &'static Mutex<Core> {
             worst_last: Duration::ZERO,
             last_present: None,
         };
+        if std::env::var("KETTLE_OVERLAY_DEMO").is_ok_and(|v| v == "open") {
+            // Tests: start open (for programs whose input the hooks do not see, like vkcube's xcb).
+            c.input.set_open(true);
+            OPEN.store(true, Ordering::Release);
+        }
         ipc::start();
         Mutex::new(c)
     })
@@ -108,6 +113,7 @@ pub fn toggle() {
 pub fn publish(c: &Core) {
     let open = c.input.is_open();
     if OPEN.swap(open, Ordering::AcqRel) != open {
+        ipc::log(&format!("visible open={open}"));
         ipc::send(&sr_overlay_proto::FromHook::Visible { open });
     }
 }
@@ -215,22 +221,23 @@ impl Core {
         if !open {
             events.clear();
         }
-        let raw = egui::RawInput {
+        let mut raw = egui::RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(width as f32, height as f32))),
             time: Some(self.start.elapsed().as_secs_f64()),
-            modifiers: self.input.modifiers(),
             events,
-            focused: true,
             ..Default::default()
         };
+        raw.viewports.entry(egui::ViewportId::ROOT).or_default().focused = Some(true);
         let mut actions: Vec<UiAction> = Vec::new();
         let hud = self.hud();
         let ui_data = if open { Some(self.ui_data()) } else { None };
         let state = &mut self.state;
-        let out = self.ctx.run(raw, |ctx| match &ui_data {
-            Some(d) => actions = sr_overlay_ui::show(ctx, d, state),
-            None => sr_overlay_ui::show_hud(ctx, &hud),
-        });
+        self.ctx.begin_pass(raw);
+        match &ui_data {
+            Some(d) => actions = sr_overlay_ui::show(&self.ctx, d, state),
+            None => sr_overlay_ui::show_hud(&self.ctx, &hud),
+        }
+        let out = self.ctx.end_pass();
         let mut close = false;
         for a in actions {
             match a {

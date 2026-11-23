@@ -62,7 +62,7 @@ fn real_dlsym() -> DlsymFn {
     let mut found = 0usize;
     for v in [c"GLIBC_2.34", c"GLIBC_2.2.5", c"GLIBC_2.17", c"GLIBC_2.0"] {
         let f = unsafe { libc::dlvsym(libc::RTLD_NEXT, c"dlsym".as_ptr(), v.as_ptr()) } as usize;
-        if f != 0 && f != dlsym as usize {
+        if f != 0 && f != dlsym as *const () as usize {
             found = f;
             break;
         }
@@ -72,11 +72,7 @@ fn real_dlsym() -> DlsymFn {
 }
 
 fn all_slots() -> impl Iterator<Item = &'static Slot> {
-    crate::gl::slots::ALL
-        .iter()
-        .chain(crate::sdl::slots::ALL.iter())
-        .chain(crate::xlib::slots::ALL.iter())
-        .copied()
+    crate::gl::slots::ALL.iter().chain(crate::sdl::slots::ALL.iter()).chain(crate::xlib::slots::ALL.iter()).copied()
 }
 
 pub fn find(name: &CStr) -> Option<&'static Slot> {

@@ -5,10 +5,10 @@
 //! SDL2 and SDL3 export the same names with different event layouts; which one is loaded is told by an SDL3-only
 //! function. SDL3 is written from its public headers and has not been run (no SDL3 here).
 
-use crate::state;
 use crate::hooks;
 use crate::input::{KeyKind, Verdict};
 use crate::real::Slot;
+use crate::state;
 use egui::{Key, Pos2};
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -36,6 +36,7 @@ fn sdl3() -> bool {
 }
 
 /// The game's view of the mouse, kept while the overlay has changed the real one.
+#[derive(Clone)]
 struct Game {
     /// SDL2: one global relative mode; SDL3: per window (key 0 is used for SDL2).
     relative: HashMap<usize, bool>,
@@ -64,6 +65,8 @@ fn store() -> &'static Mutex<Game> {
 }
 
 thread_local! {
+    /// `on_open` is changing the real state: SDL's own calls into our hooks must not count as the game's.
+    static APPLYING: Cell<bool> = const { Cell::new(false) };
     /// We are inside one of our own SDL hooks (SDL's functions call each other through the symbol table).
     static INSIDE: Cell<u32> = const { Cell::new(0) };
 }
@@ -167,7 +170,11 @@ unsafe fn filter(ev: *const u8) -> Verdict {
         }
         SDL_MOUSEMOTION => {
             let (x, y) = unsafe {
-                if three { (rd::<f32>(ev, 28), rd::<f32>(ev, 32)) } else { (rd::<i32>(ev, 20) as f32, rd::<i32>(ev, 24) as f32) }
+                if three {
+                    (rd::<f32>(ev, 28), rd::<f32>(ev, 32))
+                } else {
+                    (rd::<i32>(ev, 20) as f32, rd::<i32>(ev, 24) as f32)
+                }
             };
             state::with_input(|i| i.motion(Pos2::new(x, y)))
         }
@@ -183,7 +190,11 @@ unsafe fn filter(ev: *const u8) -> Verdict {
         }
         SDL_MOUSEWHEEL => {
             let (dx, dy) = unsafe {
-                if three { (rd::<f32>(ev, 24), rd::<f32>(ev, 28)) } else { (rd::<i32>(ev, 16) as f32, rd::<i32>(ev, 20) as f32) }
+                if three {
+                    (rd::<f32>(ev, 24), rd::<f32>(ev, 28))
+                } else {
+                    (rd::<i32>(ev, 16) as f32, rd::<i32>(ev, 20) as f32)
+                }
             };
             state::with_input(|i| i.wheel(dx, dy))
         }
@@ -223,11 +234,16 @@ pub fn on_open(open: bool, pos: Pos2) {
         return;
     }
     let three = sdl3();
-    let g = game();
+    let g = game().clone();
+    log_real(if open { "before-open" } else { "before-close" }, &g, three);
+    APPLYING.with(|a| a.set(true));
+    let mut new_pos = None;
     unsafe {
         if open {
             if three {
-                if let Some(f) = real::<unsafe extern "C" fn(*mut c_void, bool) -> bool>(&slots::SDL_SetWindowRelativeMouseMode) {
+                if let Some(f) =
+                    real::<unsafe extern "C" fn(*mut c_void, bool) -> bool>(&slots::SDL_SetWindowRelativeMouseMode)
+                {
                     for (win, on) in &g.relative {
                         if *on {
                             f(*win as *mut c_void, false);
@@ -237,14 +253,17 @@ pub fn on_open(open: bool, pos: Pos2) {
                 if let Some(f) = real::<unsafe extern "C" fn() -> bool>(&slots::SDL_ShowCursor) {
                     f();
                 }
-                if let Some(f) = real::<unsafe extern "C" fn(*mut c_void, bool) -> bool>(&slots::SDL_SetWindowMouseGrab) {
+                if let Some(f) = real::<unsafe extern "C" fn(*mut c_void, bool) -> bool>(&slots::SDL_SetWindowMouseGrab)
+                {
                     for (win, on) in &g.mouse_grab {
                         if *on {
                             f(*win as *mut c_void, false);
                         }
                     }
                 }
-                if let Some(f) = real::<unsafe extern "C" fn(*mut c_void, bool) -> bool>(&slots::SDL_SetWindowKeyboardGrab) {
+                if let Some(f) =
+                    real::<unsafe extern "C" fn(*mut c_void, bool) -> bool>(&slots::SDL_SetWindowKeyboardGrab)
+                {
                     for (win, on) in &g.kbd_grab {
                         if *on {
                             f(*win as *mut c_void, false);
@@ -272,11 +291,11 @@ pub fn on_open(open: bool, pos: Pos2) {
                 {
                     f();
                 }
-                if let Some(f) = real::<unsafe extern "C" fn(*mut c_int, *mut c_int) -> u32>(&slots::SDL_GetMouseState) {
+                if let Some(f) = real::<unsafe extern "C" fn(*mut c_int, *mut c_int) -> u32>(&slots::SDL_GetMouseState)
+                {
                     let (mut x, mut y) = (0, 0);
                     f(&mut x, &mut y);
-                    drop(g);
-                    state::lock().input.set_pos(Pos2::new(x as f32, y as f32));
+                    new_pos = Some(Pos2::new(x as f32, y as f32));
                 }
             }
         } else if three {
@@ -285,7 +304,8 @@ pub fn on_open(open: bool, pos: Pos2) {
                     f(*win as *mut c_void, *on);
                 }
             }
-            if let Some(f) = real::<unsafe extern "C" fn(*mut c_void, bool) -> bool>(&slots::SDL_SetWindowKeyboardGrab) {
+            if let Some(f) = real::<unsafe extern "C" fn(*mut c_void, bool) -> bool>(&slots::SDL_SetWindowKeyboardGrab)
+            {
                 for (win, on) in &g.kbd_grab {
                     f(*win as *mut c_void, *on);
                 }
@@ -295,7 +315,9 @@ pub fn on_open(open: bool, pos: Pos2) {
             {
                 f();
             }
-            if let Some(f) = real::<unsafe extern "C" fn(*mut c_void, bool) -> bool>(&slots::SDL_SetWindowRelativeMouseMode) {
+            if let Some(f) =
+                real::<unsafe extern "C" fn(*mut c_void, bool) -> bool>(&slots::SDL_SetWindowRelativeMouseMode)
+            {
                 for (win, on) in &g.relative {
                     if *on {
                         f(*win as *mut c_void, true);
@@ -305,7 +327,8 @@ pub fn on_open(open: bool, pos: Pos2) {
         } else {
             if let Some(f) = real::<unsafe extern "C" fn(*mut c_void, c_int)>(&slots::SDL_SetWindowGrab) {
                 for win in g.mouse_grab.keys().chain(g.kbd_grab.keys()).collect::<std::collections::BTreeSet<_>>() {
-                    let on = g.mouse_grab.get(win).copied().unwrap_or(false) || g.kbd_grab.get(win).copied().unwrap_or(false);
+                    let on = g.mouse_grab.get(win).copied().unwrap_or(false)
+                        || g.kbd_grab.get(win).copied().unwrap_or(false);
                     f(*win as *mut c_void, on as c_int);
                 }
             }
@@ -324,7 +347,30 @@ pub fn on_open(open: bool, pos: Pos2) {
             }
         }
     }
+    APPLYING.with(|a| a.set(false));
+    if let Some(p) = new_pos {
+        state::lock().input.set_pos(p);
+    }
+    log_real(if open { "open" } else { "close" }, &g, three);
     let _ = pos;
+}
+
+fn applying() -> bool {
+    APPLYING.with(Cell::get)
+}
+
+/// For the tests: what the real SDL state is after switching (read with SDL's own functions).
+fn log_real(label: &str, g: &Game, three: bool) {
+    if std::env::var_os("KETTLE_OVERLAY_LOG").is_none() || three {
+        return;
+    }
+    unsafe {
+        let rel = real::<unsafe extern "C" fn() -> c_int>(&slots::SDL_GetRelativeMouseMode).map(|f| f());
+        let cursor = real::<unsafe extern "C" fn(c_int) -> c_int>(&slots::SDL_ShowCursor).map(|f| f(-1));
+        let grab = real::<unsafe extern "C" fn(*mut c_void) -> c_int>(&slots::SDL_GetWindowGrab)
+            .map(|f| g.mouse_grab.keys().map(|w| f(*w as *mut c_void)).max().unwrap_or(0));
+        crate::ipc::log(&format!("sdl {label} real rel={rel:?} cursor={cursor:?} grab={grab:?}"));
+    }
 }
 
 hooks! {
@@ -397,6 +443,9 @@ hooks! {
         w
     }
     fn SDL_SetRelativeMouseMode(real; on: c_int) -> c_int {
+        if applying() {
+            return unsafe { real(on) };
+        }
         if state::is_open() {
             game().relative.insert(0, on != 0);
             return 0;
@@ -414,6 +463,9 @@ hooks! {
         unsafe { real() }
     }
     fn SDL_SetWindowRelativeMouseMode(real; win: *mut c_void, on: bool) -> bool {
+        if applying() {
+            return unsafe { real(win, on) };
+        }
         if state::is_open() {
             game().relative.insert(win as usize, on);
             return true;
@@ -431,6 +483,9 @@ hooks! {
         unsafe { real(win) }
     }
     fn SDL_ShowCursor(real; toggle: c_int) -> c_int {
+        if applying() {
+            return unsafe { real(toggle) };
+        }
         if sdl3() {
             // SDL3's SDL_ShowCursor takes nothing and returns a bool.
             if !state::is_open() {
@@ -450,6 +505,9 @@ hooks! {
         unsafe { real(toggle) }
     }
     fn SDL_HideCursor(real; ) -> bool {
+        if applying() {
+            return unsafe { real() };
+        }
         if state::is_open() {
             game().cursor_shown = false;
             return true;
@@ -464,6 +522,9 @@ hooks! {
         unsafe { real() }
     }
     fn SDL_SetWindowGrab(real; win: *mut c_void, on: c_int) -> () {
+        if applying() {
+            return unsafe { real(win, on) };
+        }
         {
             let mut g = game();
             g.mouse_grab.insert(win as usize, on != 0);
@@ -474,6 +535,9 @@ hooks! {
         }
     }
     fn SDL_SetWindowMouseGrab(real; win: *mut c_void, on: c_int) -> c_int {
+        if applying() {
+            return unsafe { real(win, on) };
+        }
         game().mouse_grab.insert(win as usize, on != 0);
         if state::is_open() {
             return if sdl3() { 1 } else { 0 };
@@ -481,6 +545,9 @@ hooks! {
         unsafe { real(win, on) }
     }
     fn SDL_SetWindowKeyboardGrab(real; win: *mut c_void, on: c_int) -> c_int {
+        if applying() {
+            return unsafe { real(win, on) };
+        }
         game().kbd_grab.insert(win as usize, on != 0);
         if state::is_open() {
             return if sdl3() { 1 } else { 0 };
@@ -496,12 +563,18 @@ hooks! {
         unsafe { real(win) }
     }
     fn SDL_StartTextInput(real; win: *mut c_void) -> () {
+        if applying() {
+            return unsafe { real(win) };
+        }
         if !sdl3() {
             game().text_input = true;
         }
         unsafe { real(win) }
     }
     fn SDL_StopTextInput(real; win: *mut c_void) -> () {
+        if applying() {
+            return unsafe { real(win) };
+        }
         if !sdl3() {
             game().text_input = false;
         }

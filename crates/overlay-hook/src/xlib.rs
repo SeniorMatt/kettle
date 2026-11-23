@@ -5,10 +5,10 @@
 //! Programs that create their windows through SDL are handled by the SDL hooks instead (SDL calls Xlib itself,
 //! and swallowing events there would break SDL's own bookkeeping); see `sdl::in_use`.
 
-use crate::state;
 use crate::hooks;
 use crate::input::{KeyKind, Verdict};
 use crate::real;
+use crate::state;
 use egui::{Key, Pos2};
 use std::collections::HashMap;
 use std::ffi::{c_char, c_int, c_uint, c_ulong, c_void};
@@ -116,7 +116,7 @@ unsafe fn filter(ev: *const u8) -> Verdict {
             let keycode: u32 = unsafe { rd(ev, 84) };
             let sym = unsafe {
                 match lib::<unsafe extern "C" fn(*const u8, c_int) -> c_ulong>(c"XLookupKeysym", &[c"libX11.so.6"]) {
-                    Some(l) => l(ev, 0) as u64,
+                    Some(l) => l(ev, 0),
                     None => 0,
                 }
             };
@@ -259,7 +259,17 @@ pub fn on_open(open: bool, _pos: Pos2) {
             }
             // The pointer position for egui.
             if let Some(q) = lib::<
-                unsafe extern "C" fn(Display, Window, *mut Window, *mut Window, *mut c_int, *mut c_int, *mut c_int, *mut c_int, *mut c_uint) -> c_int,
+                unsafe extern "C" fn(
+                    Display,
+                    Window,
+                    *mut Window,
+                    *mut Window,
+                    *mut c_int,
+                    *mut c_int,
+                    *mut c_int,
+                    *mut c_int,
+                    *mut c_uint,
+                ) -> c_int,
             >(c"XQueryPointer", &[c"libX11.so.6"])
             {
                 let (mut r, mut c, mut rx, mut ry, mut wx, mut wy, mut m) = (0, 0, 0, 0, 0, 0, 0);
@@ -274,15 +284,26 @@ pub fn on_open(open: bool, _pos: Pos2) {
             }
         } else {
             if let Some(g) = s.ptr_grab
-                && let Some(gp) = f::<unsafe extern "C" fn(Display, Window, c_int, c_uint, c_int, c_int, Window, c_ulong, c_ulong) -> c_int>(
-                    &slots::XGrabPointer,
-                )
+                && let Some(gp) = f::<
+                    unsafe extern "C" fn(
+                        Display,
+                        Window,
+                        c_int,
+                        c_uint,
+                        c_int,
+                        c_int,
+                        Window,
+                        c_ulong,
+                        c_ulong,
+                    ) -> c_int,
+                >(&slots::XGrabPointer)
             {
                 gp(dpy, g[0], g[1] as c_int, g[2] as c_uint, g[3] as c_int, g[4] as c_int, g[5], g[6], 0);
             }
             if let Some(g) = s.kbd_grab
-                && let Some(gk) =
-                    f::<unsafe extern "C" fn(Display, Window, c_int, c_int, c_int, c_ulong) -> c_int>(&slots::XGrabKeyboard)
+                && let Some(gk) = f::<unsafe extern "C" fn(Display, Window, c_int, c_int, c_int, c_ulong) -> c_int>(
+                    &slots::XGrabKeyboard,
+                )
             {
                 gk(dpy, g[0], g[1] as c_int, g[2] as c_int, g[3] as c_int, 0);
             }

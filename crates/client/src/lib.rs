@@ -32,6 +32,7 @@ mod non_steam;
 mod notes;
 mod notify;
 mod open;
+pub use open::url as open_url;
 mod overlay_proto;
 mod play;
 mod profile;
@@ -571,6 +572,8 @@ impl Drop for Session {
 
 pub struct Client {
     state: State,
+    /// The in-game overlay library and socket that games are started with (set by the app).
+    overlay_hook: Option<sr_steam::overlay_hook::Hook>,
     session: Option<Session>,
     friends: friends::FriendsInner,
     installed: HashMap<u32, local::InstalledApp>,
@@ -614,6 +617,11 @@ pub struct Client {
 }
 
 impl Client {
+    /// The in-game overlay library (and Kettle's socket for it) that games are started with from now on.
+    pub fn set_overlay_hook(&mut self, hook: Option<sr_steam::overlay_hook::Hook>) {
+        self.overlay_hook = hook;
+    }
+
     pub fn new(wake: Waker) -> anyhow::Result<Self> {
         let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build()?;
         let (tx, rx) = mpsc::channel(EVENT_QUEUE);
@@ -662,6 +670,7 @@ impl Client {
             installed: HashMap::new(),
             base_play: HashMap::new(),
             play_stats: play::PlayStats::load(),
+            overlay_hook: None,
             steam_missing: HashMap::new(),
             cloud_ctx: HashMap::new(),
             cloud_choice: HashMap::new(),

@@ -66,13 +66,7 @@ impl Input {
 
     pub fn modifiers(&self) -> Modifiers {
         let ctrl = !self.ctrl.is_empty();
-        Modifiers {
-            alt: !self.alt.is_empty(),
-            ctrl,
-            shift: !self.shift.is_empty(),
-            mac_cmd: false,
-            command: ctrl,
-        }
+        Modifiers { alt: !self.alt.is_empty(), ctrl, shift: !self.shift.is_empty(), mac_cmd: false, command: ctrl }
     }
 
     /// Open or close (also used for a toggle that came from Kettle's menu).
@@ -194,7 +188,12 @@ impl Input {
                 if self.open
                     && let Some(b) = button_of(button)
                 {
-                    self.events.push(Event::PointerButton { pos, button: b, pressed: false, modifiers: self.modifiers() });
+                    self.events.push(Event::PointerButton {
+                        pos,
+                        button: b,
+                        pressed: false,
+                        modifiers: self.modifiers(),
+                    });
                 }
                 return Verdict::Swallow;
             }
@@ -219,6 +218,7 @@ impl Input {
         self.events.push(Event::MouseWheel {
             unit: MouseWheelUnit::Line,
             delta: Vec2::new(dx, dy),
+            phase: egui::TouchPhase::Move,
             modifiers: self.modifiers(),
         });
         Verdict::Swallow
@@ -245,7 +245,11 @@ mod tests {
     #[test]
     fn shift_tab_opens_and_closes_and_the_game_never_sees_tab() {
         let mut i = Input::default();
-        assert_eq!(i.key(TAB, KeyKind::Tab, Some(Key::Tab), true, false).verdict, Verdict::Pass, "plain Tab is the game's");
+        assert_eq!(
+            i.key(TAB, KeyKind::Tab, Some(Key::Tab), true, false).verdict,
+            Verdict::Pass,
+            "plain Tab is the game's"
+        );
         i.key(TAB, KeyKind::Tab, Some(Key::Tab), false, false);
         let s = shift_tab(&mut i);
         assert_eq!(s, KeyStep { verdict: Verdict::Swallow, toggled: Some(true) });
