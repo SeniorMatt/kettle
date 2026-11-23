@@ -65,7 +65,7 @@ fn demo_shots() -> Vec<PathBuf> {
         let path = dir.join(format!("demo-{i}.png"));
         if !path.exists() {
             let img = image::RgbImage::from_fn(448, 252, |x, y| {
-                let block = (x / 56 + y / 42 + i as u32) % 3 == 0;
+                let block = (x / 56 + y / 42 + i as u32).is_multiple_of(3);
                 let dark = [ground[0] / 2 + 40, ground[1] / 2 + 40, ground[2] / 2 + 40];
                 image::Rgb(if y < 120 + 20 * (x / 150) {
                     *sky
