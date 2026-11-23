@@ -240,7 +240,7 @@ fn primary_button(ui: &mut Ui, client: &mut Client, game: &sr_model::Game, ov: &
         return;
     }
     if client.state().starting_steam.contains(&app) {
-        big_button(ui, Glyph::Play, "Starting Steam...", (theme::PAGE_PLAY_A, None), false);
+        big_button(ui, Glyph::Play, crate::settings_steam::starting_label(), (theme::PAGE_PLAY_A, None), false);
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(500));
         return;
     }

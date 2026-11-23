@@ -15,7 +15,6 @@ pub fn background_label(mode: SteamBackground) -> &'static str {
 }
 
 /// The text of the Play button while a game waits for the Steam client.
-#[allow(dead_code)] // the Play button (game_page.rs) is to call it
 pub fn starting_label() -> &'static str {
     "Starting Steam…"
 }
