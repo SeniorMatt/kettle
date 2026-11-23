@@ -139,6 +139,12 @@ fn news_column(ui: &mut Ui, app: AppId, news: &Arc<Vec<NewsItem>>, w: f32, cmds:
     featured(ui, app, latest, w, cmds);
     ui.add_space(38.0);
     heading(ui, "ACTIVITY", w);
+    say_something(ui, w);
+    ui.add_space(21.0);
+    if link(ui, "View Latest News", w) {
+        cmds.push(Command::OpenUrl(sr_client::news_page(app.0)));
+    }
+    ui.add_space(2.0);
     let now = crate::fmt::now_unix();
     let offset = sr_client::local_utc_offset(now);
     let today = day_of(now, offset);
@@ -156,10 +162,44 @@ fn news_column(ui: &mut Ui, app: AppId, news: &Arc<Vec<NewsItem>>, w: f32, cmds:
         }
         news_row(ui, app, item, w, cmds);
     }
-    ui.add_space(14.0);
-    if link(ui, "View Latest News", w) {
-        cmds.push(Command::OpenUrl(sr_client::news_page(app.0)));
+}
+
+/// The field under ACTIVITY. Kettle has no call that posts to the activity feed, so Enter only clears the
+/// field and says so.
+fn say_something(ui: &mut Ui, w: f32) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(w, theme::SAY_H), Sense::hover());
+    ui.painter().rect_filled(rect, 2.0, theme::SAY_BG);
+    let id = egui::Id::new("say-something");
+    let mut text: String = ui.data(|d| d.get_temp(id)).unwrap_or_default();
+    let hint = egui::RichText::new("Say something about this game to your friends...")
+        .font(theme::regular(16.0))
+        .italics()
+        .color(theme::SAY_HINT);
+    let resp = ui.put(
+        rect,
+        egui::TextEdit::singleline(&mut text)
+            .hint_text(hint)
+            .font(theme::regular(16.0))
+            .frame(false)
+            .margin(egui::Margin::symmetric(18, 8))
+            .vertical_align(egui::Align::Center)
+            .desired_width(w),
+    );
+    let posted = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && !text.trim().is_empty();
+    let note_id = id.with("note");
+    if posted {
+        text.clear();
+        ui.data_mut(|d| d.insert_temp(note_id, true));
     }
+    ui.data_mut(|d| d.insert_temp(id, text));
+    if ui.data(|d| d.get_temp::<bool>(note_id)).unwrap_or(false) {
+        ui.add_space(4.0);
+        note(ui, "Posting to your activity feed is not available in Kettle yet.", w);
+    }
+}
+
+fn note(ui: &mut Ui, s: &str, w: f32) {
+    text(ui, s, theme::regular(12.0), theme::GP_LINK, w, 1);
 }
 
 /// The card with the newest news item: a blue strip, then the kind of post and its title.
@@ -374,7 +414,7 @@ fn day_of(unix: u64, offset: i64) -> i64 {
 }
 
 /// "TODAY", "YESTERDAY" or "NOV 12" (with the year when it is not this year).
-fn day_label(day: i64, today: i64) -> String {
+pub(super) fn day_label(day: i64, today: i64) -> String {
     match today - day {
         0 => return "TODAY".into(),
         1 => return "YESTERDAY".into(),

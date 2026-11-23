@@ -96,7 +96,9 @@ pub fn load_square(url: &str, side: u32) -> Option<(usize, Vec<u8>)> {
 }
 
 fn load(url: String) -> WebImage {
-    let decoded = storefront::fetch_image(&url).ok().and_then(|b| image::load_from_memory(&b).ok());
+    // An absolute path is a local picture (a screenshot of the post-game summary), anything else a URL.
+    let bytes = if url.starts_with('/') { std::fs::read(&url).ok() } else { storefront::fetch_image(&url).ok() };
+    let decoded = bytes.and_then(|b| image::load_from_memory(&b).ok());
     let Some(img) = decoded else { return WebImage { url, size: [0, 0], rgba: None } };
     let img = if img.width() > MAX_SIZE.0 || img.height() > MAX_SIZE.1 {
         img.resize(MAX_SIZE.0, MAX_SIZE.1, image::imageops::FilterType::Triangle)

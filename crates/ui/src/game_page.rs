@@ -1,6 +1,7 @@
 //! A game's page: hero banner with logo, the action bar (Play / Install and
 //! stats), and details below.
 
+mod post_game;
 mod sections;
 
 use crate::dialogs::Overlays;
@@ -305,7 +306,7 @@ fn tab_strip(ui: &mut Ui, client: &mut Client, game: &sr_model::Game) {
         ("Support", Some(format!("https://help.steampowered.com/en/wizard/HelpWithGame/?appid={id}"))),
     ];
     let mut open: Option<(usize, Option<String>)> = None;
-    let w = ui.available_width() - 40.0;
+    let w = ui.available_width() - 43.0;
     ui.add_space(8.0);
     ui.horizontal(|ui| {
         ui.add_space(20.0);
@@ -353,7 +354,20 @@ fn tab_strip(ui: &mut Ui, client: &mut Client, game: &sr_model::Game) {
 
 fn details(ui: &mut Ui, client: &mut Client, tex: &mut Textures, game: &sr_model::Game) {
     tab_strip(ui, client, game);
-    egui::Frame::new().inner_margin(egui::Margin { left: 20, right: 23, top: 24, bottom: 24 }).show(ui, |ui| {
+    // Between the tab box and the news: the recommendation question and the post-game summary (20 px under
+    // the box, 24 px between the boxes, as measured).
+    let mut gap = 24.0;
+    if post_game::recommend_visible(client, game) {
+        ui.add_space(20.0);
+        post_game::recommend(ui, client, game);
+        gap = 24.0;
+    }
+    if post_game::summary_visible(client, game) {
+        ui.add_space(25.0);
+        post_game::summary(ui, client, tex, game);
+        gap = 24.0;
+    }
+    egui::Frame::new().inner_margin(egui::Margin { left: 20, right: 23, top: gap as i8, bottom: 24 }).show(ui, |ui| {
         sections::show(ui, client, tex, game);
     });
 }

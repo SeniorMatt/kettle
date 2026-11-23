@@ -182,3 +182,36 @@ fn collection_page_shows_the_games_of_the_clicked_section() {
         press(&mut h, pos2(23.0, 46.0));
     }
 }
+
+/// Click rows until a game page is open.
+fn open_a_game(h: &mut Harness<'_, State>) -> sr_model::AppId {
+    for i in 0..12 {
+        press(h, pos2(14.0, row(i).y));
+        if let Some(app) = h.state().1.state().selected {
+            frames(h, 4);
+            return app;
+        }
+    }
+    panic!("no game page opened");
+}
+
+#[test]
+fn post_game_summary_shows_the_session_and_can_be_closed() {
+    let mut h = harness();
+    let app = open_a_game(&mut h);
+    let pg = h.state().1.state().gamepage.post_game.get(&app.0).cloned().expect("demo session summary");
+    assert!(!pg.shots.is_empty() && pg.end > pg.start);
+    h.state_mut().1.send(sr_client::Command::ClosePostGame(app));
+    frames(&mut h, 3);
+    assert!(!h.state().1.state().gamepage.post_game.contains_key(&app.0), "closing removes the summary");
+}
+
+#[test]
+fn recommend_question_hides_after_maybe_later() {
+    let mut h = harness();
+    let app = open_a_game(&mut h);
+    assert!(!h.state().1.state().gamepage.recommend_hidden.contains(&app.0));
+    h.state_mut().1.send(sr_client::Command::HideRecommend(app, false));
+    frames(&mut h, 3);
+    assert!(h.state().1.state().gamepage.recommend_hidden.contains(&app.0));
+}

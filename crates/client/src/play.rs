@@ -46,6 +46,15 @@ pub struct PlayProblem {
 pub struct PlayStats {
     /// `appid -> (seconds played, unix time of the last run)`
     pub apps: BTreeMap<String, (u64, u64)>,
+    /// `appid -> (start, end)` unix times of the last session (for the post-game summary).
+    #[serde(default)]
+    pub sessions: BTreeMap<String, (u64, u64)>,
+    /// `appid -> end time of the session whose summary was closed`.
+    #[serde(default)]
+    pub post_closed: BTreeMap<String, u64>,
+    /// `appid -> unix time until which the recommendation question stays hidden` (`u64::MAX` = for good).
+    #[serde(default)]
+    pub recommend_until: BTreeMap<String, u64>,
 }
 
 impl PlayStats {
@@ -61,6 +70,18 @@ impl PlayStats {
         let e = self.apps.entry(app.0.to_string()).or_default();
         e.0 += seconds;
         e.1 = now;
+        self.sessions.insert(app.0.to_string(), (now.saturating_sub(seconds), now));
+    }
+
+    /// The last session of `app` unless its summary was closed.
+    pub fn open_session(&self, app: AppId) -> Option<(u64, u64)> {
+        let key = app.0.to_string();
+        let s = self.sessions.get(&key).copied()?;
+        (self.post_closed.get(&key).copied().unwrap_or(0) < s.1).then_some(s)
+    }
+
+    pub fn recommend_hidden(&self, app: AppId, now: u64) -> bool {
+        self.recommend_until.get(&app.0.to_string()).is_some_and(|&t| t > now)
     }
 
     pub fn get(&self, app: AppId) -> (u64, u64) {
@@ -139,6 +160,7 @@ impl Client {
         self.cloud_after_exit(app);
         self.play_stats.add(app, seconds, super::downloads::now_unix());
         let _ = store::save_json(&PlayStats::path(), &self.play_stats);
+        self.refresh_post_game(app);
         self.merge_installed();
         let missing = self.steam_missing.remove(&app);
         if let Some(message) = missing.filter(|_| seconds < EARLY_EXIT_SECS) {
@@ -482,6 +504,22 @@ mod tests {
         s.add(AppId(7), 30, 2000);
         assert_eq!(s.get(AppId(7)), (120, 2000));
         assert_eq!(s.get(AppId(8)), (0, 0));
+    }
+
+    #[test]
+    fn session_summary_can_be_closed() {
+        let mut s = PlayStats::default();
+        s.add(AppId(7), 600, 5000);
+        assert_eq!(s.open_session(AppId(7)), Some((4400, 5000)));
+        s.post_closed.insert("7".into(), 5000);
+        assert_eq!(s.open_session(AppId(7)), None);
+        // A later session opens it again.
+        s.add(AppId(7), 60, 9000);
+        assert_eq!(s.open_session(AppId(7)), Some((8940, 9000)));
+        assert!(!s.recommend_hidden(AppId(7), 10));
+        s.recommend_until.insert("7".into(), 100);
+        assert!(s.recommend_hidden(AppId(7), 10));
+        assert!(!s.recommend_hidden(AppId(7), 100));
     }
 
     #[test]

@@ -417,3 +417,23 @@ pub const GP_FEATURED_H: f32 = 100.0; // measured: card y 425-525
 pub const GP_FEATURED_HEADER_H: f32 = 27.0; // measured: strip y 425-452
 pub const GP_RIGHT_W: f32 = 187.0; // measured: right column x 715-902
 pub const GP_COL_GAP: f32 = 32.0; // measured: left column ends x 683
+
+// ---- recommendation box and post-game summary (sampled from Steam, TF2 page in steam-vs-kettle.webp) ----
+pub const REC_BG: Color32 = Color32::from_rgb(0x43, 0x49, 0x52); // box fill, x 1229-1837, y 415-505
+pub const REC_BTN: Color32 = Color32::from_rgb(0x4a, 0x61, 0x72); // Yes / No / Maybe Later fill
+pub const REC_BTN_HOVER: Color32 = Color32::from_rgb(0x58, 0x72, 0x86);
+pub const REC_BTN_TEXT: Color32 = Color32::from_rgb(0x85, 0xbc, 0xe2); // button text and thumbs
+pub const REC_TITLE: Color32 = Color32::from_rgb(0x7f, 0xaf, 0xd2); // "You've played for N hours"
+pub const REC_BODY: Color32 = Color32::from_rgb(0xf8, 0xfd, 0xff); // "Would you recommend this game ..."
+pub const REC_H: f32 = 90.0;
+pub const POST_PANEL_BG: Color32 = Color32::from_rgb(0x16, 0x19, 0x1e); // post-game strip (flat; Steam's is #15191c-#17181f)
+pub const POST_PANEL_H: f32 = 185.0; // y 553-738
+pub const POST_THUMB_W: f32 = 224.0;
+pub const POST_THUMB_H: f32 = 126.0;
+pub const POST_THUMB_GAP: f32 = 22.0;
+pub const POST_ICON: Color32 = Color32::from_rgb(0xd4, 0xd8, 0xdd); // < > X
+pub const POST_ICON_OFF: Color32 = Color32::from_rgb(0x5a, 0x60, 0x68);
+pub const POST_DAY: Color32 = Color32::from_rgb(0xcb, 0xcf, 0xd4); // "Today"
+pub const SAY_BG: Color32 = Color32::from_rgb(0x1d, 0x21, 0x27); // "Say something ..." field
+pub const SAY_HINT: Color32 = Color32::from_rgb(0x66, 0x6c, 0x71);
+pub const SAY_H: f32 = 36.0; // y 930-966
