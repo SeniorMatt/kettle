@@ -197,6 +197,12 @@ fn app_icon() -> egui::IconData {
 }
 
 fn main() -> eframe::Result {
+    // `kettle --doctor <appid> [--deep]`: print the launch checks for a game and exit (no window).
+    if let Some(appid) = doctor_arg(std::env::args().skip(1)) {
+        let deep = std::env::args().any(|a| a == "--deep");
+        print!("{}", sr_steam::doctor::report(appid, &sr_steam::run::PrepareOpts::default(), deep));
+        return Ok(());
+    }
     let started = Instant::now();
     let timings = std::env::var_os("KETTLE_TIMING").is_some() || std::env::var_os("KETTLE_TIMINGS").is_some();
     let options = eframe::NativeOptions {
@@ -253,6 +259,19 @@ fn main() -> eframe::Result {
     )
 }
 
+/// The app id after `--doctor` (or in `--doctor=<id>`), when given.
+fn doctor_arg(mut args: impl Iterator<Item = String>) -> Option<u32> {
+    while let Some(a) = args.next() {
+        if a == "--doctor" {
+            return args.next()?.parse().ok();
+        }
+        if let Some(v) = a.strip_prefix("--doctor=") {
+            return v.parse().ok();
+        }
+    }
+    None
+}
+
 /// The app id after `--play` (or in `--play=<id>`), when given.
 fn play_arg(mut args: impl Iterator<Item = String>) -> Option<u32> {
     while let Some(a) = args.next() {
@@ -293,5 +312,7 @@ mod tests {
         assert_eq!(play_arg(args(&["--play", "abc"])), None);
         assert_eq!(play_arg(args(&["--play"])), None);
         assert_eq!(play_arg(args(&[])), None);
+        assert_eq!(doctor_arg(args(&["--doctor", "38410", "--deep"])), Some(38410));
+        assert_eq!(doctor_arg(args(&["--play", "5"])), None);
     }
 }
