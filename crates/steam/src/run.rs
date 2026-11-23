@@ -356,8 +356,15 @@ pub fn find_umu() -> Option<PathBuf> {
 pub fn runtime_for<'a>(tool: &CompatTool, tools: &'a [CompatTool]) -> Option<&'a CompatTool> {
     let id = tool.require_tool_appid?;
     let usable = |t: &&CompatTool| t.kind == ToolKind::Runtime && t.command("run").0.is_file();
+    // The library's manifest for app `id` names the folder that app lives in; only that folder is the runtime.
+    // (All runtimes of a library sit beside the same manifests, so "a manifest exists" proves nothing: the first
+    // runtime found used to win, and Proton ran inside the wrong container.)
     let by_manifest = tools.iter().filter(usable).find(|t| {
-        t.dir.parent().and_then(Path::parent).is_some_and(|sa| sa.join(format!("appmanifest_{id}.acf")).is_file())
+        let Some(sa) = t.dir.parent().and_then(Path::parent) else { return false };
+        let Ok(text) = std::fs::read_to_string(sa.join(format!("appmanifest_{id}.acf"))) else { return false };
+        let doc = crate::vdf::parse(text.trim().trim_matches('\0'));
+        let node = doc.get("AppState").unwrap_or(&doc);
+        node.get_str("installdir").is_some_and(|d| t.dir.file_name().is_some_and(|n| n.to_string_lossy() == d))
     });
     let name = match id {
         1070560 => "SteamLinuxRuntime",
@@ -1232,6 +1239,52 @@ mod tests {
         assert!(!p.env.contains_key("STEAM_COMPAT_DATA_PATH"));
     }
 
+    /// Real layout of a library with several runtimes (all manifests side by side): Proton 11 wants runtime 4.0
+    /// (4183110), Proton 10 wants sniper (1628350). The scout runtime sorts first and used to win for both: the
+    /// game then ran in the wrong container and died with "C:\windows ... failed" / "no such file".
+    #[test]
+    fn each_tool_gets_its_own_runtime_not_the_first_one() {
+        let root = std::env::temp_dir().join(format!("sr-rt-many-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let steam = root.join(".var/app/com.valvesoftware.Steam/.local/share/Steam");
+        let mut tools = Vec::new();
+        for (id, dir) in [
+            (1070560, "SteamLinuxRuntime"),
+            (1391110, "SteamLinuxRuntime_soldier"),
+            (1628350, "SteamLinuxRuntime_sniper"),
+            (4183110, "SteamLinuxRuntime_4"),
+        ] {
+            let d = steam.join("steamapps/common").join(dir);
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join("_v2-entry-point"), b"").unwrap();
+            std::fs::write(
+                steam.join(format!("steamapps/appmanifest_{id}.acf")),
+                format!("\"AppState\"\n{{\n\t\"appid\"\t\"{id}\"\n\t\"installdir\"\t\"{dir}\"\n}}\n"),
+            )
+            .unwrap();
+            let mut rt = tool(ToolKind::Runtime, None);
+            (rt.internal_name, rt.dir) = (dir.into(), d);
+            rt.commandline = Some("/_v2-entry-point --verb=%verb% --".into());
+            tools.push(rt);
+        }
+        for (need, want) in [(4183110, "SteamLinuxRuntime_4"), (1628350, "SteamLinuxRuntime_sniper")] {
+            let mut proton = tool(ToolKind::Proton, None);
+            proton.require_tool_appid = Some(need);
+            assert_eq!(runtime_for(&proton, &tools).unwrap().internal_name, want);
+        }
+        // Without the manifests the folder names decide, still not "the first runtime".
+        for id in [1070560, 1391110, 1628350, 4183110] {
+            std::fs::remove_file(steam.join(format!("steamapps/appmanifest_{id}.acf"))).unwrap();
+        }
+        let mut proton = tool(ToolKind::Proton, None);
+        proton.require_tool_appid = Some(4183110);
+        assert_eq!(runtime_for(&proton, &tools).unwrap().internal_name, "SteamLinuxRuntime_4");
+        // The runtime it needs is not installed: none, so the launch says so instead of picking another.
+        let only_scout = vec![tools[0].clone()];
+        assert!(runtime_for(&proton, &only_scout).is_none());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn runtime_is_found_by_manifest_and_flatpak_paths_stay_in_the_flatpak() {
         let root = std::env::temp_dir().join(format!("sr-rt-{}", std::process::id()));
@@ -1241,7 +1294,11 @@ mod tests {
         let rtdir = steam.join("steamapps/common/SteamLinuxRuntime_sniper");
         std::fs::create_dir_all(&rtdir).unwrap();
         std::fs::write(rtdir.join("_v2-entry-point"), b"").unwrap();
-        std::fs::write(steam.join("steamapps/appmanifest_1628350.acf"), b"").unwrap();
+        std::fs::write(
+            steam.join("steamapps/appmanifest_1628350.acf"),
+            "\"AppState\"\n{\n\t\"appid\"\t\"1628350\"\n\t\"installdir\"\t\"SteamLinuxRuntime_sniper\"\n}\n",
+        )
+        .unwrap();
         let mut rt = tool(ToolKind::Runtime, None);
         rt.internal_name = "whatever".into();
         rt.dir = rtdir.clone();

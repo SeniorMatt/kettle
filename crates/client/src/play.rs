@@ -281,11 +281,18 @@ fn launch(
         Err(e) => {
             let message = format!("{e:#}");
             let needs_compat_tool = is_compat_problem(&message);
-            let details = format!("{name} ({})\n{details}\nerror: {message}\n", app.0);
+            let details = format!("{name} ({})\n{details}\nerror: {message}\n{}", app.0, doctor_text(app));
             let log = Some(run::log_path(app.0)).filter(|p| p.is_file());
             send(Event::PlayFailed(PlayProblem { app, name, message, needs_compat_tool, details, log }));
         }
     }
+}
+
+/// The launch doctor's checks (as `sr-cli launch <id> --doctor`, without starting the container) for the
+/// details a user copies into a report.
+fn doctor_text(app: AppId) -> String {
+    let report = sr_steam::doctor::report(app.0, &run::PrepareOpts::default(), false);
+    format!("---- checks ----\n{report}")
 }
 
 /// A game that ended within seconds with an error: say why when the log tells, and carry the log's end.
@@ -297,7 +304,7 @@ fn early_exit_problem(app: AppId, name: String) -> PlayProblem {
         app,
         message: format!("{reason}\nThe full log is {}", log.display()),
         needs_compat_tool: false,
-        details: format!("{name} ({})\n{tail}\n", app.0),
+        details: format!("{name} ({})\n{tail}\n{}", app.0, doctor_text(app)),
         log: Some(log).filter(|p| p.is_file()),
         name,
     }
