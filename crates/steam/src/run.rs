@@ -429,6 +429,8 @@ pub struct PrepareOpts {
     /// Run the game inside Gamescope (see [`crate::gamescope`]); `None` = as usual. Ignored on Windows and
     /// when the user's own launch options already start `gamescope`.
     pub gamescope: Option<crate::gamescope::Launch>,
+    /// The in-game overlay library to load (not used inside Gamescope, which has its own overlay path).
+    pub overlay: Option<crate::overlay_hook::Hook>,
 }
 
 pub struct Prepared {
@@ -563,6 +565,12 @@ pub fn prepare_with(info: &AppInfo, installed: Option<&InstalledApp>, opts: &Pre
         } else {
             crate::mangohud::apply(&mut plan, hud, &parsed);
         }
+    }
+    if let Some(o) = &opts.overlay
+        && gs.is_none()
+        && host == HostOs::Linux
+    {
+        crate::overlay_hook::apply(&mut plan, &o.lib, o.socket.as_deref());
     }
     let wrapped = gs.is_some();
     if let Some(g) = gs {

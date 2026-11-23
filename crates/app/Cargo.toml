@@ -10,20 +10,12 @@ publish.workspace = true
 sr-client = { path = "../client" }
 sr-ui = { path = "../ui" }
 sr-model = { path = "../model" }
+sr-steam = { path = "../steam" }
+sr-overlay-proto = { path = "../overlay-proto" }
 eframe = { version = "=0.36.2", default-features = false, features = ["wgpu", "x11", "wayland"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 
-# The global Shift+Tab shortcut for the in-game overlay (see src/hotkey.rs).
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
-ashpd = { version = "0.13", default-features = false, features = ["async-io", "global_shortcuts"] }
-async-io = "2"
-futures-util = "0.3"
-futures-channel = "0.3"
-x11rb = { version = "0.13", features = ["randr"] }
-# The in-game overlay helper process (see src/overlay_helper.rs): its window id and the socket protocol.
-raw-window-handle = "0.6"
-serde = "1"
-serde_json = "1"
 # The system tray icon (StatusNotifierItem over D-Bus; KDE and others), see src/tray.rs. MIT.
 ksni = { version = "0.3", default-features = false, features = ["async-io", "blocking"] }
 

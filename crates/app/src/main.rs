@@ -1,16 +1,14 @@
 //! kettle desktop app: window setup and wiring only.
 
-mod hotkey;
-mod overlay_helper;
 mod overlay_host;
+mod overlay_install;
 #[cfg(all(unix, not(target_os = "macos")))]
-mod overlay_ipc;
 mod tray;
 
 use eframe::egui;
 use sr_client::Client;
 use sr_ui::{AppUi, TrayGo, theme};
-use std::sync::{Arc, mpsc};
+use std::sync::Arc;
 use std::time::Instant;
 
 struct App {
@@ -24,10 +22,8 @@ struct App {
     /// Frames drawn since the last report (a quiet UI draws almost none).
     frames: u32,
     last_report: Instant,
-    /// Registers Shift+Tab while a game runs; each press arrives on `toggles`.
-    hotkey: hotkey::Hotkey,
-    toggles: mpsc::Receiver<()>,
-    /// The in-game overlay: a helper process on Linux (see overlay_host.rs), the in-process window otherwise.
+    /// The in-game overlay: drawn inside the game by the overlay library on Linux (see overlay_host.rs), the
+    /// in-process window otherwise.
     overlay_host: overlay_host::Host,
     /// The tray icon, while "Show Kettle in the tray" is on.
     tray: Option<tray::Tray>,
@@ -54,7 +50,7 @@ fn show_window(ctx: &egui::Context) {
 }
 
 impl App {
-    /// Show or hide the overlay: through the helper process when it runs, else the in-process window.
+    /// Show or hide the overlay: through the game's overlay library when it is connected, else the in-process window.
     fn toggle_overlay(&mut self) {
         if !self.overlay_host.toggle(&self.client) {
             self.ui.toggle_overlay(&mut self.client);
@@ -144,15 +140,8 @@ impl eframe::App for App {
                 .map(|(app, _)| *app)
                 .filter(|_| s.settings.overlay)
         };
-        self.hotkey.set_active(game.is_some());
-        let in_gamescope = game.is_some_and(|g| self.client.state().running.get(&g).is_some_and(|r| r.gamescope));
-        if self.overlay_host.sync(game, in_gamescope) {
-            ctx.request_repaint_after(std::time::Duration::from_millis(500));
-        }
+        self.overlay_host.sync(game);
         self.ui.set_overlay_external(self.overlay_host.active());
-        while self.toggles.try_recv().is_ok() {
-            self.toggle_overlay();
-        }
         self.ui.show(ui, &mut self.client);
         // "Games > Show overlay" while the helper is in use arrives as a request.
         if self.ui.take_overlay_request() {
@@ -208,10 +197,6 @@ fn app_icon() -> egui::IconData {
 }
 
 fn main() -> eframe::Result {
-    // `kettle --overlay ...` is the in-game overlay helper process, not the app (see overlay_helper.rs).
-    if let Some(result) = overlay_helper::dispatch() {
-        return result;
-    }
     let started = Instant::now();
     let timings = std::env::var_os("KETTLE_TIMING").is_some() || std::env::var_os("KETTLE_TIMINGS").is_some();
     let options = eframe::NativeOptions {
@@ -233,14 +218,8 @@ fn main() -> eframe::Result {
             AppUi::setup(&cc.egui_ctx);
             let gpu = cc.wgpu_render_state.as_ref().map(|r| r.adapter.get_info().name).unwrap_or_default();
             let ctx = cc.egui_ctx.clone();
-            let (toggle_tx, toggles) = mpsc::channel();
-            let toggle_ctx = ctx.clone();
-            let hotkey = hotkey::Hotkey::new(Arc::new(move || {
-                let _ = toggle_tx.send(());
-                toggle_ctx.request_repaint();
-            }));
             let host_ctx = ctx.clone();
-            let overlay_host = overlay_host::Host::new(Arc::new(move || host_ctx.request_repaint()));
+            let mut overlay_host = overlay_host::Host::new(Arc::new(move || host_ctx.request_repaint()));
             let t = Instant::now();
             let mut client = Client::new(Arc::new(move || ctx.request_repaint()))?;
             // `kettle --play <appid>` (desktop and menu shortcuts): start that game once the library is scanned.
@@ -251,6 +230,8 @@ fn main() -> eframe::Result {
                 let ms = |d: std::time::Duration| d.as_secs_f64() * 1e3;
                 eprintln!("[timing] window+GPU ready {:.0} ms, client {:.0} ms", ms(t - started), ms(t.elapsed()));
             }
+            // The overlay library goes into our data folder; games started from here load it.
+            client.set_overlay_hook(overlay_install::prepare(&mut overlay_host));
             let mut ui = AppUi::default();
             ui.set_gpu_name(gpu);
             Ok(Box::new(App {
@@ -263,8 +244,6 @@ fn main() -> eframe::Result {
                 image_logged: false,
                 frames: 0,
                 last_report: Instant::now(),
-                hotkey,
-                toggles,
                 overlay_host,
                 tray: None,
                 quitting: false,

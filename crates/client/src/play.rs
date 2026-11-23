@@ -111,6 +111,7 @@ impl Client {
             gamescope: self.gamescope_for(app).then(|| self.state.settings.gamescope.clone()),
             cloud: self.cloud_mode(app),
             env: self.state.game_env.get(app),
+            overlay: self.overlay_hook.clone(),
         };
 
         self.rt.spawn_blocking(move || launch(app, name, installed, (steam, stamp), options, tx, wake));
@@ -181,6 +182,8 @@ struct LaunchText {
     cloud: CloudMode,
     /// The game's own environment variables and switches (see `game_env`).
     env: crate::GameEnv,
+    /// The in-game overlay library and Kettle's socket for it, when installed.
+    overlay: Option<sr_steam::overlay_hook::Hook>,
 }
 
 /// Worker: prepare the plan from Steam's app data and start it.
@@ -220,15 +223,28 @@ fn launch(
         let hud_settings = sr_steam::gamescope::hud_for(&options.hud, gamescope.is_some());
         // The old display report would make the overlay join the last session's display.
         sr_steam::gamescope::clear_display(app.0);
-        // MangoHud: writes the game's config file; a problem here only means no HUD, never a failed launch.
-        let hud = sr_steam::mangohud::prepare(&hud_settings, app.0).unwrap_or_else(|e| {
-            eprintln!("[hud] not applied: {e:#}");
+        // The performance HUD is drawn by the overlay library when it is loaded (outside Gamescope); otherwise
+        // MangoHud writes the game's config file. A problem here only means no HUD, never a failed launch.
+        let by_overlay = options.overlay.is_some() && gamescope.is_none();
+        let hud = if by_overlay {
             None
-        });
+        } else {
+            sr_steam::mangohud::prepare(&hud_settings, app.0).unwrap_or_else(|e| {
+                eprintln!("[hud] not applied: {e:#}");
+                None
+            })
+        };
         run::prepare_with(
             &info,
             installed.as_ref(),
-            &run::PrepareOpts { launch_options, hud, proton_log: options.proton_log, gamescope, ..Default::default() },
+            &run::PrepareOpts {
+                launch_options,
+                hud,
+                proton_log: options.proton_log,
+                gamescope,
+                overlay: options.overlay.clone(),
+                ..Default::default()
+            },
         )
         .map(|mut p| {
             // The game's own variables go last, so they win over everything we set.

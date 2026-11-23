@@ -1,13 +1,13 @@
-//! The main app's side of the in-game overlay.
+//! Kettle's side of the in-game overlay.
 //!
-//! The overlay is drawn by a second process, `kettle --overlay <appid> --socket <path>` (see `overlay_helper`),
-//! started when the first game starts and ended when the game ends. It is forced onto X11 (even on Wayland, where
-//! games under Proton are XWayland windows) so it can be an override-redirect window: the desktop plays no
-//! window animation for it and never changes focus or minimizes the game. This file spawns and stops that
-//! process, owns the Unix socket, sends it snapshots and turns what the user did there into `Command`s.
+//! The overlay is drawn by `libkettle_overlay.so` inside the game's own frames (crate `sr-overlay-hook`), not by
+//! a window of ours. This file owns the Unix socket the library connects to (`$XDG_RUNTIME_DIR/kettle-overlay-
+//! <pid>.sock`, mode 0600, named to the game through `KETTLE_OVERLAY_SOCKET`), sends it snapshots of what to show
+//! and turns what the user did there into `Command`s. Several game processes may connect; all get the data.
 //!
-//! If the helper cannot start (no X display, no runtime folder, spawn error) or dies, [`Host::active`] is false and
-//! the caller falls back to the in-process overlay window of `sr-ui`.
+//! [`Host::active`] is true while a library is connected: the menu's "Show overlay" then sends it a toggle
+//! instead of opening the in-process window. Games without the library (Gamescope, Windows builds, 32-bit) keep
+//! using the in-process window.
 
 #[cfg(all(unix, not(target_os = "macos")))]
 pub use imp::Host;
@@ -18,19 +18,20 @@ pub use stub::Host;
 mod stub {
     use sr_client::Client;
     use sr_model::AppId;
+    use std::path::PathBuf;
 
-    /// No helper on this system: the in-process overlay is always used.
     pub struct Host;
 
     impl Host {
         pub fn new(_wake: std::sync::Arc<dyn Fn() + Send + Sync>) -> Host {
             Host
         }
-        pub fn sync(&mut self, _want: Option<AppId>, _gamescope: bool) -> bool {
-            false
-        }
+        pub fn sync(&mut self, _want: Option<AppId>) {}
         pub fn active(&self) -> bool {
             false
+        }
+        pub fn socket(&self) -> Option<PathBuf> {
+            None
         }
         pub fn toggle(&mut self, _client: &Client) -> bool {
             false
@@ -41,52 +42,72 @@ mod stub {
 
 #[cfg(all(unix, not(target_os = "macos")))]
 mod imp {
-    use crate::overlay_ipc;
-    use sr_client::{Client, Command, FromHelper, OverlaySnapshot, ToHelper, detect_hud, overlay_snapshot};
+    use sr_client::{Client, Command, OverlaySnapshot, overlay_snapshot};
     use sr_model::{AppId, SteamId};
-    use std::io::BufReader;
+    use sr_overlay_proto::{
+        AchievementRow, FriendRow, FromHook, MAX_LINE, OverlayAction, OverlayData, ToHook, decode, encode,
+    };
+    use std::io::{BufRead, BufReader, Read, Write};
     use std::os::unix::fs::PermissionsExt;
     use std::os::unix::net::{UnixListener, UnixStream};
     use std::path::PathBuf;
-    use std::process::{Child, Command as Process, Stdio};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex, mpsc};
     use std::time::{Duration, Instant};
 
-    /// How long a game in Gamescope has to report its display before the normal overlay is used instead.
-    const DISPLAY_LIMIT: Duration = Duration::from_secs(90);
-    /// How long the helper has to connect before we give up on it.
-    const CONNECT_LIMIT: Duration = Duration::from_secs(20);
-    /// A toggle this soon after the user closed the overlay itself is the same key press seen twice
-    /// (by the helper's keyboard grab and by the global shortcut).
-    const DEBOUNCE: Duration = Duration::from_millis(300);
-    /// Fresh data goes to a shown overlay at most this often.
-    const UPDATE_EVERY: Duration = Duration::from_millis(250);
+    /// Fresh data goes to a visible overlay this often, to a hidden one (for the HUD and the next opening) less.
+    const UPDATE_OPEN: Duration = Duration::from_millis(500);
+    const UPDATE_CLOSED: Duration = Duration::from_secs(3);
 
-    type Shared = Arc<Mutex<Option<UnixStream>>>;
+    type Conns = Arc<Mutex<Vec<UnixStream>>>;
 
     pub struct Host {
         wake: Arc<dyn Fn() + Send + Sync>,
-        tx: mpsc::Sender<FromHelper>,
-        rx: mpsc::Receiver<FromHelper>,
-        /// The helper process and the game it was started for.
-        child: Option<(Child, AppId)>,
-        conn: Shared,
-        stop_accept: Arc<AtomicBool>,
+        tx: mpsc::Sender<FromHook>,
+        rx: mpsc::Receiver<FromHook>,
+        conns: Conns,
         socket: Option<PathBuf>,
-        /// Set once the helper failed; the in-process overlay is used from then on (until the game changes).
-        failed: bool,
-        ready: bool,
+        stop: Arc<AtomicBool>,
+        started: bool,
+        /// The game the data is about.
+        app: Option<AppId>,
         visible: bool,
-        pending_show: bool,
-        last_hidden: Option<Instant>,
         last_sent: Instant,
-        dirty: bool,
-        detect: Option<(Instant, bool)>,
-        /// A game in Gamescope is running but has not reported its X display yet.
-        waiting: bool,
-        /// Since when the running game has been waited for.
-        waiting_since: Option<Instant>,
+        /// A library connected since the last data: send at once.
+        fresh: Arc<AtomicBool>,
+    }
+
+    fn snapshot_to_data(s: &OverlaySnapshot, hud_on: bool) -> OverlayData {
+        OverlayData {
+            app: s.app,
+            game: s.game.clone(),
+            session_secs: s.session_secs,
+            total_minutes: 0,
+            me: s.me.clone(),
+            friends_connected: s.friends_connected,
+            friends: s
+                .friends
+                .iter()
+                .map(|f| FriendRow {
+                    id: f.id,
+                    name: f.name.clone(),
+                    status: match (&f.game, f.state) {
+                        (Some(g), _) => g.clone(),
+                        (None, 0) => "Offline".into(),
+                        (None, 3) => "Away".into(),
+                        (None, _) => "Online".into(),
+                    },
+                    online: f.state != 0,
+                    in_game: f.game.is_some(),
+                })
+                .collect(),
+            achievements_unlocked: 0,
+            achievements_total: 0,
+            achievements_recent: Vec::<AchievementRow>::new(),
+            hud: hud_on,
+            enabled: s.overlay_on,
+            animations: s.animations,
+        }
     }
 
     impl Host {
@@ -96,169 +117,96 @@ mod imp {
                 wake,
                 tx,
                 rx,
-                child: None,
-                conn: Arc::default(),
-                stop_accept: Arc::default(),
+                conns: Arc::default(),
                 socket: None,
-                failed: false,
-                ready: false,
+                stop: Arc::default(),
+                started: false,
+                app: None,
                 visible: false,
-                pending_show: false,
-                last_hidden: None,
                 last_sent: Instant::now(),
-                dirty: false,
-                detect: None,
-                waiting: false,
-                waiting_since: None,
+                fresh: Arc::default(),
             }
         }
 
-        /// Keep the helper in step with the game: started for `want`, ended when there is none. `gamescope` says
-        /// the game runs inside Gamescope: the helper then joins Gamescope's own X server, whose name the game's
-        /// launcher reports in a file a moment after the start. Returns true while that is awaited, so the
-        /// caller asks for another frame soon.
-        pub fn sync(&mut self, want: Option<AppId>, gamescope: bool) -> bool {
-            self.waiting = false;
-            let died = self.child.as_mut().is_some_and(|(c, _)| matches!(c.try_wait(), Ok(Some(_))));
-            if died {
-                eprintln!("[overlay] the helper process ended; using the built-in overlay window");
-                self.stop();
-                self.failed = true;
+        /// The game the overlay data is about (`None` = no game running). The socket is created the first time
+        /// a game runs, so the launch that follows can name it.
+        pub fn sync(&mut self, want: Option<AppId>) {
+            self.app = want;
+            if want.is_some() && !self.started {
+                self.start();
             }
-            match (want, self.child.as_ref().map(|(_, a)| *a)) {
-                (None, _) => {
-                    if self.child.is_some() {
-                        self.stop();
-                    }
-                    self.failed = false;
-                    self.waiting_since = None;
-                }
-                (Some(app), Some(running)) if app != running => {
-                    self.stop();
-                    self.failed = false;
-                    self.waiting_since = None;
-                    self.start(app, gamescope);
-                }
-                (Some(app), None) if !self.failed => self.start(app, gamescope),
-                _ => {}
+            if want.is_none() {
+                self.visible = false;
             }
-            self.waiting
         }
 
-        /// Is the helper (started or still connecting) the one that shows the overlay?
+        /// The socket path to give a game (`KETTLE_OVERLAY_SOCKET`); created on first use.
+        pub fn socket(&mut self) -> Option<PathBuf> {
+            if !self.started {
+                self.start();
+            }
+            self.socket.clone()
+        }
+
+        /// Is a game's overlay library connected?
         pub fn active(&self) -> bool {
-            (self.child.is_some() && !self.failed) || self.waiting
+            self.conns.lock().map(|c| !c.is_empty()).unwrap_or(false)
         }
 
-        fn start(&mut self, app: AppId, gamescope: bool) {
-            // A game in Gamescope lives on Gamescope's own X server; its name arrives from the launcher shim.
-            let mut display = None;
-            if gamescope {
-                match sr_client::gamescope_display(app) {
-                    Some(d) => display = Some(d),
-                    None => {
-                        let since = *self.waiting_since.get_or_insert_with(Instant::now);
-                        if since.elapsed() > DISPLAY_LIMIT {
-                            eprintln!(
-                                "[overlay] the game's Gamescope display never appeared; using the built-in overlay"
-                            );
-                            self.failed = true;
-                        } else {
-                            self.waiting = true;
-                        }
-                        return;
-                    }
-                }
-            }
-            let Some(path) = overlay_ipc::socket_path(std::process::id()) else {
-                eprintln!("[overlay] no XDG_RUNTIME_DIR; using the built-in overlay window");
-                self.failed = true;
+        fn start(&mut self) {
+            self.started = true;
+            let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR").filter(|d| !d.is_empty()) else {
+                eprintln!("[overlay] no XDG_RUNTIME_DIR; the in-game overlay is not available");
                 return;
             };
-            if display.is_none() && std::env::var_os("DISPLAY").is_none_or(|d| d.is_empty()) {
-                eprintln!("[overlay] no X11 display (XWayland); using the built-in overlay window");
-                self.failed = true;
-                return;
-            }
+            let path = PathBuf::from(dir).join(format!("kettle-overlay-{}.sock", std::process::id()));
             let _ = std::fs::remove_file(&path);
             let listener = match UnixListener::bind(&path) {
                 Ok(l) => l,
                 Err(e) => {
                     eprintln!("[overlay] cannot create {}: {e}", path.display());
-                    self.failed = true;
                     return;
                 }
             };
-            // The runtime folder is already private; this makes the socket itself private too.
             let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-            let exe = match std::env::current_exe() {
-                Ok(e) => e,
-                Err(e) => {
-                    eprintln!("[overlay] cannot find our own program: {e}");
-                    let _ = std::fs::remove_file(&path);
-                    self.failed = true;
-                    return;
-                }
-            };
-            // Wayland is hidden from the helper, so winit picks X11 (XWayland on a Wayland desktop).
-            let mut cmd = Process::new(exe);
-            cmd.arg("--overlay").arg(app.0.to_string()).arg("--socket").arg(&path);
-            if let Some(d) = &display {
-                // Inside Gamescope's X server: a normal window with the properties Gamescope draws on top.
-                cmd.arg("--gamescope").env("DISPLAY", d);
-            }
-            let child = cmd.env_remove("WAYLAND_DISPLAY").env("XDG_SESSION_TYPE", "x11").stdin(Stdio::null()).spawn();
-            match child {
-                Ok(c) => self.child = Some((c, app)),
-                Err(e) => {
-                    eprintln!("[overlay] cannot start the helper: {e}");
-                    let _ = std::fs::remove_file(&path);
-                    self.failed = true;
-                    return;
-                }
-            }
             self.socket = Some(path);
-            self.stop_accept = Arc::default();
-            self.accept(listener);
-        }
-
-        /// A thread waits for the helper to connect, then reads what it sends until it hangs up.
-        fn accept(&self, listener: UnixListener) {
-            let (conn, tx, wake, stop) =
-                (self.conn.clone(), self.tx.clone(), self.wake.clone(), self.stop_accept.clone());
-            let _ = listener.set_nonblocking(true);
+            let (conns, tx, wake, stop, fresh) =
+                (self.conns.clone(), self.tx.clone(), self.wake.clone(), self.stop.clone(), self.fresh.clone());
             let spawned = std::thread::Builder::new().name("overlay-accept".into()).spawn(move || {
-                let begin = Instant::now();
-                let stream = loop {
-                    if stop.load(Ordering::SeqCst) || begin.elapsed() > CONNECT_LIMIT {
+                for stream in listener.incoming() {
+                    if stop.load(Ordering::SeqCst) {
                         return;
                     }
-                    match listener.accept() {
-                        Ok((s, _)) => break s,
-                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                            std::thread::sleep(Duration::from_millis(50))
-                        }
-                        Err(_) => return,
+                    let Ok(stream) = stream else { continue };
+                    let _ = stream.set_write_timeout(Some(Duration::from_millis(300)));
+                    let Ok(reader) = stream.try_clone() else { continue };
+                    if let Ok(mut c) = conns.lock() {
+                        c.push(stream);
                     }
-                };
-                let _ = stream.set_nonblocking(false);
-                let _ = stream.set_write_timeout(Some(Duration::from_millis(500)));
-                let Ok(reader) = stream.try_clone() else { return };
-                if let Ok(mut c) = conn.lock() {
-                    *c = Some(stream);
-                }
-                let mut reader = BufReader::new(reader);
-                let mut buf = Vec::new();
-                while let Ok(Some(())) = overlay_ipc::read_line(&mut reader, &mut buf) {
-                    if let Some(msg) = overlay_ipc::decode::<FromHelper>(&buf) {
-                        if tx.send(msg).is_err() {
-                            return;
+                    fresh.store(true, Ordering::SeqCst);
+                    wake();
+                    let (conns, tx, wake) = (conns.clone(), tx.clone(), wake.clone());
+                    let _ = std::thread::Builder::new().name("overlay-conn".into()).spawn(move || {
+                        let mut r = BufReader::new(reader);
+                        let mut buf = Vec::new();
+                        loop {
+                            buf.clear();
+                            match r.by_ref().take(MAX_LINE as u64 + 1).read_until(b'\n', &mut buf) {
+                                Ok(0) | Err(_) => break,
+                                Ok(_) if buf.len() > MAX_LINE => break,
+                                Ok(_) => {}
+                            }
+                            if let Some(m) = decode::<FromHook>(&buf)
+                                && tx.send(m).is_ok()
+                            {
+                                wake();
+                            }
                         }
-                        wake();
-                    }
-                }
-                if let Ok(mut c) = conn.lock() {
-                    *c = None;
+                        // Dropped streams are removed lazily on the next failed write.
+                        if let Ok(mut c) = conns.lock() {
+                            c.retain(|s| s.peer_addr().is_ok() && s.take_error().ok().flatten().is_none());
+                        }
+                    });
                 }
             });
             if let Err(e) = spawned {
@@ -266,127 +214,68 @@ mod imp {
             }
         }
 
-        fn send(&mut self, msg: &ToHelper) -> bool {
-            let Ok(mut guard) = self.conn.lock() else { return false };
-            let Some(stream) = guard.as_mut() else { return false };
-            if overlay_ipc::send(stream, msg).is_err() {
-                *guard = None;
-                return false;
-            }
-            self.last_sent = Instant::now();
-            true
+        fn send(&self, msg: &ToHook) -> bool {
+            let line = encode(msg);
+            let Ok(mut c) = self.conns.lock() else { return false };
+            c.retain_mut(|s| s.write_all(&line).is_ok());
+            !c.is_empty()
         }
 
-        fn stop(&mut self) {
-            if self.child.is_some() {
-                self.send(&ToHelper::Quit);
-            }
-            self.stop_accept.store(true, Ordering::SeqCst);
-            if let Ok(mut c) = self.conn.lock() {
-                *c = None;
-            }
-            if let Some((mut child, _)) = self.child.take() {
-                // Our own child process only. Quit above normally ends it first.
-                let _ = child.kill();
-                let _ = child.wait();
-            }
-            if let Some(path) = self.socket.take() {
-                let _ = std::fs::remove_file(path);
-            }
-            self.ready = false;
-            self.visible = false;
-            self.pending_show = false;
-            self.dirty = false;
+        /// "Show overlay" in the menu. False when no library is connected (the in-process window is used).
+        pub fn toggle(&mut self, _client: &Client) -> bool {
+            self.active() && self.send(&ToHook::Toggle)
         }
 
-        fn hud_installed(&mut self) -> bool {
-            if let Some((at, v)) = self.detect
-                && at.elapsed() < Duration::from_secs(5)
-            {
-                return v;
-            }
-            let v = detect_hud().installed();
-            self.detect = Some((Instant::now(), v));
-            v
+        fn data(&self, client: &Client) -> Option<OverlayData> {
+            let app = self.app?;
+            let s = overlay_snapshot(client.state(), app, false)?;
+            let hud = client.state().settings.hud.preset != sr_steam::mangohud::Preset::Off;
+            Some(snapshot_to_data(&s, hud))
         }
 
-        fn snapshot(&mut self, client: &Client) -> Option<OverlaySnapshot> {
-            let app = self.child.as_ref().map(|(_, a)| *a)?;
-            let installed = self.hud_installed();
-            overlay_snapshot(client.state(), app, installed)
-        }
-
-        /// The shortcut was pressed (or "Show overlay" chosen). False when the helper is not in use, so the
-        /// caller shows the built-in window instead.
-        pub fn toggle(&mut self, client: &Client) -> bool {
-            if !self.active() {
-                return false;
-            }
-            if self.child.is_none() {
-                return true; // the game's display is not known yet; the key press is dropped
-            }
-            if self.last_hidden.is_some_and(|t| t.elapsed() < DEBOUNCE) {
-                return true;
-            }
-            if self.visible {
-                self.visible = false;
-                self.send(&ToHelper::Hide);
-            } else if let Some(s) = self.snapshot(client) {
-                if self.ready && self.send(&ToHelper::Show(s)) {
-                    self.visible = true;
-                } else {
-                    // Still starting: shown as soon as it says it is ready.
-                    self.pending_show = true;
-                }
-            }
-            true
-        }
-
-        /// Apply what the helper reported and keep a shown overlay up to date. Call once per frame.
+        /// Apply what the libraries reported and keep them supplied with data. Call once per frame.
         pub fn poll(&mut self, client: &mut Client, ctx: &eframe::egui::Context) {
             while let Ok(msg) = self.rx.try_recv() {
                 match msg {
-                    FromHelper::Ready => {
-                        self.ready = true;
-                        if self.pending_show {
-                            self.pending_show = false;
-                            if let Some(s) = self.snapshot(client) {
-                                self.visible = self.send(&ToHelper::Show(s));
+                    FromHook::Hello { .. } => {}
+                    FromHook::Visible { open } => self.visible = open,
+                    FromHook::Action { a } => match a {
+                        OverlayAction::OpenUrl { url } => {
+                            if let Err(e) = sr_client::open_url(&url) {
+                                eprintln!("[overlay] cannot open {url}: {e:#}");
                             }
                         }
-                    }
-                    FromHelper::Hidden => {
-                        self.visible = false;
-                        self.last_hidden = Some(Instant::now());
-                    }
-                    FromHelper::OpenChat { id } => {
-                        // Loads the history. The chat panel in the main window is closed again: it is behind the game.
-                        client.send(Command::OpenChat(SteamId(id)));
-                        client.send(Command::CloseFriends);
-                    }
-                    FromHelper::SendChat { id, text } => client.send(Command::SendChat(SteamId(id), text)),
-                    FromHelper::SetNote { app, text } => client.send(Command::SetNote(AppId(app), text)),
-                    FromHelper::SetOverlay { on } => client.send(Command::SetOverlay(on)),
-                    FromHelper::SetHud(h) => client.send(Command::SetHud(h)),
+                        OverlayAction::OpenChat { id } => {
+                            // Loads the history; the chat panel of the main window stays closed (it is behind the game).
+                            client.send(Command::OpenChat(SteamId(id)));
+                            client.send(Command::CloseFriends);
+                        }
+                        OverlayAction::SendChat { id, text } => client.send(Command::SendChat(SteamId(id), text)),
+                        OverlayAction::Screenshot | OverlayAction::PerfHud { .. } | OverlayAction::Close => {}
+                    },
                 }
             }
-            if self.visible {
-                if self.last_sent.elapsed() >= UPDATE_EVERY {
-                    self.dirty = false;
-                    if let Some(s) = self.snapshot(client) {
-                        self.send(&ToHelper::Update(s));
-                    }
-                } else {
-                    self.dirty = true;
-                    ctx.request_repaint_after(UPDATE_EVERY);
-                }
+            if !self.active() {
+                return;
             }
+            let every = if self.visible { UPDATE_OPEN } else { UPDATE_CLOSED };
+            let fresh = self.fresh.swap(false, Ordering::SeqCst);
+            if fresh || self.last_sent.elapsed() >= every {
+                if let Some(d) = self.data(client) {
+                    self.send(&ToHook::Data(d));
+                }
+                self.last_sent = Instant::now();
+            }
+            ctx.request_repaint_after(every);
         }
     }
 
     impl Drop for Host {
         fn drop(&mut self) {
-            self.stop();
+            self.stop.store(true, Ordering::SeqCst);
+            if let Some(p) = self.socket.take() {
+                let _ = std::fs::remove_file(p);
+            }
         }
     }
 }

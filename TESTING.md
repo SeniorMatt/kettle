@@ -77,30 +77,23 @@ Pick a small game you own (under 2 GB).
 
 ### In-game overlay (Shift+Tab)
 
-- [ ] KDE Wayland: start a game from the launcher. KDE shows a one-time "kettle wants to register a shortcut" prompt; accept it. System Settings → Shortcuts lists kettle "Show or hide the in-game overlay" with Shift+Tab.
-- [ ] With the game in focus (also fullscreen), Shift+Tab shows the dimmed overlay over it with a fade-in: game name, session time, clock, friends and chat, Notes, "Return to game".
-- [ ] Shift+Tab, Esc or "Return to game" hides it and the game has focus again (keyboard and mouse work).
-- [ ] Type a note, close, press Shift+Tab again: the note is still there. Restart the app: it is still there.
-- [ ] With no game running, Shift+Tab does nothing here: other programs get it (e.g. Shift+Tab moves focus backwards in a browser). Quit the game: same.
-- [ ] Settings → In Game → "Enable the in-game overlay" off: Shift+Tab is no longer taken and Games → "Show overlay" is gone.
-- [ ] X11 session: the same checks (the shortcut is a key grab, no prompt).
-- [ ] Windows: same checks with a fullscreen-windowed game. If the overlay shows behind an exclusive-fullscreen game, note it.
-- [ ] While the overlay is hidden the app uses no CPU (`top`).
+The overlay is drawn inside the game's own frames by `libkettle_overlay.so` and takes the game's input while open. The checks below need a real game; the automatic version is `scripts/overlay-test.sh` (a test program under Xvfb, run in CI).
 
-#### Overlay helper window (no window behaviour)
-The overlay is a second process, `kettle --overlay <appid> --socket <path>`, an override-redirect X11 window (XWayland on Wayland). Check with a game that runs under Proton (an XWayland window):
-- [ ] KDE Wayland: `pgrep -a kettle` shows the helper while the game runs, and it is gone a moment after the game exits. Games > "Show overlay" and Shift+Tab both show it.
-- [ ] No open or close animation of the desktop (no zoom, fade or minimize effect), no taskbar or task switcher entry, no new window in the KDE window list (`qdbus org.kde.KWin /KWin org.kde.KWin.showDesktop` or Alt+Tab).
-- [ ] The game is not minimized and not un-fullscreened when the overlay opens or closes, also for a fullscreen game (borderless and, if it works, exclusive). Repeat 20 times in a row (Shift+Tab, Shift+Tab, ...): no flicker and no double show (the 300 ms debounce).
-- [ ] While shown: typing in a note and in a chat does not reach the game (no WASD movement). After hiding, the game gets keyboard input at once.
-- [ ] Mouse: clicks hit the overlay buttons. A game that captures the mouse (FPS) may keep the pointer; note which games do.
-- [ ] The overlay covers the monitor the game is on (it uses the primary monitor; note if the game is on another one).
-- [ ] While hidden, the helper uses no CPU (`top -p $(pgrep -f 'kettle --overlay')`), and the compositor still unredirects a fullscreen game (nothing is mapped).
-- [ ] X11 session: same checks; Shift+Tab comes through the helper's keyboard grab, one press toggles once.
-- [ ] No `XDG_RUNTIME_DIR` or no `DISPLAY` (run the app with it unset): the built-in overlay window is used and a line `[overlay] ...; using the built-in overlay window` is printed.
-- [ ] `ls -l $XDG_RUNTIME_DIR/kettle-overlay-*.sock` shows mode `srw-------` while a game runs and no file after it exits or the app is closed.
-- [ ] Top bar shows game, session time, clock, Friends, Settings, Return to game. Friends: online and in-game friends first, click opens a chat, a sent message appears. Notes, quick settings (overlay on/off, performance overlay on/off, preset) work. Controls are about 40 px high.
-- [ ] Settings > Interface > Animations = Off: the overlay appears without a fade.
+**DDNet (SDL2, OpenGL or Vulkan backend, relative mouse), owner steps:**
+- [ ] Start DDNet from Kettle (a Linux build, or add the standalone release as a non-Steam game). `ls ~/.local/share/kettle/overlay/` shows `libkettle_overlay.so`; `ls ~/.local/share/vulkan/implicit_layer.d/kettle_overlay.json` exists.
+- [ ] In a running game press Shift+Tab: the overlay appears over the game, the mouse cursor is visible and moves freely (DDNet's mouse capture is released), and clicking an overlay button does nothing in the game (no shot, no hook).
+- [ ] Type in the Notes field: the text appears there and not in DDNet's chat or console.
+- [ ] Switch to another workspace and back: the overlay is still there, drawn in the game (it is not a separate window). Alt+Tab to another program and back: same.
+- [ ] Shift+Tab again (or Esc, or the close button): the overlay disappears, the cursor is hidden again, the mouse turns the view like before (relative mode is back) and DDNet's keys work. Repeat 20 times in a row: no stuck keys, no jump of the view.
+- [ ] Switch DDNet to the other graphics backend (Settings > Graphics: OpenGL / Vulkan) and repeat the above.
+- [ ] A Proton game (DXVK / Vulkan): Shift+Tab shows the overlay, the mouse works on it and the game does not receive the clicks; close restores the game's mouse. Note which games keep the pointer or show nothing.
+- [ ] Games > Show overlay (menu) opens and closes it too.
+- [ ] Performance monitor on in the overlay or in Settings: FPS and frame time show while the overlay is closed, at the top left.
+- [ ] Settings > In Game > "Enable the in-game overlay" off: Shift+Tab goes to the game, nothing opens.
+- [ ] With no game running, Kettle takes no Shift+Tab (it is no longer a global shortcut).
+- [ ] `ls -l $XDG_RUNTIME_DIR/kettle-overlay-*.sock` shows mode `srw-------` while Kettle runs and no file after it exits.
+- [ ] While the overlay is closed and the HUD is off, the game's frame rate is the same with and without it (`KETTLE_OVERLAY_DISABLE=1`).
+- [ ] 32-bit games get no overlay yet (follow-up: an i686 build of the library). Gamescope games use the in-process window.
 
 #### Gamescope (Settings > Run games in Gamescope; `sr-cli launch <appid> --dry-run --gamescope`)
 Needs `gamescope` installed (`sudo apt install gamescope`). Never tried in a real session yet; test on KDE Wayland first.
@@ -110,7 +103,7 @@ Needs `gamescope` installed (`sudo apt install gamescope`). Never tried in a rea
 - [ ] Window / Borderless / Windowed, game resolution lower than the window with FSR, NIS and Nearest: the picture is scaled. Sharpness changes the FSR look.
 - [ ] Frame rate limit: the game is capped (turn the performance overlay on to see it). With the cap only on the performance overlay, it still caps (through Gamescope) and does not cap twice.
 - [ ] Performance overlay on with `mangoapp` installed: one HUD, drawn by Gamescope; `MANGOHUD=1` is not in the command. Without `mangoapp`: the usual in-game HUD.
-- [ ] Overlay: `ls $XDG_RUNTIME_DIR/kettle-gamescope-*.display` shows `:N` a few seconds after the start. Shift+Tab draws the overlay over the game without changing the game's focus; keys type into chat; mouse clicks hit the buttons; closing returns input to the game. Repeat 20 times. If the overlay never shows, the terminal says `[overlay] the game's Gamescope display never appeared` after 90 s and the built-in window is used.
+- [ ] Overlay in Gamescope: the library is not loaded there; Games > Show overlay opens the in-process window.
 - [ ] Mouse: a game that loses the mouse works with "Always grab the mouse" on. Note which games need it.
 - [ ] HDR only with the switch on and an HDR screen. Adaptive sync only with the switch on.
 - [ ] NVIDIA: Gamescope needs a recent driver and `nvidia-drm.modeset=1`; note any black window, missing cursor or crash and the driver version.

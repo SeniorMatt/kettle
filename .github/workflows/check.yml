@@ -14,6 +14,8 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+      - name: SDL2 runtime (the overlay test program links it)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libsdl2-2.0-0
       - name: Check
         run: cargo check --workspace --all-targets --keep-going --message-format short
       - name: Test
@@ -40,3 +42,16 @@ jobs:
         with:
           name: overlay-shots
           path: target/overlay-shots/
+      - name: Overlay library on a virtual screen
+        if: always()
+        run: |
+          sudo apt-get install -y -qq mesa-utils libgl1-mesa-dri vulkan-tools x11-apps ffmpeg xdotool xvfb mesa-vulkan-drivers >/dev/null
+          cargo build -p sr-overlay-hook --lib --example sdl_test
+          scripts/overlay-test.sh target/overlay-hook
+          scripts/overlay-gl-vk-test.sh target/overlay-hook
+          scripts/overlay-ddnet-test.sh target/overlay-hook
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: overlay-hook-shots
+          path: target/overlay-hook/
