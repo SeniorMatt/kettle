@@ -39,6 +39,8 @@ mod protondb;
 mod settings;
 mod shortcuts;
 #[cfg(target_os = "linux")]
+mod steam_warm;
+mod steamroot;
 mod steamworks_host;
 mod storage;
 mod store_more;
@@ -97,6 +99,7 @@ pub use overlay_proto::{
     snapshot as overlay_snapshot,
 };
 pub use play::{PlayProblem, RunningGame};
+pub use sr_steam::steam_client::Background as SteamBackground;
 pub use profile::{EditPhase, ProfileEntry, ProfileLoad, ProfileState};
 pub use protondb::{ProtonDbRating, Tier as ProtonTier, page_url as protondb_page_url};
 pub use settings::{LibraryChoice, MAX_WORKERS, MIN_WORKERS, Settings};
@@ -344,8 +347,10 @@ pub enum Command {
     ProtonRemove(PathBuf),
     SetLibrary(Option<PathBuf>),
     SetWorkers(usize),
-    /// Start the official Steam client in the background for games that need it.
-    SetStartSteam(bool),
+    /// "Start Steam in the background": Automatic / Always / Never.
+    SetSteamBackground(sr_steam::steam_client::Background),
+    /// "Run games without the Steam client (experimental)".
+    SetOwnSteamclient(bool),
     /// "Write Proton logs": Windows games started with `PROTON_LOG=1` (log files in the data dir's `logs`).
     /// The toggle is in Settings > Compatibility.
     SetProtonLog(bool),
@@ -596,6 +601,10 @@ pub struct Client {
     rt: std::mem::ManuallyDrop<tokio::runtime::Runtime>,
     /// The shared Steam connection of the signed-in account.
     hub: Option<cm_hub::HubHandle>,
+    /// The background start of the official client was decided for this setting (see `steam_warm`).
+    warm_done: bool,
+    /// Kettle's Steamworks service for games that run without the official client (experimental).
+    sw_host: Option<steam_warm::SwHost>,
     /// Installed games the account doesn't own (or that the owned list doesn't have yet).
     local_only: HashSet<u32>,
     tx: mpsc::Sender<Event>,
@@ -681,6 +690,8 @@ impl Client {
             gamepage_at: HashMap::new(),
             rt: std::mem::ManuallyDrop::new(rt),
             hub: None,
+            warm_done: false,
+            sw_host: None,
             local_only: HashSet::new(),
             tx,
             rx,
@@ -741,7 +752,8 @@ impl Client {
             Command::ProtonRemove(dir) => self.proton_remove(dir),
             c @ (Command::SetLibrary(_)
             | Command::SetWorkers(_)
-            | Command::SetStartSteam(_)
+            | Command::SetSteamBackground(_)
+            | Command::SetOwnSteamclient(_)
             | Command::SetProtonLog(_)
             | Command::SetOverlay(_)
             | Command::SetInterface(_)) => settings::handle(self, c),
@@ -870,6 +882,7 @@ impl Client {
                 self.state.games = list;
                 self.capture_base_play();
                 self.merge_installed();
+                self.push_to_host();
             }
             Event::OwnedFailed { generation, error } if generation == current => {
                 self.state.refreshing = false;
@@ -880,6 +893,8 @@ impl Client {
                 self.state.timings.local_scan = Some(took);
                 self.installed = apps;
                 self.merge_installed();
+                self.warm_steam();
+                self.push_to_host();
                 self.run_pending_play(true);
             }
             Event::DlProgress { job, progress } => self.dl_progress(job, progress),
@@ -1184,6 +1199,7 @@ impl Client {
         }
         self.bump_generation();
         self.hub = None;
+        self.sw_host = None;
         self.state.connection = ConnectionStatus::Offline;
         self.reset_friends();
         self.state.profile = ProfileState::default();
@@ -1235,6 +1251,7 @@ impl Client {
         let Some(s) = &self.session else { return };
         let generation = self.generation.load(Ordering::Relaxed);
         self.state.connection = ConnectionStatus::Connecting;
+        self.sw_host = None; // it holds the old hub
         self.hub = Some(cm_hub::spawn(
             self.rt.handle(),
             s.account.account_name.clone(),
@@ -1244,6 +1261,7 @@ impl Client {
             self.tx.clone(),
             self.wake.clone(),
         ));
+        self.sync_steamworks_host();
     }
 
     /// Load the owned games over the shared connection. If a request fails, it is tried again on the next

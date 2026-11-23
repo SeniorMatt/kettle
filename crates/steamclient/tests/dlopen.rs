@@ -307,7 +307,7 @@ fn games_can_use_kettles_steamclient() {
         assert_eq!(auth(su, small.as_mut_ptr(), 2, &mut tl), 0, "a ticket that does not fit is refused");
 
         // Interfaces we do not implement are safe to call.
-        for ver in ["SteamInput006", "STEAMREMOTESTORAGE_INTERFACE_VERSION016", "SteamNetworkingSockets012"] {
+        for ver in ["STEAMREMOTESTORAGE_INTERFACE_VERSION016", "SteamNetworkingSockets012", "SteamFutureThing001"] {
             let o = get3(17, ver);
             assert!(!o.is_null(), "{ver}");
             for i in 0..60 {

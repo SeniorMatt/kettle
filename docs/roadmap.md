@@ -86,13 +86,17 @@ Nothing here is a promise. The owner decides what comes next. Bugs found on real
 - [x] Play: umu-launcher support
 - [x] Play: running state, stop, play-time tracking
 - [x] Play: start the official client in the background for Steamworks games
+- [x] Play: Steam is warm before Play (Automatic/Always/Never, low priority, per-install scan cache, IPC readiness instead of a fixed wait)
+- [ ] Play: Steam warm start timed on the owner's machine (start to IPC ready)
 - [ ] Play: tested on a real game on a real machine
 - [x] Play: launch options and command-line arguments per game
 - [x] Play: run games in Gamescope (option; unit-tested, not tried in a session yet)
 - [ ] Play: pre-launch checks (first-time setup, redistributables)
 - [ ] Play: play time synced with Steam's servers
 - [x] Play: own steamclient core (exports, ISteamClient/User/Apps/Utils/UserStats/Friends tables, null objects, socket host; see docs/steamclient-design.md; built, tested by loading it like a game against a fake host)
-- [ ] Play: own steamclient checked against Valve's headers and a real Steamworks game on Linux
+- [x] Play: own steamclient vtables compared with the public headers (Client 017-023, User 017-023, Friends 015-018, Utils 007-011, Apps 006-009, UserStats 011-013; Input/RemoteStorage/NetworkingUtils and the rest as do-nothing objects)
+- [x] Play: setting "Run games without the Steam client (experimental)" (off by default; Kettle-owned Steam root, host wired to the session)
+- [ ] Play: own steamclient run by a real Steamworks game on Linux (dlopen test with Valve's libsteam_api.so written; needs a machine with one)
 - [ ] Play: own steamclient tickets (ownership and encrypted app tickets over the CM, built; auth session ticket framing and DRM-stub interface not yet)
 - [ ] Play: own steamclient stats and achievements synced with Steam (local file only so far; needs the stats schema)
 - [ ] Play: own steamclient 32-bit build (i686) for 32-bit games

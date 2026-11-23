@@ -97,7 +97,11 @@ impl Client {
         let name = self.state.game(app).map(|g| g.name.clone()).unwrap_or_default();
         let installed = self.installed.get(&app.0).cloned();
         let (tx, wake) = (self.tx.clone(), self.wake.clone());
-        let start_steam = self.state.settings.start_steam;
+        let steam = super::steam_warm::SteamPlay {
+            background: self.state.settings.steam_background,
+            own: self.state.settings.own_steamclient,
+        };
+        let stamp = installed.as_ref().map_or(0, super::steam_warm::stamp);
         let (ours, account) = self.launch_options_for(app);
         let options = LaunchText {
             ours,
@@ -109,7 +113,7 @@ impl Client {
             env: self.state.game_env.get(app),
         };
 
-        self.rt.spawn_blocking(move || launch(app, name, installed, start_steam, options, tx, wake));
+        self.rt.spawn_blocking(move || launch(app, name, installed, (steam, stamp), options, tx, wake));
     }
 
     /// Stop a running game: end its whole process group (the game, Proton and the helpers).
@@ -184,7 +188,7 @@ fn launch(
     app: AppId,
     name: String,
     installed: Option<InstalledApp>,
-    start_steam: bool,
+    (steam, stamp): (super::steam_warm::SteamPlay, u64),
     options: LaunchText,
     tx: mpsc::Sender<Event>,
     wake: Waker,
@@ -248,10 +252,9 @@ fn launch(
         },
         Err(e) => Err(e),
     };
-    let prepared = prepared.inspect(|p| {
-        if start_steam {
-            ensure_steam(app, &p.install_dir, &send);
-        }
+    let prepared = prepared.map(|mut p| {
+        prepare_steam(app, &mut p.plan, &p.install_dir, stamp, steam, &send);
+        p
     });
     let (result, details) = match prepared {
         Ok(p) => (start(&p.plan, &preamble, &send).map(|pid| (pid, p.gamescope)), run::describe(&p.plan)),
@@ -301,11 +304,71 @@ fn explain_log(tail: &str) -> Option<&'static str> {
     }
 }
 
-/// Games that use the Steamworks API only start while the official client runs: start it first when allowed.
-/// Never fails the launch; if the client can't be started the game still starts, with a note for an early exit.
-fn ensure_steam(app: AppId, install_dir: &std::path::Path, send: &impl Fn(Event)) {
+/// Steam for one launch. Games without the Steamworks API never wait for anything. For the others: in own mode the
+/// game gets Kettle's steamclient (and Steam is never started); otherwise the official client must be up, which
+/// costs nothing when the background start already did it.
+fn prepare_steam(
+    app: AppId,
+    plan: &mut run::LaunchPlan,
+    install_dir: &std::path::Path,
+    stamp: u64,
+    steam: super::steam_warm::SteamPlay,
+    send: &impl Fn(Event),
+) {
+    use sr_steam::steam_client::{Background, ScanCache};
+    if steam.background == Background::Never && !steam.own {
+        return;
+    }
+    let mut cache = ScanCache::load();
+    let (uses, changed) = cache.uses(app.0, install_dir, stamp, sr_steam::steam_client::uses_steamworks);
+    if changed {
+        cache.save();
+    }
+    if !uses {
+        return;
+    }
+    if steam.own {
+        match use_own_steamclient(app, plan) {
+            Ok(()) => return,
+            Err(why) => {
+                eprintln!("[steamclient] own mode not used: {why}");
+                if steam.background == Background::Never {
+                    return;
+                }
+                // Fall through to the official client; say why if the game then fails early.
+                send(Event::SteamMissing { app, message: format!("{why}. Kettle started the Steam client instead.") });
+            }
+        }
+    }
+    ensure_steam(app, send);
+}
+
+/// Point a game at Kettle's own steamclient: the library is installed for the game, the socket and the app id are
+/// in its environment. Any problem is an `Err` with a sentence, and the caller falls back.
+fn use_own_steamclient(app: AppId, plan: &mut run::LaunchPlan) -> Result<(), String> {
+    let src = super::steamroot::library_source()
+        .ok_or("Kettle's own steamclient library (libsteamclient.so) was not found next to Kettle")?;
+    let home = std::env::var_os("HOME").map(PathBuf::from).ok_or("no home folder")?;
+    let root = super::steamroot::prepare(&super::steamroot::default_root(), &src, &home)?;
+    own_env(&mut plan.env, app, &root, &sr_steamclient::proto::socket_path());
+    Ok(())
+}
+
+/// The variables a game needs to use Kettle's steamclient.
+fn own_env(env: &mut BTreeMap<String, String>, app: AppId, root: &std::path::Path, sock: &std::path::Path) {
+    let a = app.0.to_string();
+    env.insert("SteamAppId".into(), a.clone());
+    env.insert("SteamGameId".into(), a);
+    env.insert("KETTLE_STEAMCLIENT_SOCK".into(), sock.to_string_lossy().into_owned());
+    env.insert("STEAM_COMPAT_CLIENT_INSTALL_PATH".into(), root.to_string_lossy().into_owned());
+}
+
+/// The game needs the official client: start it if it is not running and wait until its IPC answers (no fixed
+/// delay; no waiting at all when it is up). Never fails the launch; if the client can't be started the game still
+/// starts, with a note for an early exit.
+fn ensure_steam(app: AppId, send: &impl Fn(Event)) {
     use sr_steam::steam_client::{self as sc, Started};
-    if !sc::uses_steamworks(install_dir) || sc::is_running() {
+    if sc::is_running() && sc::ipc_ready() {
         return;
     }
     send(Event::SteamStarting { app });
@@ -377,6 +440,16 @@ mod tests {
         let (got, success) = done_rx.recv_timeout(std::time::Duration::from_secs(10)).expect("exit event");
         assert_eq!((got, success), (AppId(app), true));
         let _ = std::fs::remove_file(run::log_path(app));
+    }
+
+    #[test]
+    fn own_mode_sets_the_game_up() {
+        let mut env = BTreeMap::new();
+        own_env(&mut env, AppId(480), std::path::Path::new("/root"), std::path::Path::new("/run/s.sock"));
+        assert_eq!(env["SteamAppId"], "480");
+        assert_eq!(env["SteamGameId"], "480");
+        assert_eq!(env["KETTLE_STEAMCLIENT_SOCK"], "/run/s.sock");
+        assert_eq!(env["STEAM_COMPAT_CLIENT_INSTALL_PATH"], "/root");
     }
 
     #[test]

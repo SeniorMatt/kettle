@@ -240,3 +240,15 @@ These are unit-tested but not tried on the desktop yet.
 - [ ] Add a Game: type the full path of a Linux program (or pick an installed app: name, program and icon fill in). It appears in the library; Play starts it; the play time grows after it exits.
 - [ ] Add a `.exe`: it starts through Proton (default tool) with a prefix in `~/.local/share/kettle/compatdata/<id>`.
 - [ ] "Import from Steam" adds the shortcuts of the official client; Steam's `shortcuts.vdf` is unchanged (compare its modification time). "Remove from library" takes a game off the list and leaves its files.
+
+### Steam is warm before Play (owner steps)
+- [ ] Quit the official Steam client. Start Kettle with a Steamworks game installed (one that has `libsteam_api.so` or `steam_api64.dll`). Settings > In Game > "Start Steam in the background" is Automatic. Within a few seconds `pgrep -x steam` shows the client, with no Steam window and `ps -o ni -p $(pgrep -x steam)` shows nice 10 (the launcher chain `nice`/`ionice`). `~/.local/share/kettle/logs/steam-client.log` exists. Start Kettle again: no second client.
+- [ ] Press Play on that game right after Kettle opened: the button says "Starting Steam…" only while the client is still starting and the game starts the moment the client answers (no fixed 3 s pause). With the client already running, Play starts the game at once.
+- [ ] A game without the Steamworks library never starts or waits for Steam. Setting "Never": Kettle never starts the client (such a game may fail to start). "Always": the client starts even with no Steamworks game installed. A game's scan answer is cached in `~/.local/share/kettle/steamworks-scan.json` (per install and build); the second start of Kettle does not walk the game folders.
+- [ ] Quit Kettle: the client keeps running (like Steam's tray icon). Quit the client by hand when you want it gone.
+
+### Run games without the Steam client (experimental, default OFF)
+Off until you have tested it on real games. Needs: signed in to Kettle, `libsteamclient.so` next to the `kettle` program (built with `cargo build -p sr-steamclient`), and NO official Steam install in `~/.steam` (Kettle never changes the official client's links; with one present it says so and starts the official client instead).
+- [ ] Settings > In Game > turn on "Run games without the Steam client (experimental)". Start a Steamworks game: no `steam` process starts; `~/.steam/sdk64/steamclient.so` points to `~/.local/share/kettle/steamroot/linux64/steamclient.so`; the game gets past its Steam check. Report which games work and which interface names the game log lists as "not implemented" (`[steamclient]` lines in `launch-<id>.log`).
+- [ ] Turn it off: Steamworks games use the official client again (behaviour above).
+- [ ] With `libsteam_api.so` from one of your games: `cargo test -p sr-steamclient --test real_api` copies it to a temp folder and calls `SteamAPI_Init` against our library and a fake host (it never starts Steam and skips when it finds no library; `KETTLE_LIBSTEAM_API=<file>` picks one).

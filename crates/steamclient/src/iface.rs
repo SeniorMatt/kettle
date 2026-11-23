@@ -64,51 +64,21 @@ pub extern "C" fn empty_str() -> *const c_char {
 extern "C" fn minus_one() -> i32 {
     -1
 }
+/// A `bool` slot whose safe answer is "yes".
+extern "C" fn ret_true() -> bool {
+    true
+}
 extern "C" fn byte_ff() -> u8 {
     255
 }
 
 // ---------------------------------------------------------------- interface kinds
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Kind {
-    Client,
-    User,
-    Friends,
-    Utils,
-    Apps,
-    UserStats,
-}
+pub use crate::layout::{Kind, classify};
+use crate::layout::{slots, stats_are_pushed};
 
-fn num_after(ver: &str, prefix: &str) -> Option<u32> {
-    let rest = ver.strip_prefix(prefix)?;
-    if rest.is_empty() || !rest.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    rest.parse().ok()
-}
-
-/// The kind and number of a version string we implement. Everything else gets the null object.
-pub fn classify(ver: &str) -> Option<(Kind, u32)> {
-    let table: [(&str, Kind, std::ops::RangeInclusive<u32>); 6] = [
-        ("SteamClient", Kind::Client, 17..=21),
-        ("SteamUser", Kind::User, 19..=23),
-        ("SteamFriends", Kind::Friends, 15..=18),
-        ("SteamUtils", Kind::Utils, 9..=10),
-        ("STEAMAPPS_INTERFACE_VERSION", Kind::Apps, 6..=8),
-        ("STEAMUSERSTATS_INTERFACE_VERSION", Kind::UserStats, 11..=13),
-    ];
-    for (prefix, kind, range) in table {
-        if let Some(n) = num_after(ver, prefix)
-            && range.contains(&n)
-        {
-            return Some((kind, n));
-        }
-    }
-    None
-}
-
-/// Does `CreateInterface`/`Steam_IsKnownInterface` know this name?
+/// Does `CreateInterface`/`Steam_IsKnownInterface` know this name? Every Steamworks interface we recognise is
+/// answered (the ones without an implementation by a do-nothing object).
 pub fn is_known(ver: &str) -> bool {
     classify(ver).is_some()
 }
@@ -123,28 +93,143 @@ fn new_object(table: *const usize) -> usize {
     Box::leak(Box::new(table)) as *mut *const usize as usize
 }
 
-/// The object for `ver`, created on first use. Unknown versions get a null object (and a log line, once).
+/// A do-nothing table (unknown or unimplemented interface): 160 slots that return 0 / false / NULL.
+fn null_table() -> *const usize {
+    leak_table(vec![zero as *const () as usize; 160])
+}
+
+/// The slot table of a known interface version: every method name gets its implementation or the do-nothing slot.
+fn table_for(kind: Kind, n: u32) -> *const usize {
+    let names = slots(kind, n);
+    if kind == Kind::Stub {
+        return null_table();
+    }
+    let t: Vec<usize> = names.iter().map(|name| resolve(kind, name)).collect();
+    if kind == Kind::Input {
+        // ISteamInput has 48 slots; only the first two mean something.
+        let mut t = t;
+        t.resize(64, zero as *const () as usize);
+        return leak_table(t);
+    }
+    leak_table(t)
+}
+
+/// The function behind method `name` of `kind`; [`zero`] when we do not implement it.
+pub fn resolve(kind: Kind, name: &str) -> usize {
+    let f = |p: *const ()| p as usize;
+    let z = f(zero as *const ());
+    match kind {
+        Kind::Client => match name {
+            "CreateSteamPipe" => f(client_create_pipe as *const ()),
+            "BReleaseSteamPipe" => f(client_release_pipe as *const ()),
+            "ConnectToGlobalUser" => f(client_connect_user as *const ()),
+            "CreateLocalUser" => f(client_create_local_user as *const ()),
+            "GetISteamUtils" => f(client_get_utils as *const ()),
+            "BShutdownIfAllPipesClosed" => f(client_shutdown_if_closed as *const ()),
+            n if n.starts_with("GetISteam") => f(client_get_interface as *const ()),
+            _ => z,
+        },
+        Kind::User => match name {
+            "GetHSteamUser" => f(user_hsteam_user as *const ()),
+            "BLoggedOn" => f(user_logged_on as *const ()),
+            "GetSteamID" => f(user_steam_id as *const ()),
+            "GetAuthSessionTicket" => f(user_auth_session_ticket as *const ()),
+            "BeginAuthSession" => f(user_begin_auth_session as *const ()),
+            "CancelAuthTicket" => f(user_cancel_auth_ticket as *const ()),
+            "UserHasLicenseForApp" => f(user_has_license as *const ()),
+            "RequestEncryptedAppTicket" => f(user_request_encrypted_ticket as *const ()),
+            "GetEncryptedAppTicket" => f(user_get_encrypted_ticket as *const ()),
+            _ => z,
+        },
+        Kind::Friends => match name {
+            "GetPersonaName" => f(friends_persona_name as *const ()),
+            "GetPersonaState" => f(friends_persona_state as *const ()),
+            "GetFriendPersonaState" => f(friends_friend_state as *const ()),
+            "GetFriendPersonaName" => f(friends_friend_name as *const ()),
+            "GetFriendPersonaNameHistory" => f(empty_str as *const ()),
+            "SetRichPresence" => f(ret_true as *const ()),
+            _ => z,
+        },
+        Kind::Utils => match name {
+            "GetSecondsSinceAppActive" | "GetSecondsSinceComputerActive" => f(utils_seconds_since_start as *const ()),
+            "GetConnectedUniverse" => f(utils_universe as *const ()),
+            "GetServerRealTime" => f(utils_server_real_time as *const ()),
+            "GetIPCountry" => f(empty_str as *const ()),
+            "GetCurrentBatteryPower" => f(byte_ff as *const ()),
+            "GetAppID" => f(utils_app_id as *const ()),
+            "IsAPICallCompleted" => f(utils_is_call_completed as *const ()),
+            "GetAPICallFailureReason" => f(minus_one as *const ()),
+            "GetAPICallResult" => f(utils_call_result as *const ()),
+            "GetSteamUILanguage" => f(utils_ui_language as *const ()),
+            _ => z,
+        },
+        Kind::Apps => match name {
+            "BIsSubscribed" => f(apps_subscribed as *const ()),
+            "GetCurrentGameLanguage" => f(apps_language as *const ()),
+            "GetAvailableGameLanguages" => f(apps_available_languages as *const ()),
+            "BIsSubscribedApp" | "BIsDlcInstalled" => f(apps_subscribed_app as *const ()),
+            "GetAppInstallDir" => f(apps_install_dir as *const ()),
+            "BIsAppInstalled" => f(apps_is_installed as *const ()),
+            "GetAppOwner" => f(apps_owner as *const ()),
+            "GetLaunchQueryParam" => f(empty_str as *const ()),
+            "GetAppBuildId" => f(apps_build_id as *const ()),
+            "GetLaunchCommandLine" => f(apps_launch_command_line as *const ()),
+            _ => z,
+        },
+        Kind::UserStats => match name {
+            "RequestCurrentStats" => f(us_request_current_stats as *const ()),
+            "GetStatInt" => f(us_get_stat_int as *const ()),
+            "GetStatFloat" => f(us_get_stat_float as *const ()),
+            "SetStatInt" => f(us_set_stat_int as *const ()),
+            "SetStatFloat" => f(us_set_stat_float as *const ()),
+            "GetAchievement" => f(us_get_achievement as *const ()),
+            "SetAchievement" => f(us_set_achievement as *const ()),
+            "ClearAchievement" => f(us_clear_achievement as *const ()),
+            "GetAchievementAndUnlockTime" => f(us_get_achievement_and_time as *const ()),
+            "StoreStats" => f(us_store_stats as *const ()),
+            "GetAchievementDisplayAttribute" | "GetAchievementName" => f(empty_str as *const ()),
+            "ResetAllStats" => f(us_reset_all as *const ()),
+            _ => z,
+        },
+        Kind::Input => match name {
+            "Init" | "Shutdown" => f(ret_true as *const ()),
+            _ => z,
+        },
+        Kind::Stub => z,
+    }
+}
+
+/// The object for `ver`, created on first use. Unknown versions get a null object (and a log line, once): a
+/// game never crashes on an interface we have not heard of, its calls just do nothing.
 pub fn interface_for(ver: &str) -> usize {
     if let Some(p) = g().interfaces.get(ver) {
         return *p;
     }
-    let table = match classify(ver) {
-        Some((Kind::Client, n)) => client_table(n),
-        Some((Kind::User, n)) => user_table(n),
-        Some((Kind::Friends, _)) => friends_table(),
-        Some((Kind::Utils, _)) => utils_table(),
-        Some((Kind::Apps, _)) => apps_table(),
-        Some((Kind::UserStats, _)) => user_stats_table(),
-        None => {
+    let class = classify(ver);
+    let table = match class {
+        Some((kind, n)) if kind != Kind::Stub => table_for(kind, n),
+        other => {
             let first = g().warned.insert(ver.to_string());
             if first {
-                log(&format!("interface {ver} is not implemented; calls on it do nothing"));
+                let what = if other.is_some() { "is only a do-nothing object" } else { "is unknown" };
+                log(&format!("interface {ver} {what}; calls on it do nothing"));
             }
-            leak_table(vec![zero as *const () as usize; 160])
+            null_table()
         }
     };
     let obj = new_object(table);
     g().interfaces.insert(ver.to_string(), obj);
+    // From ISteamUserStats013 on there is no RequestCurrentStats: the client sends the stats by itself.
+    if let Some((Kind::UserStats, n)) = class
+        && stats_are_pushed(n)
+        && !us_request_current_stats(std::ptr::null_mut())
+    {
+        // Without an answer the game would wait for its stats for ever: tell it there is no connection.
+        let mut cb = game_id().to_le_bytes().to_vec();
+        cb.extend_from_slice(&ERESULT_NO_CONNECTION.to_le_bytes());
+        cb.extend_from_slice(&identity().steam_id.to_le_bytes());
+        g().push(CB_USER_STATS_RECEIVED, cb);
+    }
     obj
 }
 
@@ -183,58 +268,6 @@ extern "C" fn client_get_utils(_t: This, _pipe: i32, ver: *const c_char) -> usiz
 }
 extern "C" fn client_shutdown_if_closed(_t: This) -> bool {
     g().pipes.is_empty()
-}
-
-fn client_table(n: u32) -> *const usize {
-    let get = client_get_interface as *const () as usize;
-    let mut t = vec![
-        client_create_pipe as *const () as usize,       // 0 CreateSteamPipe
-        client_release_pipe as *const () as usize,      // 1 BReleaseSteamPipe
-        client_connect_user as *const () as usize,      // 2 ConnectToGlobalUser
-        client_create_local_user as *const () as usize, // 3 CreateLocalUser
-        zero as *const () as usize,                     // 4 ReleaseUser
-        get,                                            // 5 GetISteamUser
-        get,                                            // 6 GetISteamGameServer
-        zero as *const () as usize,                     // 7 SetLocalIPBinding
-        get,                                            // 8 GetISteamFriends
-        client_get_utils as *const () as usize,         // 9 GetISteamUtils
-        get,                                            // 10 GetISteamMatchmaking
-        get,                                            // 11 GetISteamMatchmakingServers
-        get,                                            // 12 GetISteamGenericInterface
-        get,                                            // 13 GetISteamUserStats
-        get,                                            // 14 GetISteamGameServerStats
-        get,                                            // 15 GetISteamApps
-        get,                                            // 16 GetISteamNetworking
-        get,                                            // 17 GetISteamRemoteStorage
-        get,                                            // 18 GetISteamScreenshots
-    ];
-    if n >= 20 {
-        t.push(get); // GetISteamGameSearch (layout to verify against the 020/021 headers)
-    }
-    t.extend([
-        zero as *const () as usize,                      // GetIPCCallCount
-        zero as *const () as usize,                      // SetWarningMessageHook
-        client_shutdown_if_closed as *const () as usize, // BShutdownIfAllPipesClosed
-        get,                                             // GetISteamHTTP
-        get,                                             // GetISteamUnifiedMessages (deprecated)
-        get,                                             // GetISteamController
-        get,                                             // GetISteamUGC
-        get,                                             // GetISteamAppList
-        get,                                             // GetISteamMusic
-        get,                                             // GetISteamMusicRemote
-        get,                                             // GetISteamHTMLSurface
-        zero as *const () as usize,                      // Set_SteamAPI_CPostAPIResultInProcess (deprecated)
-        zero as *const () as usize,                      // Remove_SteamAPI_CPostAPIResultInProcess (deprecated)
-        zero as *const () as usize,                      // Set_SteamAPI_CCheckCallbackRegisteredInProcess
-        get,                                             // GetISteamInventory
-        get,                                             // GetISteamVideo
-        get,                                             // GetISteamParentalSettings
-        get,                                             // GetISteamInput
-        get,                                             // GetISteamParties
-        get,                                             // GetISteamRemotePlay
-        zero as *const () as usize,                      // DestroyAllInterfaces
-    ]);
-    leak_table(t)
 }
 
 // ---------------------------------------------------------------- ISteamUser
@@ -326,50 +359,6 @@ extern "C" fn user_get_encrypted_ticket(_t: This, buf: *mut u8, max: i32, out_le
     true
 }
 
-fn user_table(n: u32) -> *const usize {
-    let z = zero as *const () as usize;
-    let mut t = vec![
-        user_hsteam_user as *const () as usize,         // 0 GetHSteamUser
-        user_logged_on as *const () as usize,           // 1 BLoggedOn
-        user_steam_id as *const () as usize,            // 2 GetSteamID
-        z,                                              // 3 InitiateGameConnection_DEPRECATED
-        z,                                              // 4 TerminateGameConnection_DEPRECATED
-        z,                                              // 5 TrackAppUsageEvent
-        z,                                              // 6 GetUserDataFolder
-        z,                                              // 7 StartVoiceRecording
-        z,                                              // 8 StopVoiceRecording
-        z,                                              // 9 GetAvailableVoice
-        z,                                              // 10 GetVoice
-        z,                                              // 11 DecompressVoice
-        z,                                              // 12 GetVoiceOptimalSampleRate
-        user_auth_session_ticket as *const () as usize, // 13 GetAuthSessionTicket
-    ];
-    if n >= 23 {
-        t.push(z); // GetAuthTicketForWebApi (layout to verify against the 023 header)
-    }
-    t.extend([
-        user_begin_auth_session as *const () as usize,       // BeginAuthSession
-        z,                                                   // EndAuthSession
-        user_cancel_auth_ticket as *const () as usize,       // CancelAuthTicket
-        user_has_license as *const () as usize,              // UserHasLicenseForApp
-        z,                                                   // BIsBehindNAT
-        z,                                                   // AdvertiseGame
-        user_request_encrypted_ticket as *const () as usize, // RequestEncryptedAppTicket
-        user_get_encrypted_ticket as *const () as usize,     // GetEncryptedAppTicket
-        z,                                                   // GetGameBadgeLevel
-        z,                                                   // GetPlayerSteamLevel
-        z,                                                   // RequestStoreAuthURL
-        z,                                                   // BIsPhoneVerified
-        z,                                                   // BIsTwoFactorEnabled
-        z,                                                   // BIsPhoneIdentifying
-        z,                                                   // BIsPhoneRequiringVerification
-        z,                                                   // GetMarketEligibility
-        z,                                                   // GetDurationControl
-        z,                                                   // BSetDurationControlOnlineState
-    ]);
-    leak_table(t)
-}
-
 // ---------------------------------------------------------------- ISteamUtils
 
 extern "C" fn utils_seconds_since_start(_t: This) -> u32 {
@@ -424,47 +413,6 @@ extern "C" fn utils_ui_language(_t: This) -> *const c_char {
     cs(if l.is_empty() { "english" } else { l.as_str() })
 }
 
-fn utils_table() -> *const usize {
-    let z = zero as *const () as usize;
-    leak_table(vec![
-        utils_seconds_since_start as *const () as usize, // 0 GetSecondsSinceAppActive
-        utils_seconds_since_start as *const () as usize, // 1 GetSecondsSinceComputerActive
-        utils_universe as *const () as usize,            // 2 GetConnectedUniverse
-        utils_server_real_time as *const () as usize,    // 3 GetServerRealTime
-        empty_str as *const () as usize,                 // 4 GetIPCountry
-        z,                                               // 5 GetImageSize
-        z,                                               // 6 GetImageRGBA
-        z,                                               // 7 GetCSERIPPort
-        byte_ff as *const () as usize,                   // 8 GetCurrentBatteryPower (255 = on AC)
-        utils_app_id as *const () as usize,              // 9 GetAppID
-        z,                                               // 10 SetOverlayNotificationPosition
-        utils_is_call_completed as *const () as usize,   // 11 IsAPICallCompleted
-        minus_one as *const () as usize,                 // 12 GetAPICallFailureReason (-1 = none)
-        utils_call_result as *const () as usize,         // 13 GetAPICallResult
-        z,                                               // 14 RunFrame
-        z,                                               // 15 GetIPCCallCount
-        z,                                               // 16 SetWarningMessageHook
-        z,                                               // 17 IsOverlayEnabled (false: Kettle's overlay is separate)
-        z,                                               // 18 BOverlayNeedsPresent
-        z,                                               // 19 CheckFileSignature
-        z,                                               // 20 ShowGamepadTextInput
-        z,                                               // 21 GetEnteredGamepadTextLength
-        z,                                               // 22 GetEnteredGamepadTextInput
-        utils_ui_language as *const () as usize,         // 23 GetSteamUILanguage
-        z,                                               // 24 IsSteamRunningInVR
-        z,                                               // 25 SetOverlayNotificationInset
-        z,                                               // 26 IsSteamInBigPictureMode
-        z,                                               // 27 StartVRDashboard
-        z,                                               // 28 IsVRHeadsetStreamingEnabled
-        z,                                               // 29 SetVRHeadsetStreamingEnabled
-        z,                                               // 30 IsSteamChinaLauncher
-        z,                                               // 31 InitFilterText
-        z,                                               // 32 FilterText
-        z,                                               // 33 GetIPv6ConnectivityState
-        z,                                               // 34 IsSteamRunningOnSteamDeck
-    ])
-}
-
 // ---------------------------------------------------------------- ISteamApps
 
 extern "C" fn apps_subscribed(_t: This) -> bool {
@@ -501,42 +449,6 @@ extern "C" fn apps_launch_command_line(_t: This, buf: *mut c_char, size: i32) ->
     0
 }
 
-fn apps_table() -> *const usize {
-    let z = zero as *const () as usize;
-    leak_table(vec![
-        apps_subscribed as *const () as usize,          // 0 BIsSubscribed
-        z,                                              // 1 BIsLowViolence
-        z,                                              // 2 BIsCybercafe
-        z,                                              // 3 BIsVACBanned
-        apps_language as *const () as usize,            // 4 GetCurrentGameLanguage
-        apps_available_languages as *const () as usize, // 5 GetAvailableGameLanguages
-        apps_subscribed_app as *const () as usize,      // 6 BIsSubscribedApp
-        apps_subscribed_app as *const () as usize,      // 7 BIsDlcInstalled (owned; installed state is not tracked yet)
-        z,                                              // 8 GetEarliestPurchaseUnixTime
-        z,                                              // 9 BIsSubscribedFromFreeWeekend
-        z,                                              // 10 GetDLCCount
-        z,                                              // 11 BGetDLCDataByIndex
-        z,                                              // 12 InstallDLC
-        z,                                              // 13 UninstallDLC
-        z,                                              // 14 RequestAppProofOfPurchaseKey
-        z,                                              // 15 GetCurrentBetaName
-        z,                                              // 16 MarkContentCorrupt
-        z,                                              // 17 GetInstalledDepots
-        apps_install_dir as *const () as usize,         // 18 GetAppInstallDir
-        apps_is_installed as *const () as usize,        // 19 BIsAppInstalled
-        apps_owner as *const () as usize,               // 20 GetAppOwner
-        empty_str as *const () as usize,                // 21 GetLaunchQueryParam
-        z,                                              // 22 GetDlcDownloadProgress
-        apps_build_id as *const () as usize,            // 23 GetAppBuildId
-        z,                                              // 24 RequestAllProofOfPurchaseKeys
-        z,                                              // 25 GetFileDetails
-        apps_launch_command_line as *const () as usize, // 26 GetLaunchCommandLine
-        z,                                              // 27 BIsSubscribedFromFamilySharing
-        z,                                              // 28 BIsTimedTrial
-        z,                                              // 29 SetDlcContext
-    ])
-}
-
 // ---------------------------------------------------------------- ISteamFriends
 
 extern "C" fn friends_persona_name(_t: This) -> *const c_char {
@@ -552,24 +464,6 @@ extern "C" fn friends_friend_state(_t: This, id: u64) -> i32 {
 extern "C" fn friends_friend_name(_t: This, id: u64) -> *const c_char {
     let me = identity();
     if id != 0 && id == me.steam_id { cs(&me.persona) } else { cs("[unknown]") }
-}
-
-fn friends_table() -> *const usize {
-    let z = zero as *const () as usize;
-    leak_table(vec![
-        friends_persona_name as *const () as usize,  // 0 GetPersonaName
-        z,                                           // 1 SetPersonaName
-        friends_persona_state as *const () as usize, // 2 GetPersonaState
-        z,                                           // 3 GetFriendCount
-        z,                                           // 4 GetFriendByIndex
-        z,                                           // 5 GetFriendRelationship
-        friends_friend_state as *const () as usize,  // 6 GetFriendPersonaState
-        friends_friend_name as *const () as usize,   // 7 GetFriendPersonaName
-        empty_str as *const () as usize,             // 8 GetFriendGamePlayed (sret in real headers; not supported)
-        empty_str as *const () as usize,             // 9 GetFriendPersonaNameHistory
-        z,                                           // 10 GetFriendSteamLevel
-        empty_str as *const () as usize,             // 11 GetPlayerNickname
-    ])
 }
 
 // ---------------------------------------------------------------- ISteamUserStats
@@ -730,30 +624,89 @@ extern "C" fn us_reset_all(_t: This, achievements_too: bool) -> bool {
     true
 }
 
-fn user_stats_table() -> *const usize {
-    let z = zero as *const () as usize;
-    leak_table(vec![
-        us_request_current_stats as *const () as usize,    // 0 RequestCurrentStats
-        us_get_stat_int as *const () as usize,             // 1 GetStat(int32*)
-        us_get_stat_float as *const () as usize,           // 2 GetStat(float*)
-        us_set_stat_int as *const () as usize,             // 3 SetStat(int32)
-        us_set_stat_float as *const () as usize,           // 4 SetStat(float)
-        z,                                                 // 5 UpdateAvgRateStat
-        us_get_achievement as *const () as usize,          // 6 GetAchievement
-        us_set_achievement as *const () as usize,          // 7 SetAchievement
-        us_clear_achievement as *const () as usize,        // 8 ClearAchievement
-        us_get_achievement_and_time as *const () as usize, // 9 GetAchievementAndUnlockTime
-        us_store_stats as *const () as usize,              // 10 StoreStats
-        z,                                                 // 11 GetAchievementIcon
-        empty_str as *const () as usize,                   // 12 GetAchievementDisplayAttribute
-        z,                                                 // 13 IndicateAchievementProgress
-        z,                                                 // 14 GetNumAchievements
-        empty_str as *const () as usize,                   // 15 GetAchievementName
-        z,                                                 // 16 RequestUserStats
-        z,                                                 // 17 GetUserStat(int32*)
-        z,                                                 // 18 GetUserStat(float*)
-        z,                                                 // 19 GetUserAchievement
-        z,                                                 // 20 GetUserAchievementAndUnlockTime
-        us_reset_all as *const () as usize,                // 21 ResetAllStats
-    ])
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The function pointer in slot `i` of the table of `kind`/`n`.
+    fn slot_of(kind: Kind, n: u32, i: usize) -> usize {
+        let t = table_for(kind, n);
+        // SAFETY: `table_for` leaks a table with at least `slots(kind, n).len()` entries plus slack.
+        unsafe { *t.add(i) }
+    }
+
+    fn z() -> usize {
+        zero as *const () as usize
+    }
+
+    #[test]
+    fn client_tables_put_the_functions_where_the_headers_do() {
+        for n in 17..=23u32 {
+            let names = slots(Kind::Client, n);
+            let shutdown = names.iter().position(|s| *s == "BShutdownIfAllPipesClosed").unwrap();
+            assert_eq!(slot_of(Kind::Client, n, shutdown), client_shutdown_if_closed as *const () as usize, "{n}");
+            assert_eq!(slot_of(Kind::Client, n, 9), client_get_utils as *const () as usize);
+            assert_eq!(slot_of(Kind::Client, n, 5), client_get_interface as *const () as usize);
+            let run = names.iter().position(|s| *s == "RunFrame").unwrap();
+            assert_eq!(slot_of(Kind::Client, n, run), z(), "RunFrame takes no version string: never the getter");
+            // The slack after the last slot does nothing.
+            assert_eq!(slot_of(Kind::Client, n, names.len() + 3), z());
+        }
+    }
+
+    #[test]
+    fn only_the_getters_of_every_client_version_take_a_version_string() {
+        for n in 17..=23u32 {
+            for (i, name) in slots(Kind::Client, n).iter().enumerate() {
+                let is_getter = slot_of(Kind::Client, n, i) == client_get_interface as *const () as usize;
+                assert_eq!(is_getter, name.starts_with("GetISteam") && *name != "GetISteamUtils", "{n} {name}");
+            }
+        }
+    }
+
+    #[test]
+    fn user_stats_013_is_shifted_by_the_missing_request() {
+        let store = |n| slots(Kind::UserStats, n).iter().position(|s| *s == "StoreStats").unwrap();
+        assert_eq!(slot_of(Kind::UserStats, 12, store(12)), us_store_stats as *const () as usize);
+        assert_eq!(slot_of(Kind::UserStats, 13, store(13)), us_store_stats as *const () as usize);
+        assert_eq!(slot_of(Kind::UserStats, 13, 0), us_get_stat_int as *const () as usize);
+        assert_eq!(slot_of(Kind::UserStats, 11, 0), us_request_current_stats as *const () as usize);
+    }
+
+    #[test]
+    fn utils_011_loses_the_ip_port_slot() {
+        assert_eq!(slot_of(Kind::Utils, 10, 9), utils_app_id as *const () as usize);
+        assert_eq!(slot_of(Kind::Utils, 11, 8), utils_app_id as *const () as usize);
+        assert_eq!(slot_of(Kind::Utils, 11, 9), z());
+    }
+
+    #[test]
+    fn friends_018_moves_rich_presence_up() {
+        assert_eq!(slot_of(Kind::Friends, 17, 43), ret_true as *const () as usize);
+        assert_eq!(slot_of(Kind::Friends, 18, 41), ret_true as *const () as usize);
+        assert_eq!(slot_of(Kind::Friends, 17, 0), friends_persona_name as *const () as usize);
+        assert_eq!(slot_of(Kind::Friends, 18, 1), friends_persona_state as *const () as usize);
+        assert_eq!(slot_of(Kind::Friends, 17, 2), friends_persona_state as *const () as usize);
+    }
+
+    #[test]
+    fn unknown_and_unimplemented_versions_get_a_do_nothing_object() {
+        for ver in ["SteamNetworkingUtils004", "STEAMREMOTESTORAGE_INTERFACE_VERSION016", "SteamFutureThing001", ""] {
+            let obj = interface_for(ver);
+            assert_ne!(obj, 0, "{ver:?}");
+            // SAFETY: an interface object is a pointer to a table with 160+ do-nothing entries.
+            let table = unsafe { *(obj as *const *const usize) };
+            let (first, last) = unsafe { (*table, *table.add(150)) };
+            assert_eq!((first, last), (z(), z()));
+            assert_eq!(interface_for(ver), obj, "the same object every time");
+        }
+        assert!(is_known("SteamNetworkingUtils004") && !is_known("SteamFutureThing001"));
+    }
+
+    #[test]
+    fn input_says_ok_to_init() {
+        assert_eq!(slot_of(Kind::Input, 6, 0), ret_true as *const () as usize);
+        assert_eq!(slot_of(Kind::Input, 6, 1), ret_true as *const () as usize);
+        assert_eq!(slot_of(Kind::Input, 6, 3), z());
+    }
 }

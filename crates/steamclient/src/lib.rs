@@ -7,6 +7,7 @@
 //! own CM session. See `docs/steamclient-design.md`.
 
 pub mod ipc;
+pub mod layout;
 pub mod proto;
 
 #[cfg(feature = "exports")]

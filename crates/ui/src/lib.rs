@@ -30,6 +30,7 @@ mod settings_downloads;
 mod settings_extra;
 mod settings_gamescope;
 mod settings_ingame;
+mod settings_steam;
 mod settings_interface;
 mod settings_notify;
 mod settings_page;
