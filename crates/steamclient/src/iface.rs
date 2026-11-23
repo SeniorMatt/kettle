@@ -57,6 +57,12 @@ fn now_secs() -> u32 {
 pub extern "C" fn zero() -> usize {
     0
 }
+/// The one canonical address of [`zero`]. Rust does not promise a function a unique address across codegen units,
+/// so tables and tests both take it from here (never inlined: one body, one address).
+#[inline(never)]
+pub fn zero_addr() -> usize {
+    zero as *const () as usize
+}
 /// A `const char*` slot we don't implement: an empty string, never NULL.
 pub extern "C" fn empty_str() -> *const c_char {
     cs("")
@@ -85,7 +91,7 @@ pub fn is_known(ver: &str) -> bool {
 
 fn leak_table(mut t: Vec<usize>) -> *const usize {
     // Slack at the end: a game built against a newer header than ours must not run off the table.
-    t.extend(std::iter::repeat_n(zero as *const () as usize, 24));
+    t.extend(std::iter::repeat_n(zero_addr(), 24));
     Box::leak(t.into_boxed_slice()).as_ptr()
 }
 
@@ -95,7 +101,7 @@ fn new_object(table: *const usize) -> usize {
 
 /// A do-nothing table (unknown or unimplemented interface): 160 slots that return 0 / false / NULL.
 fn null_table() -> *const usize {
-    leak_table(vec![zero as *const () as usize; 160])
+    leak_table(vec![zero_addr(); 160])
 }
 
 /// The slot table of a known interface version: every method name gets its implementation or the do-nothing slot.
@@ -108,13 +114,15 @@ fn table_for(kind: Kind, n: u32) -> *const usize {
     if kind == Kind::Input {
         // ISteamInput has 48 slots; only the first two mean something.
         let mut t = t;
-        t.resize(64, zero as *const () as usize);
+        t.resize(64, zero_addr());
         return leak_table(t);
     }
     leak_table(t)
 }
 
+/// Never inlined, for the same reason as [`zero_addr`]: tests compare against what this returns.
 /// The function behind method `name` of `kind`; [`zero`] when we do not implement it.
+#[inline(never)]
 pub fn resolve(kind: Kind, name: &str) -> usize {
     let f = |p: *const ()| p as usize;
     let z = f(zero as *const ());
@@ -636,7 +644,7 @@ mod tests {
     }
 
     fn z() -> usize {
-        zero as *const () as usize
+        zero_addr()
     }
 
     #[test]
@@ -644,9 +652,9 @@ mod tests {
         for n in 17..=23u32 {
             let names = slots(Kind::Client, n);
             let shutdown = names.iter().position(|s| *s == "BShutdownIfAllPipesClosed").unwrap();
-            assert_eq!(slot_of(Kind::Client, n, shutdown), client_shutdown_if_closed as *const () as usize, "{n}");
-            assert_eq!(slot_of(Kind::Client, n, 9), client_get_utils as *const () as usize);
-            assert_eq!(slot_of(Kind::Client, n, 5), client_get_interface as *const () as usize);
+            assert_eq!(slot_of(Kind::Client, n, shutdown), resolve(Kind::Client, "BShutdownIfAllPipesClosed"), "{n}");
+            assert_eq!(slot_of(Kind::Client, n, 9), resolve(Kind::Client, "GetISteamUtils"));
+            assert_eq!(slot_of(Kind::Client, n, 5), resolve(Kind::Client, "GetISteamFriends"));
             let run = names.iter().position(|s| *s == "RunFrame").unwrap();
             assert_eq!(slot_of(Kind::Client, n, run), z(), "RunFrame takes no version string: never the getter");
             // The slack after the last slot does nothing.
@@ -658,7 +666,7 @@ mod tests {
     fn only_the_getters_of_every_client_version_take_a_version_string() {
         for n in 17..=23u32 {
             for (i, name) in slots(Kind::Client, n).iter().enumerate() {
-                let is_getter = slot_of(Kind::Client, n, i) == client_get_interface as *const () as usize;
+                let is_getter = slot_of(Kind::Client, n, i) == resolve(Kind::Client, "GetISteamFriends");
                 assert_eq!(is_getter, name.starts_with("GetISteam") && *name != "GetISteamUtils", "{n} {name}");
             }
         }
@@ -667,26 +675,26 @@ mod tests {
     #[test]
     fn user_stats_013_is_shifted_by_the_missing_request() {
         let store = |n| slots(Kind::UserStats, n).iter().position(|s| *s == "StoreStats").unwrap();
-        assert_eq!(slot_of(Kind::UserStats, 12, store(12)), us_store_stats as *const () as usize);
-        assert_eq!(slot_of(Kind::UserStats, 13, store(13)), us_store_stats as *const () as usize);
-        assert_eq!(slot_of(Kind::UserStats, 13, 0), us_get_stat_int as *const () as usize);
-        assert_eq!(slot_of(Kind::UserStats, 11, 0), us_request_current_stats as *const () as usize);
+        assert_eq!(slot_of(Kind::UserStats, 12, store(12)), resolve(Kind::UserStats, "StoreStats"));
+        assert_eq!(slot_of(Kind::UserStats, 13, store(13)), resolve(Kind::UserStats, "StoreStats"));
+        assert_eq!(slot_of(Kind::UserStats, 13, 0), resolve(Kind::UserStats, "GetStatInt"));
+        assert_eq!(slot_of(Kind::UserStats, 11, 0), resolve(Kind::UserStats, "RequestCurrentStats"));
     }
 
     #[test]
     fn utils_011_loses_the_ip_port_slot() {
-        assert_eq!(slot_of(Kind::Utils, 10, 9), utils_app_id as *const () as usize);
-        assert_eq!(slot_of(Kind::Utils, 11, 8), utils_app_id as *const () as usize);
+        assert_eq!(slot_of(Kind::Utils, 10, 9), resolve(Kind::Utils, "GetAppID"));
+        assert_eq!(slot_of(Kind::Utils, 11, 8), resolve(Kind::Utils, "GetAppID"));
         assert_eq!(slot_of(Kind::Utils, 11, 9), z());
     }
 
     #[test]
     fn friends_018_moves_rich_presence_up() {
-        assert_eq!(slot_of(Kind::Friends, 17, 43), ret_true as *const () as usize);
-        assert_eq!(slot_of(Kind::Friends, 18, 41), ret_true as *const () as usize);
-        assert_eq!(slot_of(Kind::Friends, 17, 0), friends_persona_name as *const () as usize);
-        assert_eq!(slot_of(Kind::Friends, 18, 1), friends_persona_state as *const () as usize);
-        assert_eq!(slot_of(Kind::Friends, 17, 2), friends_persona_state as *const () as usize);
+        assert_eq!(slot_of(Kind::Friends, 17, 43), resolve(Kind::Friends, "SetRichPresence"));
+        assert_eq!(slot_of(Kind::Friends, 18, 41), resolve(Kind::Friends, "SetRichPresence"));
+        assert_eq!(slot_of(Kind::Friends, 17, 0), resolve(Kind::Friends, "GetPersonaName"));
+        assert_eq!(slot_of(Kind::Friends, 18, 1), resolve(Kind::Friends, "GetPersonaState"));
+        assert_eq!(slot_of(Kind::Friends, 17, 2), resolve(Kind::Friends, "GetPersonaState"));
     }
 
     #[test]
@@ -705,8 +713,8 @@ mod tests {
 
     #[test]
     fn input_says_ok_to_init() {
-        assert_eq!(slot_of(Kind::Input, 6, 0), ret_true as *const () as usize);
-        assert_eq!(slot_of(Kind::Input, 6, 1), ret_true as *const () as usize);
+        assert_eq!(slot_of(Kind::Input, 6, 0), resolve(Kind::Input, "Init"));
+        assert_eq!(slot_of(Kind::Input, 6, 1), resolve(Kind::Input, "Shutdown"));
         assert_eq!(slot_of(Kind::Input, 6, 3), z());
     }
 }
