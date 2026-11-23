@@ -17,9 +17,12 @@ use std::time::{Duration, Instant};
 const API_LIBS: [&str; 3] = ["libsteam_api.so", "steam_api.dll", "steam_api64.dll"];
 const MAX_DEPTH: usize = 4;
 const MAX_ENTRIES: usize = 5000;
-/// Time Steam gets to finish starting its IPC after the pid file shows up.
-const SETTLE: Duration = Duration::from_secs(3);
-const POLL: Duration = Duration::from_millis(500);
+/// How long we wait for a sign of the client's IPC after its process shows up, before we go on anyway (a client
+/// whose signals we cannot read, such as Flatpak's, must not block a game forever).
+const IPC_GRACE: Duration = Duration::from_secs(8);
+/// Flatpak's client hides its IPC from us: it counts as ready this long after its process started.
+const FLATPAK_WARMUP: Duration = Duration::from_secs(4);
+const POLL: Duration = Duration::from_millis(100);
 
 /// Result of [`ensure_running`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,14 +99,19 @@ pub fn is_running() -> bool {
 /// nothing on the host, but the process itself is visible here. Only runs
 /// when the player presses Play, so the scan's cost doesn't matter.
 #[cfg(target_os = "linux")]
-fn any_steam_process() -> bool {
+fn any_steam_pid() -> Option<u32> {
     use std::os::unix::fs::MetadataExt;
-    let Ok(me) = std::fs::metadata("/proc/self") else { return false };
-    let Ok(entries) = std::fs::read_dir("/proc") else { return false };
-    entries.flatten().any(|e| {
-        let Some(pid) = e.file_name().to_str().and_then(|n| n.parse::<u32>().ok()) else { return false };
-        e.metadata().is_ok_and(|m| m.uid() == me.uid()) && proc_name(pid).is_some_and(|n| looks_like_steam(&n))
+    let me = std::fs::metadata("/proc/self").ok()?;
+    std::fs::read_dir("/proc").ok()?.flatten().find_map(|e| {
+        let pid = e.file_name().to_str().and_then(|n| n.parse::<u32>().ok())?;
+        (e.metadata().is_ok_and(|m| m.uid() == me.uid()) && proc_name(pid).is_some_and(|n| looks_like_steam(&n)))
+            .then_some(pid)
     })
+}
+
+#[cfg(target_os = "linux")]
+fn any_steam_process() -> bool {
+    any_steam_pid().is_some()
 }
 
 #[cfg(all(unix, not(target_os = "linux")))]
@@ -140,6 +148,90 @@ fn windows_pid_alive(pid: u32) -> bool {
 #[cfg(windows)]
 fn looks_like_steam_row(text: &str) -> bool {
     text.split(',').next().is_some_and(|name| looks_like_steam(name.trim().trim_matches('"')))
+}
+
+// ---- Is its IPC ready? ---------------------------------------------------------------------------------------
+
+/// Pure rule: the client's IPC is up when its process is alive and it has announced itself, either in
+/// `registry.vdf` (`ActiveProcess/pid` equals the process) or with its shared-memory object, which must be newer
+/// than the process (an old file from a crashed run proves nothing).
+pub fn ipc_ready_rule(pid: Option<u32>, registry_pid: Option<u32>, shm_fresh: bool) -> bool {
+    pid.is_some() && (registry_pid == pid || shm_fresh)
+}
+
+/// `ActiveProcess { pid }` from the text of Steam's `registry.vdf`.
+pub fn parse_active_pid(text: &str) -> Option<u32> {
+    let at = text.find("\"ActiveProcess\"")?;
+    let rest = &text[at..];
+    let end = rest.find('}').unwrap_or(rest.len());
+    let block = &rest[..end];
+    let p = block.find("\"pid\"")?;
+    let after = &block[p + 5..];
+    let q1 = after.find('"')?;
+    let after = &after[q1 + 1..];
+    let q2 = after.find('"')?;
+    after[..q2].trim().parse().ok().filter(|p| *p > 0)
+}
+
+/// The pid of the live client process, from the pid files (Windows: the registry).
+#[cfg(not(windows))]
+fn live_pid() -> Option<u32> {
+    pid_files().iter().find_map(|f| {
+        let pid = std::fs::read_to_string(f).ok()?.trim().parse::<u32>().ok()?;
+        (pid > 0 && proc_name(pid).is_some_and(|n| looks_like_steam(&n))).then_some(pid)
+    })
+}
+
+/// When the process `pid` started, in unix seconds (from `/proc`). `None` if unknown.
+#[cfg(target_os = "linux")]
+fn process_start(pid: u32) -> Option<u64> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // Fields after the `)` that closes the command name; starttime is field 22 overall = index 19 after it.
+    let ticks: u64 = stat.rsplit_once(')')?.1.split_whitespace().nth(19)?.parse().ok()?;
+    let boot: u64 = std::fs::read_to_string("/proc/stat")
+        .ok()?
+        .lines()
+        .find_map(|l| l.strip_prefix("btime ")?.trim().parse().ok())?;
+    Some(boot + ticks / 100) // CLK_TCK is 100 on every Linux we run on
+}
+
+/// The client creates `/dev/shm/u<uid>-ValveIPCSharedObj-Steam` once it serves IPC. Fresh = newer than `pid`.
+#[cfg(target_os = "linux")]
+fn shm_fresh(pid: u32) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let Ok(me) = std::fs::metadata("/proc/self") else { return false };
+    let Ok(m) = std::fs::metadata(format!("/dev/shm/u{}-ValveIPCSharedObj-Steam", me.uid())) else { return false };
+    let modified = m.mtime().max(0) as u64;
+    process_start(pid).is_some_and(|start| modified + 1 >= start)
+}
+
+/// Is the client up and answering? Linux: see [`ipc_ready_rule`]. Windows: the process runs.
+pub fn ipc_ready() -> bool {
+    #[cfg(windows)]
+    {
+        is_running()
+    }
+    #[cfg(not(windows))]
+    {
+        let Some(pid) = live_pid() else {
+            // Flatpak: its pid file holds a pid from inside the sandbox and its /dev/shm is private. All we can
+            // see is the process; give it a few seconds from its start.
+            #[cfg(target_os = "linux")]
+            if let Some(p) = any_steam_pid() {
+                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+                return process_start(p).is_some_and(|st| now >= st + FLATPAK_WARMUP.as_secs());
+            }
+            return false;
+        };
+        let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+        let registry =
+            std::fs::read_to_string(home.join(".steam/registry.vdf")).ok().and_then(|t| parse_active_pid(&t));
+        #[cfg(target_os = "linux")]
+        let fresh = shm_fresh(pid);
+        #[cfg(not(target_os = "linux"))]
+        let fresh = false;
+        ipc_ready_rule(Some(pid), registry, fresh)
+    }
 }
 
 // ---- Starting it ---------------------------------------------------------------------------------------------
@@ -212,23 +304,57 @@ pub fn log_path() -> PathBuf {
     store::data_dir().join("logs").join("steam-client.log")
 }
 
-/// Make sure the client runs: start it if needed and wait (polling every 500 ms, at most `timeout`) until it does.
-pub fn ensure_running(timeout: Duration, cancel: &AtomicBool) -> Result<Started> {
-    ensure_running_with(is_running, start_command, &log_path(), timeout, SETTLE, cancel)
+/// Wrap a start command so the client runs at low priority (`nice`, `ionice`) where those tools exist. Used for
+/// the background start before the player asked for anything; a start the player waits for is not wrapped.
+pub fn low_priority(spec: StartSpec, path: &[PathBuf]) -> StartSpec {
+    // `nice -n 10 ionice -c 2 -n 7 <program> <args>`; with only one tool present the chain is shorter.
+    let tools: [(&str, [&str; 4]); 2] = [("nice", ["-n", "10", "", ""]), ("ionice", ["-c", "2", "-n", "7"])];
+    let mut first: Option<PathBuf> = None;
+    let mut args: Vec<String> = Vec::new();
+    for (tool, a) in tools {
+        let Some(p) = find_in(path, tool) else { continue };
+        if first.is_none() {
+            first = Some(p);
+        } else {
+            args.push(tool.to_string());
+        }
+        args.extend(a.iter().filter(|x| !x.is_empty()).map(|x| x.to_string()));
+    }
+    let Some(program) = first else { return spec };
+    args.push(spec.program.to_string_lossy().into_owned());
+    args.extend(spec.args);
+    StartSpec { program, args }
 }
 
-/// [`ensure_running`] with everything injected, for tests.
-pub fn ensure_running_with(
-    running: impl Fn() -> bool,
-    command: impl FnOnce() -> Option<Command>,
-    log: &Path,
-    timeout: Duration,
-    settle: Duration,
-    cancel: &AtomicBool,
-) -> Result<Started> {
-    if running() {
+/// The command for the background start: [`start_spec`] at low priority.
+pub fn background_command() -> Option<Command> {
+    let path: Vec<PathBuf> = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect();
+    start_spec().map(|s| {
+        #[cfg(not(windows))]
+        let s = low_priority(s, &path);
+        #[cfg(windows)]
+        let _ = &path;
+        let mut c = Command::new(s.program);
+        c.args(s.args);
+        c
+    })
+}
+
+/// Start the client now if it is not running, and return at once (the start-up of Kettle must not wait).
+pub fn start_background() -> Result<Started> {
+    if is_running() {
         return Ok(Started::AlreadyRunning);
     }
+    spawn_client(background_command, &log_path())
+}
+
+/// Make sure the client runs and answers: start it if needed (at once, not in the background) and wait until
+/// its IPC is ready, at most `timeout`. Returns immediately when it is already up.
+pub fn ensure_running(timeout: Duration, cancel: &AtomicBool) -> Result<Started> {
+    ensure_running_with(is_running, ipc_ready, start_command, &log_path(), timeout, IPC_GRACE, cancel)
+}
+
+fn spawn_client(command: impl FnOnce() -> Option<Command>, log: &Path) -> Result<Started> {
     let Some(mut cmd) = command() else { return Ok(Started::NotInstalled) };
     if let Some(dir) = log.parent() {
         store::private_dir(dir)?;
@@ -242,18 +368,113 @@ pub fn ensure_running_with(
     std::thread::Builder::new().name("steam-client-wait".into()).spawn(move || {
         let _ = child.wait();
     })?;
-    let start = Instant::now();
-    while !running() {
+    Ok(Started::StartedNow)
+}
+
+/// [`ensure_running`] with everything injected, for tests. `grace` bounds the wait for `ready` once `running`.
+pub fn ensure_running_with(
+    running: impl Fn() -> bool,
+    ready: impl Fn() -> bool,
+    command: impl FnOnce() -> Option<Command>,
+    log: &Path,
+    timeout: Duration,
+    grace: Duration,
+    cancel: &AtomicBool,
+) -> Result<Started> {
+    let mut started = Started::AlreadyRunning;
+    if !running() {
+        if spawn_client(command, log)? == Started::NotInstalled {
+            return Ok(Started::NotInstalled);
+        }
+        started = Started::StartedNow;
+    }
+    // Running (maybe started by the background start a moment ago): wait for the IPC, not for a fixed time.
+    let begin = Instant::now();
+    let mut running_since: Option<Instant> = None;
+    loop {
+        if running() {
+            if ready() {
+                return Ok(started);
+            }
+            let since = *running_since.get_or_insert_with(Instant::now);
+            if since.elapsed() >= grace {
+                return Ok(started); // no signal we can read: go on, the game's own retries cover the rest
+            }
+        }
         if cancel.load(Ordering::Relaxed) {
             bail!("cancelled while waiting for the Steam client");
         }
-        if start.elapsed() >= timeout {
+        if begin.elapsed() >= timeout {
             bail!("the Steam client did not start within {} s", timeout.as_secs());
         }
         std::thread::sleep(POLL);
     }
-    std::thread::sleep(settle);
-    Ok(Started::StartedNow)
+}
+
+// ---- Which installed games need it? (cached) ------------------------------------------------------------------
+
+/// What we remember about one install: valid while the folder and the stamp (build id, update time) stay the same.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ScanEntry {
+    pub dir: PathBuf,
+    pub stamp: u64,
+    pub uses: bool,
+}
+
+/// The per-install answers of [`uses_steamworks`], so the start of Kettle does not walk every game folder again.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ScanCache {
+    pub apps: std::collections::BTreeMap<String, ScanEntry>,
+}
+
+impl ScanCache {
+    pub fn path() -> PathBuf {
+        store::data_dir().join("steamworks-scan.json")
+    }
+
+    pub fn load() -> ScanCache {
+        store::load_json(&ScanCache::path()).unwrap_or_default()
+    }
+
+    pub fn save(&self) {
+        let _ = store::save_json(&ScanCache::path(), self);
+    }
+
+    /// Does `app` (installed in `dir`, `stamp` = build id mixed with the update time) ship the Steamworks library?
+    /// Walks the folder only when the cache has no matching entry. The bool says whether the cache changed.
+    pub fn uses(&mut self, app: u32, dir: &Path, stamp: u64, scan: impl FnOnce(&Path) -> bool) -> (bool, bool) {
+        if let Some(e) = self.apps.get(&app.to_string())
+            && e.dir == dir
+            && e.stamp == stamp
+        {
+            return (e.uses, false);
+        }
+        let uses = scan(dir);
+        self.apps.insert(app.to_string(), ScanEntry { dir: dir.to_path_buf(), stamp, uses });
+        (uses, true)
+    }
+}
+
+/// The "Start Steam in the background" choice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Background {
+    /// Only when an installed game uses the Steamworks API.
+    #[default]
+    Automatic,
+    Always,
+    Never,
+}
+
+/// Should Kettle start the client in the background right now?
+pub fn should_start_background(mode: Background, any_game_needs_it: bool, installed: bool, running: bool) -> bool {
+    installed
+        && !running
+        && match mode {
+            Background::Never => false,
+            Background::Always => true,
+            Background::Automatic => any_game_needs_it,
+        }
 }
 
 #[cfg(test)]
@@ -377,35 +598,64 @@ mod tests {
     fn ensure_running_with_fake_command() {
         let d = tmp("ensure");
         let pidfile = d.join("fake.pid");
+        let readyfile = d.join("fake.ready");
         let script = d.join("fake-steam.sh");
-        fs::write(&script, format!("#!/bin/sh\nsleep 1\necho $$ > '{}'\n", pidfile.display())).unwrap();
+        fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nsleep 1\necho $$ > '{}'\nsleep 1\ntouch '{}'\n",
+                pidfile.display(),
+                readyfile.display()
+            ),
+        )
+        .unwrap();
         let mut c = Command::new("/bin/sh");
         c.arg(&script).arg("-silent");
         let cancel = AtomicBool::new(false);
         let running = || pidfile.exists();
+        let ready = || readyfile.exists();
         let t = Instant::now();
         let r = ensure_running_with(
             running,
+            ready,
             || Some(c),
             &d.join("log/steam.log"),
             Duration::from_secs(20),
-            Duration::from_millis(100),
+            Duration::from_secs(10),
             &cancel,
         );
         assert_eq!(r.unwrap(), Started::StartedNow);
-        assert!(t.elapsed() >= Duration::from_secs(1));
-        // already running: the command is never asked for
+        // It waited for the ready signal (about 2 s), not for a fixed time and not for the grace.
+        assert!(t.elapsed() >= Duration::from_secs(2) && t.elapsed() < Duration::from_secs(8), "{:?}", t.elapsed());
+        // Already running and ready: the command is never asked for and there is no delay at all.
+        let t = Instant::now();
         let r = ensure_running_with(
             running,
+            ready,
             || panic!("not needed"),
             &d.join("l"),
             Duration::from_secs(1),
-            SETTLE,
+            IPC_GRACE,
             &cancel,
         );
         assert_eq!(r.unwrap(), Started::AlreadyRunning);
+        assert!(t.elapsed() < Duration::from_millis(50), "no settle delay: {:?}", t.elapsed());
+        // Running but no readable signal: goes on after the grace, not forever.
+        let t = Instant::now();
+        let r = ensure_running_with(
+            running,
+            || false,
+            || panic!("not needed"),
+            &d.join("l"),
+            Duration::from_secs(5),
+            Duration::from_millis(300),
+            &cancel,
+        );
+        assert_eq!(r.unwrap(), Started::AlreadyRunning);
+        assert!(t.elapsed() < Duration::from_secs(2));
         // not installed
-        let r = ensure_running_with(|| false, || None, &d.join("l"), Duration::from_secs(1), SETTLE, &cancel);
+        let r =
+            ensure_running_with(|| false, || false, || None, &d.join("l"), Duration::from_secs(1), IPC_GRACE, &cancel);
         assert_eq!(r.unwrap(), Started::NotInstalled);
     }
 
@@ -419,10 +669,76 @@ mod tests {
             Some(c)
         };
         let cancel = AtomicBool::new(false);
-        let r = ensure_running_with(|| false, mk, &d.join("l"), Duration::from_millis(700), SETTLE, &cancel);
+        let r =
+            ensure_running_with(|| false, || false, mk, &d.join("l"), Duration::from_millis(700), IPC_GRACE, &cancel);
         assert!(r.unwrap_err().to_string().contains("did not start"));
         let cancel = AtomicBool::new(true);
-        let r = ensure_running_with(|| false, mk, &d.join("l"), Duration::from_secs(5), SETTLE, &cancel);
+        let r = ensure_running_with(|| false, || false, mk, &d.join("l"), Duration::from_secs(5), IPC_GRACE, &cancel);
         assert!(r.unwrap_err().to_string().contains("cancelled"));
+    }
+
+    #[test]
+    fn ipc_readiness_rule() {
+        assert!(!ipc_ready_rule(None, Some(5), true), "no live process is never ready");
+        assert!(!ipc_ready_rule(Some(5), None, false), "alive but silent: not ready (a stale pipe proves nothing)");
+        assert!(!ipc_ready_rule(Some(5), Some(4), false), "registry names another (old) process");
+        assert!(ipc_ready_rule(Some(5), Some(5), false), "registry announces this process");
+        assert!(ipc_ready_rule(Some(5), None, true), "fresh shared-memory object");
+    }
+
+    #[test]
+    fn active_process_pid_is_read_from_registry_vdf() {
+        let text = "\"Registry\"\n{\n\t\"HKCU\"\n\t{\n\t\t\"Software\"\n\t\t{\n\t\t\t\"Valve\"\n\t\t\t{\n\t\t\t\t\"Steam\"\n\t\t\t\t{\n\t\t\t\t\t\"language\"\t\t\"english\"\n\t\t\t\t\t\"ActiveProcess\"\n\t\t\t\t\t{\n\t\t\t\t\t\t\"pid\"\t\t\"73430\"\n\t\t\t\t\t\t\"SteamClientDll64\"\t\t\"/x/steamclient.so\"\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n}\n";
+        assert_eq!(parse_active_pid(text), Some(73430));
+        assert_eq!(parse_active_pid("\"ActiveProcess\" { \"pid\" \"0\" }"), None);
+        assert_eq!(parse_active_pid("\"Other\" { \"pid\" \"7\" }"), None);
+        assert_eq!(parse_active_pid("\"ActiveProcess\" { \"x\" \"1\" } \"pid\" \"9\""), None, "pid of another block");
+        assert_eq!(parse_active_pid(""), None);
+    }
+
+    #[test]
+    fn automatic_background_decision() {
+        use Background::*;
+        // (mode, a game needs it, client installed, already running) -> start?
+        assert!(should_start_background(Automatic, true, true, false));
+        assert!(!should_start_background(Automatic, false, true, false), "no Steamworks game: stay out of the way");
+        assert!(should_start_background(Always, false, true, false));
+        assert!(!should_start_background(Never, true, true, false));
+        assert!(!should_start_background(Always, true, false, false), "not installed");
+        assert!(!should_start_background(Always, true, true, true), "never twice");
+    }
+
+    #[test]
+    fn scan_cache_is_per_install_and_stamp() {
+        let mut c = ScanCache::default();
+        let dir = PathBuf::from("/games/a");
+        let mut scans = 0;
+        let mut ask = |c: &mut ScanCache, dir: &Path, stamp: u64, answer: bool| {
+            c.uses(10, dir, stamp, |_| {
+                scans += 1;
+                answer
+            })
+        };
+        assert_eq!(ask(&mut c, &dir, 1, true), (true, true), "first time: scanned");
+        assert_eq!(ask(&mut c, &dir, 1, false), (true, false), "same install and build: answered from the cache");
+        assert_eq!(ask(&mut c, &dir, 2, false), (false, true), "a new build is scanned again");
+        assert_eq!(ask(&mut c, Path::new("/games/b"), 2, true), (true, true), "moved: scanned again");
+        assert_eq!(scans, 3);
+        let back: ScanCache = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
+        assert_eq!(back, c);
+    }
+
+    #[test]
+    fn background_start_runs_at_low_priority() {
+        let bin = tmp("prio");
+        let spec = StartSpec { program: PathBuf::from("/usr/bin/steam"), args: vec!["-silent".into()] };
+        assert_eq!(low_priority(spec.clone(), std::slice::from_ref(&bin)), spec, "no tools: unchanged");
+        fs::write(bin.join("nice"), b"").unwrap();
+        let l = low_priority(spec.clone(), std::slice::from_ref(&bin));
+        assert_eq!(l.program, bin.join("nice"));
+        assert_eq!(l.args, ["-n", "10", "/usr/bin/steam", "-silent"]);
+        fs::write(bin.join("ionice"), b"").unwrap();
+        let l = low_priority(spec, std::slice::from_ref(&bin));
+        assert_eq!(l.args, ["-n", "10", "ionice", "-c", "2", "-n", "7", "/usr/bin/steam", "-silent"]);
     }
 }

@@ -19,9 +19,13 @@ pub struct Settings {
     /// Chunk downloads in flight.
     #[serde(default = "default_workers")]
     pub workers: usize,
-    /// Start the official Steam client in the background for games that need it.
-    #[serde(default = "default_true")]
-    pub start_steam: bool,
+    /// Start the official Steam client in the background (before any Play): Automatic = only when an installed
+    /// game uses the Steamworks API; Always; Never (then no game of ours ever starts it).
+    #[serde(default)]
+    pub steam_background: sr_steam::steam_client::Background,
+    /// Experimental: Steamworks games use Kettle's own steamclient and the official client is never started.
+    #[serde(default)]
+    pub own_steamclient: bool,
     /// Ask Proton to write its log (`PROTON_LOG=1`) for Windows games.
     #[serde(default)]
     pub proton_log: bool,
@@ -67,7 +71,8 @@ impl Default for Settings {
         Settings {
             library: None,
             workers: DEFAULT_WORKERS,
-            start_steam: true,
+            steam_background: Default::default(),
+            own_steamclient: false,
             proton_log: false,
             overlay: true,
             interface: Default::default(),
@@ -88,7 +93,18 @@ impl Settings {
     }
 
     pub fn load() -> Settings {
-        let mut s: Settings = store::load_json(&Settings::path()).unwrap_or_default();
+        let text = std::fs::read_to_string(Settings::path()).unwrap_or_default();
+        Settings::from_text(&text)
+    }
+
+    /// Parse the settings file. Files from before "Start Steam in the background" had a plain on/off
+    /// `start_steam`; off becomes Never.
+    pub(crate) fn from_text(text: &str) -> Settings {
+        let mut s: Settings = serde_json::from_str(text).unwrap_or_default();
+        let raw: serde_json::Value = serde_json::from_str(text).unwrap_or_default();
+        if raw.get("steam_background").is_none() && raw.get("start_steam") == Some(&serde_json::Value::Bool(false)) {
+            s.steam_background = sr_steam::steam_client::Background::Never;
+        }
         s.workers = s.workers.clamp(MIN_WORKERS, MAX_WORKERS);
         s
     }
@@ -146,9 +162,18 @@ impl Client {
         self.save_settings();
     }
 
-    pub(crate) fn set_start_steam(&mut self, on: bool) {
-        self.state.settings.start_steam = on;
+    pub(crate) fn set_steam_background(&mut self, mode: sr_steam::steam_client::Background) {
+        self.state.settings.steam_background = mode;
         self.save_settings();
+        // Changing to Always/Automatic takes effect at once, not at the next start.
+        self.warm_steam();
+    }
+
+    pub(crate) fn set_own_steamclient(&mut self, on: bool) {
+        self.state.settings.own_steamclient = on;
+        self.save_settings();
+        self.sync_steamworks_host();
+        self.warm_steam();
     }
 
     pub(crate) fn set_proton_log(&mut self, on: bool) {
@@ -195,7 +220,8 @@ pub(crate) fn handle(client: &mut Client, cmd: Command) {
     match cmd {
         Command::SetLibrary(p) => client.set_library(p),
         Command::SetWorkers(n) => client.set_workers(n),
-        Command::SetStartSteam(on) => client.set_start_steam(on),
+        Command::SetSteamBackground(m) => client.set_steam_background(m),
+        Command::SetOwnSteamclient(on) => client.set_own_steamclient(on),
         Command::SetProtonLog(on) => client.set_proton_log(on),
         Command::SetOverlay(on) => client.set_overlay(on),
         Command::SetInterface(i) => client.set_interface(i),
@@ -211,12 +237,17 @@ mod tests {
     fn defaults_and_clamping() {
         let s = Settings::default();
         assert_eq!(s.workers, 8);
-        assert!(s.start_steam);
+        assert_eq!(s.steam_background, sr_steam::steam_client::Background::Automatic);
+        assert!(!s.own_steamclient, "the experimental mode is off until the owner has tested it");
         assert!(s.overlay);
         let s: Settings = serde_json::from_str(r#"{"overlay": false}"#).unwrap();
         assert!(!s.overlay);
-        let s: Settings = serde_json::from_str(r#"{"start_steam": false}"#).unwrap();
-        assert!(!s.start_steam);
+        let s = Settings::from_text(r#"{"start_steam": false}"#);
+        assert_eq!(s.steam_background, sr_steam::steam_client::Background::Never, "an old opt-out stays one");
+        let s = Settings::from_text(r#"{"start_steam": true}"#);
+        assert_eq!(s.steam_background, sr_steam::steam_client::Background::Automatic);
+        let s = Settings::from_text(r#"{"start_steam": false, "steam_background": "always"}"#);
+        assert_eq!(s.steam_background, sr_steam::steam_client::Background::Always, "the new key wins");
         let s = Settings::default();
         assert_eq!(s.default_library(), content::default_library());
         let s: Settings = serde_json::from_str(r#"{"workers": 500}"#).unwrap();
@@ -230,9 +261,9 @@ mod tests {
     fn an_old_settings_file_still_loads() {
         // What settings.json looked like before downloads, notifications and the account options existed.
         let old = r#"{"library": "/games/lib", "workers": 4, "start_steam": false, "overlay": true}"#;
-        let s: Settings = serde_json::from_str(old).unwrap();
+        let s = Settings::from_text(old);
         assert_eq!(s.library, Some(PathBuf::from("/games/lib")));
-        assert_eq!((s.workers, s.start_steam, s.overlay), (4, false, true));
+        assert_eq!((s.workers, s.steam_background, s.overlay), (4, sr_steam::steam_client::Background::Never, true));
         assert_eq!(s.downloads, crate::DownloadSettings::default());
         assert_eq!(s.notifications, crate::NotifySettings::default());
         assert!(s.keep_signed_in);

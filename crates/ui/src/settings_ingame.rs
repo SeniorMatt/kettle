@@ -55,12 +55,7 @@ pub fn show(ui: &mut Ui, client: &mut Client) {
             ui.label(RichText::new("Shift+Tab").font(theme::medium(14.0)).color(theme::TEXT));
         },
     );
-    let mut start = client.state().settings.start_steam;
-    let desc = "Most games use the Steamworks API, which only works while the official Steam client runs. We start \
-                it minimized before such a game. Nothing is sent to it; it is only started.";
-    if toggle_row(ui, "Start the Steam client for games that need it", desc, &mut start) {
-        client.send(Command::SetStartSteam(start));
-    }
+    crate::settings_steam::rows(ui, client);
     widgets::section_header(ui, "Performance overlay");
     performance(ui, client);
     widgets::section_header(ui, "Gamescope");

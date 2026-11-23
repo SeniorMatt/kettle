@@ -4,8 +4,9 @@ Goal: a game that uses the Steamworks API runs with only Kettle installed, signe
 This is a client implementation, not a crack: ownership, tickets and stats come from Steam's servers for the
 signed-in account. Nothing here fakes ownership, patches or strips DRM, or lets an unowned game start.
 
-Status: milestone 1 (core in `crates/steamclient`, host in `crates/client/src/steamworks_host.rs`) is written and
-unit-tested on paper only until the machine is free to build (see "Verification status"). Everything marked
+Status: milestone 1 (core in `crates/steamclient`, host in `crates/client/src/steamworks_host.rs`) is built and unit-tested;
+milestone 2 compared every table with the public headers and wired the host and a Kettle-owned Steam root into the app
+behind the experimental setting "Run games without the Steam client" (default off, see TESTING.md). Everything marked
 "to verify" below must be checked against Valve's published headers or a real game before it is relied on.
 
 ## 1. How a game reaches the client
@@ -65,21 +66,24 @@ launcher), and a `steam_appid.txt` next to the executable for apps started outsi
 
 ### Interface versions
 
-Implemented (slot order lives in `crates/steamclient/src/iface.rs`; each builder lists slots in header order):
+Slot orders live in `crates/steamclient/src/layout.rs` as method names per version (our own spelling); `iface.rs` maps
+each name to an implementation or to the do-nothing slot. They were compared slot by slot with the method order of the
+public Steamworks headers as published in the open-source gbe_fork repository's `sdk/steam` folder (read for order and
+signatures only, nothing copied) and the counts and key positions are unit-tested.
 
-| Interface | Version strings accepted | Notes |
+| Interface | Versions | Verified layout notes |
 |---|---|---|
-| ISteamClient | SteamClient017..021 | all `GetISteamXxx(user,pipe,ver)` slots share one function that looks at the version string, so a wrong guess about a later slot's position does not misroute them; `GetISteamUtils(pipe,ver)` has its own. To verify: position of `GetISteamGameSearch` (assumed inserted at slot 19 from 020) |
-| ISteamUser | SteamUser019..023 | GetSteamID, BLoggedOn, GetAuthSessionTicket, BeginAuthSession (answers "invalid ticket": we do not validate other players), CancelAuthTicket, UserHasLicenseForApp, RequestEncryptedAppTicket/GetEncryptedAppTicket. To verify: 023 inserts `GetAuthTicketForWebApi` after `GetAuthSessionTicket` |
-| ISteamApps | STEAMAPPS_INTERFACE_VERSION006..008 | BIsSubscribed, BIsSubscribedApp, BIsDlcInstalled (= owned), GetCurrentGameLanguage, GetAppInstallDir, BIsAppInstalled, GetAppOwner, GetAppBuildId, GetLaunchCommandLine |
-| ISteamUtils | SteamUtils009..010 | GetAppID, GetServerRealTime, GetConnectedUniverse, IsAPICallCompleted/GetAPICallResult, IsOverlayEnabled = false, GetSteamUILanguage |
-| ISteamUserStats | STEAMUSERSTATS_INTERFACE_VERSION011..013 | RequestCurrentStats, Get/SetStat (int, float), Get/Set/ClearAchievement, GetAchievementAndUnlockTime, StoreStats, ResetAllStats; callbacks 1101/1102/1103 |
-| ISteamFriends | SteamFriends015..018 | GetPersonaName, GetPersonaState, own persona via GetFriendPersonaName; friend count 0 |
+| ISteamClient | SteamClient017..023 | `RunFrame` is slot 19 (017) / 20 (018+), before `GetIPCCallCount` (the old table forgot it, which shifted every later slot); `GetISteamGameSearch` inserted at 19 from 018, removed in 022; `GetISteamAppList` and the unified-messages getter gone in 021; `GetISteamMusicRemote` gone in 023; `GetISteamInput/Parties` from 018, `RemotePlay` 019, `DestroyAllInterfaces` 020. Counts 37/40/41/42/40/39/38. |
+| ISteamUser | SteamUser017..023 | 24 slots (017), +RequestStoreAuthURL (018), +4 phone/2FA (019), +market/duration (020), +BSetDurationControlOnlineState (021); 023 inserts `GetAuthTicketForWebApi` after `GetAuthSessionTicket` |
+| ISteamFriends | SteamFriends015..018 | 018 removed `SetPersonaName` and `GetUserRestrictions`, so every later slot moved up by one or two; `GetFriendGamePlayed` is a bool, not a string |
+| ISteamUtils | SteamUtils007..011 | 011 removed `GetCSERIPPort` and `IsSteamRunningOnSteamDeck` (so `GetAppID` is slot 8 there, 9 before); ends with `IsRunningOnSteamHardware`, `GetSteamHardwareDefaultConfig`, `IsRunningUnderProton` |
+| ISteamApps | STEAMAPPS_INTERFACE_VERSION006..009 | 006 ends with `RegisterActivationCode`; 007 `GetDlcDownloadProgress`, `GetAppBuildId`; 008 up to `SetActiveBeta`; 009 adds two performance setters |
+| ISteamUserStats | STEAMUSERSTATS_INTERFACE_VERSION011..013 | 013 has no `RequestCurrentStats` (Steam pushes the stats; we queue `UserStatsReceived_t` when the object is created, with "no connection" if Kettle is unreachable); 012/013 end with `GetAchievementProgressLimits` |
+| ISteamInput | SteamInput001..007 | stub: `Init` and `Shutdown` return true, the rest do nothing |
+| everything else | SteamMatchMaking001..009, SteamMatchMakingServers, SteamNetworking, SteamNetworkingSockets/Messages/Utils (001..004), STEAMREMOTESTORAGE_INTERFACE_VERSION001..016, Screenshots, HTTP, UGC, Inventory, Controller, GameServer(+Stats), AppTicket, Parties, RemotePlay, Music, Video, ... | known names answered with a do-nothing object (160 slots returning 0/false/NULL) and one log line; a version we never heard of gets the same object plus a log line naming it |
 
-Everything else (Remote storage, Networking*, Matchmaking, Input/Controller, UGC, HTTP, Inventory, …) is the null object
-for now. The layouts were written from the published SDK headers' declaration order and are not machine-checked yet;
-the first thing to do on a free machine is to diff each table against the SDK's `isteam*.h` slot by slot (read the
-headers, do not copy them into the repo).
+Gaps worth knowing: remote storage does nothing (games that keep saves only there lose them), networking, matchmaking,
+lobbies, workshop, overlay are do-nothing.
 
 ## 4. Architecture
 
