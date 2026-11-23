@@ -51,6 +51,7 @@ shot() {
 }
 shot library ""
 shot game "game:440"
+shot collection "collection:Favorites"
 shot settings "settings:interface"
 shot store "store"
 shot downloads "downloads"

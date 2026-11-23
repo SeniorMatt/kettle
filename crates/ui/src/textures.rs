@@ -29,12 +29,20 @@ struct Entry {
     ready_at: f64,
 }
 
+/// Cover images uploaded to the GPU per frame.
+const UPLOADS_PER_FRAME: usize = 8;
+
+/// Set when the first cover image has been uploaded (for the startup timing log).
+pub static FIRST_IMAGE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// Length of the cover fade-in, in seconds.
 const FADE: f32 = 0.2;
 
 #[derive(Default)]
 pub struct Textures {
     map: HashMap<(AppId, ArtKind), Entry>,
+    /// Decoded images waiting for their GPU upload (a few per frame, so a big batch cannot hitch a frame).
+    queue: std::collections::VecDeque<sr_client::ArtImage>,
     web: HashMap<String, Entry>,
     frame: u64,
     now: f64,
@@ -55,16 +63,22 @@ impl Textures {
         self.now = ctx.input(|i| i.time);
         self.ctx = Some(ctx.clone());
         self.upload_web(ctx, client);
-        for img in client.take_art() {
+        self.queue.extend(client.take_art());
+        for _ in 0..UPLOADS_PER_FRAME {
+            let Some(img) = self.queue.pop_front() else { break };
             let slot = match img.rgba {
                 Some(rgba) => {
                     let ci = egui::ColorImage::from_rgba_unmultiplied(img.size, &rgba);
                     let name = format!("art-{}-{:?}", img.app, img.kind);
+                    FIRST_IMAGE.store(true, std::sync::atomic::Ordering::Relaxed);
                     Slot::Ready(ctx.load_texture(name, ci, egui::TextureOptions::LINEAR))
                 }
                 None => Slot::Missing,
             };
             self.map.insert((img.app, img.kind), Entry { slot, last_used: self.frame, ready_at: self.now });
+        }
+        if !self.queue.is_empty() {
+            ctx.request_repaint();
         }
         self.evict(client);
     }

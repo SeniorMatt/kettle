@@ -88,15 +88,29 @@ fn clicking_a_list_row_selects_the_game() {
 }
 
 #[test]
-fn collection_header_folds_when_clicked_anywhere() {
+fn collection_header_toggle_folds_only() {
     let mut h = harness();
     let before = h.state().0.sidebar.collapsed_count();
-    // Row 0 is a header: click it far from the left edge, nowhere near a button.
-    press(&mut h, pos2(200.0, row(0).y));
-    let folded = h.state().0.sidebar.collapsed_count();
-    assert_eq!(folded, before + 1, "the header did not fold");
-    press(&mut h, pos2(60.0, row(0).y));
-    assert_eq!(h.state().0.sidebar.collapsed_count(), before, "the header did not unfold");
+    // Row 0 is a header: its fold square sits at the left.
+    press(&mut h, pos2(14.0, row(0).y));
+    assert_eq!(h.state().0.sidebar.collapsed_count(), before + 1, "the toggle did not fold");
+    assert!(h.state().1.state().collections.selected.is_none(), "the toggle must not open the collection");
+    press(&mut h, pos2(14.0, row(0).y));
+    assert_eq!(h.state().0.sidebar.collapsed_count(), before, "the toggle did not unfold");
+}
+
+#[test]
+fn collection_header_click_opens_the_page_and_back_returns() {
+    let mut h = harness();
+    let before = h.state().0.sidebar.collapsed_count();
+    // The title, and the empty space at the right, open the collection and do not fold it.
+    for x in [70.0, 200.0] {
+        press(&mut h, pos2(x, row(0).y));
+        assert_eq!(h.state().0.sidebar.collapsed_count(), before, "a header click must not fold");
+        assert!(h.state().1.state().collections.selected.is_some(), "a header click should open the collection");
+        press(&mut h, pos2(23.0, 46.0));
+        assert!(h.state().1.state().collections.selected.is_none(), "back should return to all games");
+    }
 }
 
 #[test]

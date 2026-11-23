@@ -438,25 +438,32 @@ impl SidebarView {
                         ui.allocate_exact_size(vec2(ui.available_width(), theme::LIST_ROW_H), Sense::click());
                     let g = match row {
                         Row::Header { id, title, count, total, collapsed, can_open, ours, dynamic } => {
-                            // The whole row is the click target: it folds or unfolds the section.
+                            // Steam's header: a small square at the left folds the section, the rest of the
+                            // row opens the collection in the main area.
                             let hover = anim::animate_bool(ui.ctx(), resp.id.with("hover"), resp.hovered(), anim::FAST);
                             let color = theme::HEADER_TEXT.lerp_to_gamma(egui::Color32::WHITE, 0.4 * hover);
                             let cy = rect.center().y;
+                            let box_rect = Rect::from_center_size(pos2(rect.left() + 14.0, cy), Vec2::splat(13.0));
+                            let toggle = ui.interact(box_rect.expand(3.0), resp.id.with("fold"), Sense::click());
+                            let th =
+                                anim::animate_bool(ui.ctx(), resp.id.with("fold-hover"), toggle.hovered(), anim::FAST);
+                            let line = theme::SIDE_ICON.lerp_to_gamma(egui::Color32::WHITE, 0.6 * th);
                             ui.painter().rect_filled(rect, 0.0, theme::HEADER_BG);
                             let p = ui.painter();
-                            let dash = pos2(rect.left() + 13.0, cy);
+                            p.rect_stroke(box_rect, 1.0, egui::Stroke::new(1.0, line), egui::StrokeKind::Inside);
+                            let dash = box_rect.center();
                             p.line_segment(
-                                [dash - vec2(5.0, 0.0), dash + vec2(5.0, 0.0)],
-                                egui::Stroke::new(1.5, theme::SIDE_ICON),
+                                [dash - vec2(3.0, 0.0), dash + vec2(3.0, 0.0)],
+                                egui::Stroke::new(1.0, line),
                             );
                             if *collapsed {
                                 p.line_segment(
-                                    [dash - vec2(0.0, 5.0), dash + vec2(0.0, 5.0)],
-                                    egui::Stroke::new(1.5, theme::SIDE_ICON),
+                                    [dash - vec2(0.0, 3.0), dash + vec2(0.0, 3.0)],
+                                    egui::Stroke::new(1.0, line),
                                 );
                             }
                             let title_g = p.layout_no_wrap(title.clone(), theme::regular(13.0), color);
-                            let tx = rect.left() + 23.0;
+                            let tx = rect.left() + 30.0;
                             let tw = title_g.size().x;
                             p.galley(pos2(tx, cy - title_g.size().y / 2.0), title_g, color);
                             let count_text =
@@ -467,10 +474,14 @@ impl SidebarView {
                             if *dynamic {
                                 si::bolt(p, pos2(tx + tw + 6.0 + cw + 14.0, cy), 12.0, theme::HEADER_COUNT);
                             }
-                            if resp.clicked() {
+                            if toggle.clicked() {
                                 toggled = Some(id.clone());
+                            } else if resp.clicked() {
+                                opened = Some(if *can_open { Some(id.clone()) } else { None });
                             }
-                            header_menus.push((resp, id.clone(), *ours, *can_open));
+                            if *ours {
+                                header_menus.push((resp, id.clone()));
+                            }
                             continue;
                         }
                         Row::Game(i) => &state.games[*i],
@@ -545,13 +556,9 @@ impl SidebarView {
         for (resp, app) in menus {
             crate::game_menu::context(&resp, client, app, ov);
         }
-        for (resp, id, ours, can_open) in header_menus {
+        for (resp, id) in header_menus {
             widgets::context_menu(&resp, |ui| {
-                if can_open && ui.button("Show in the library").clicked() {
-                    opened = Some(id.clone());
-                    ui.close();
-                }
-                if ours && ui.button("Delete collection").clicked() {
+                if ui.button("Delete collection").clicked() {
                     client.send(Command::Collections(CollCmd::Delete(id.clone())));
                     ui.close();
                 }
@@ -565,7 +572,7 @@ impl SidebarView {
         }
         if let Some(id) = opened {
             client.send(Command::Select(None));
-            client.send(Command::Collections(CollCmd::Show(Some(id))));
+            client.send(Command::Collections(CollCmd::Show(id)));
         }
         if let Some(app) = clicked {
             client.send(Command::Select(Some(app)));

@@ -113,7 +113,8 @@ impl LibraryView {
         } else {
             0.0
         };
-        let top_h = shelf_h + pad.min(12.0) + theme::ALL_BAR_H;
+        let bar_h = if in_all { theme::ALL_BAR_H } else { theme::ALL_BAR_H + 22.0 };
+        let top_h = shelf_h + pad.min(12.0) + bar_h;
         let mut clicked = None;
         let mut dbl = None;
         let mut pick: Option<Option<String>> = None;
@@ -127,7 +128,7 @@ impl LibraryView {
             // The "ALL GAMES" bar: collection drop-down on the left, sort and cover size on the right.
             let bar = Rect::from_min_size(
                 Pos2::new(full.left() + pad, full.top() + shelf_h + pad.min(12.0)),
-                Vec2::new(full.width() - 2.0 * pad, theme::ALL_BAR_H),
+                Vec2::new(full.width() - 2.0 * pad, bar_h),
             );
             ui.scope_builder(egui::UiBuilder::new().max_rect(bar), |ui| {
                 ui.horizontal_centered(|ui| self.all_bar(ui, client, &mut pick));
@@ -250,24 +251,37 @@ impl LibraryView {
         let text = RichText::new(format!("{title} ({})  {}", self.order.len(), icon::CARET_DOWN))
             .font(theme::bold(14.0))
             .color(theme::TEXT_HEADING);
-        ui.scope(|ui| {
-            let v = ui.visuals_mut();
-            v.widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
-            v.widgets.inactive.bg_stroke = egui::Stroke::NONE;
-            v.widgets.hovered.weak_bg_fill = theme::BG_ROW_HOVER;
-            widgets::menu_button(ui, text, |ui| {
-                if ui.button("All games").clicked() {
-                    *pick = Some(None);
-                    ui.close();
-                }
-                for s in &colls.sections {
-                    if ui.button(&s.name).clicked() {
-                        *pick = Some(Some(s.id.clone()));
+        if let Some(name) = colls.selected.as_deref().and_then(|id| colls.title(id)) {
+            // A collection's page: its name as a big title with the game count, like Steam.
+            ui.vertical(|ui| {
+                ui.label(RichText::new(name).font(theme::bold(24.0)).color(theme::TEXT));
+                let n = self.order.len();
+                ui.label(
+                    RichText::new(format!("{n} {}", if n == 1 { "game" } else { "games" }))
+                        .font(theme::regular(13.0))
+                        .color(theme::TEXT_DIM),
+                );
+            });
+        } else {
+            ui.scope(|ui| {
+                let v = ui.visuals_mut();
+                v.widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
+                v.widgets.inactive.bg_stroke = egui::Stroke::NONE;
+                v.widgets.hovered.weak_bg_fill = theme::BG_ROW_HOVER;
+                widgets::menu_button(ui, text, |ui| {
+                    if ui.button("All games").clicked() {
+                        *pick = Some(None);
                         ui.close();
                     }
-                }
+                    for s in &colls.sections {
+                        if ui.button(&s.name).clicked() {
+                            *pick = Some(Some(s.id.clone()));
+                            ui.close();
+                        }
+                    }
+                });
             });
-        });
+        }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             // Narrow window (friends panel open): drop the slider, then the SHOW filter,
             // instead of letting the controls run over the title.

@@ -46,7 +46,9 @@ shot popup-filter "" c:249:188 k:Escape
 shot game-menu "game:440" c:400:325
 # Context menu of a list row, and a collection header click.
 shot rowmenu "" r:120:243
-shot header-fold "" c:200:216
+shot header-fold "" c:14:216
+shot collection "collection:Favorites"
+shot collection-header-click "" c:100:216
 shot settings "settings:interface"
 kill $xvfb
 ls -la "$out"
